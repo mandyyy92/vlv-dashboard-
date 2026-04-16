@@ -1109,6 +1109,213 @@ function ReorderTab(){
   </>);
 }
 
+// ─── Tab: 오더 누적 입고 수량 (Supabase) ───
+function OrderTrackingTab(){
+  const[orders,setOrders]=useState([]);
+  const[inbounds,setInbounds]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[search,setSearch]=useState("");
+  const[manualMode,setManualMode]=useState(false);
+  const[manualText,setManualText]=useState("");
+  const[plMode,setPlMode]=useState(false);
+  const[plDate,setPlDate]=useState(new Date().toISOString().slice(0,10));
+  const[plText,setPlText]=useState("");
+  const[plSupplier,setPlSupplier]=useState("코니키즈");
+
+  useEffect(()=>{(async()=>{
+    setLoading(true);
+    const o=await sb.get("orders");if(o.length>0)setOrders(o);
+    const ib=await sb.get("inbounds");if(ib.length>0)setInbounds(ib);
+    setLoading(false);
+  })();},[]);
+
+  // 수동 오더 입력
+  const parseManualOrder=async()=>{
+    const lines=manualText.trim().split("\n").filter(l=>l.trim());
+    if(lines.length<2){alert("헤더 포함 2줄 이상 입력해주세요.");return;}
+    let count=0;
+    for(let i=1;i<lines.length;i++){
+      const p=lines[i].split("\t").map(s=>s.trim());
+      if(p.length>=4){
+        const r=await sb.insert("orders",{
+          order_name:p[0]||"수동입력",style_no:p[1]||"",product_name:p[2]||"",
+          supplier:p[3]||"",color:p[4]||"",size:p[5]||"",
+          order_qty:parseInt(p[6])||0,cost:p[7]||""
+        });
+        if(r&&r[0]){setOrders(prev=>[r[0],...prev]);count++;}
+      }
+    }
+    setManualText("");setManualMode(false);
+    alert(count+"건 등록 완료");
+  };
+
+  // 패킹리스트 입고 기록
+  const parseInbound=async()=>{
+    const lines=plText.trim().split("\n").filter(l=>l.trim());
+    let count=0;
+    for(const line of lines){
+      const parts=line.split(/[\t,|;]+/).map(s=>s.trim());
+      if(parts.length>=2){
+        let color="",size="",qty=0;
+        for(const p of parts){
+          const num=parseInt(p.replace(/,/g,""));
+          if(!isNaN(num)&&num>0&&num<100000&&p.replace(/,/g,"")===String(num))qty=num;
+          else if(/^(S|M|L|XL|2XL|3XL|F|OS|FREE)$/i.test(p))size=p;
+          else if(p.length>=2&&!color)color=p;
+        }
+        if(qty>0){
+          const r=await sb.insert("inbounds",{inbound_date:plDate,supplier:plSupplier,color,size,qty});
+          if(r&&r[0]){setInbounds(prev=>[r[0],...prev]);count++;}
+        }
+      }
+    }
+    setPlText("");setPlMode(false);
+    if(count>0)alert(count+"건 입고 기록 완료 ("+plDate+")");
+    else alert("입고 데이터를 파싱할 수 없습니다.");
+  };
+
+  // 데이터 집계
+  const orderSummary=useMemo(()=>{
+    const map={};
+    orders.forEach(o=>{
+      const key=(o.product_name||"")+"__"+(o.color||"")+"__"+(o.size||"");
+      if(!map[key])map[key]={styleNo:o.style_no,name:o.product_name,supplier:o.supplier,color:o.color,size:o.size,orderQty:0,cost:o.cost,orderName:o.order_name};
+      map[key].orderQty+=(o.order_qty||0);
+    });
+    Object.values(map).forEach(item=>{
+      item.inboundQty=0;item.inboundHistory=[];
+      inbounds.forEach(ib=>{
+        const cm=(ib.color||"").includes(item.color)||item.color.includes(ib.color||"");
+        const sm=(ib.size||"").toUpperCase()===(item.size||"").toUpperCase();
+        if(cm&&sm){item.inboundQty+=(ib.qty||0);item.inboundHistory.push({date:ib.inbound_date,qty:ib.qty});}
+      });
+      item.remainQty=item.orderQty-item.inboundQty;
+      item.progress=item.orderQty>0?Math.round((item.inboundQty/item.orderQty)*100):0;
+    });
+    return Object.values(map).filter(v=>v.orderQty>0);
+  },[orders,inbounds]);
+
+  const filtered=orderSummary.filter(r=>{
+    if(!search)return true;const s=search.toLowerCase();
+    return(r.name||"").toLowerCase().includes(s)||(r.color||"").toLowerCase().includes(s)||(r.styleNo||"").toLowerCase().includes(s);
+  });
+
+  const inboundByDate=useMemo(()=>{
+    const map={};
+    inbounds.forEach(ib=>{const d=ib.inbound_date||"미지정";if(!map[d])map[d]={date:d,totalQty:0,items:[]};map[d].totalQty+=(ib.qty||0);map[d].items.push(ib);});
+    return Object.values(map).sort((a,b)=>b.date.localeCompare(a.date));
+  },[inbounds]);
+
+  const totalOrder=orderSummary.reduce((a,b)=>a+b.orderQty,0);
+  const totalInbound=orderSummary.reduce((a,b)=>a+b.inboundQty,0);
+  const totalRemain=totalOrder-totalInbound;
+  const totalProgress=totalOrder>0?Math.round((totalInbound/totalOrder)*100):0;
+
+  if(loading)return <SectionCard title="📊 오더 누적 입고 수량"><div style={{textAlign:"center",padding:40,color:"#94A3B8"}}>⏳ 데이터 불러오는 중...</div></SectionCard>;
+
+  return(<>
+    <SectionCard title="📊 오더 누적 입고 수량" subtitle="☁️ 서버 실시간 저장 · 작업지시서 대비 입고 현황 추적"
+      actions={<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        <SmallBtn primary onClick={()=>setManualMode(!manualMode)}>{manualMode?"✕ 닫기":"📝 오더 입력"}</SmallBtn>
+        <SmallBtn primary onClick={()=>setPlMode(!plMode)}>{plMode?"✕ 닫기":"📦 입고 기록"}</SmallBtn>
+      </div>}>
+
+      {/* 전체 현황 카드 */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:20}}>
+        <div style={{padding:"16px 18px",borderRadius:10,background:"#F8FAFC",border:"1px solid #E2E8F0",textAlign:"center"}}>
+          <div style={{fontSize:10,fontWeight:600,color:"#94A3B8",textTransform:"uppercase"}}>총 오더</div>
+          <div style={{fontSize:26,fontWeight:800,color:"#1E293B",marginTop:2}}>{totalOrder.toLocaleString()}<span style={{fontSize:12,color:"#94A3B8"}}> pcs</span></div>
+        </div>
+        <div style={{padding:"16px 18px",borderRadius:10,background:"#F0FDF4",border:"1px solid #BBF7D0",textAlign:"center"}}>
+          <div style={{fontSize:10,fontWeight:600,color:"#059669",textTransform:"uppercase"}}>누적 입고</div>
+          <div style={{fontSize:26,fontWeight:800,color:"#059669",marginTop:2}}>{totalInbound.toLocaleString()}<span style={{fontSize:12,color:"#6EE7B7"}}> pcs</span></div>
+        </div>
+        <div style={{padding:"16px 18px",borderRadius:10,background:totalRemain>0?"#FEF2F2":"#F0FDF4",border:"1px solid "+(totalRemain>0?"#FECACA":"#BBF7D0"),textAlign:"center"}}>
+          <div style={{fontSize:10,fontWeight:600,color:totalRemain>0?"#DC2626":"#059669",textTransform:"uppercase"}}>잔여 수량</div>
+          <div style={{fontSize:26,fontWeight:800,color:totalRemain>0?"#DC2626":"#059669",marginTop:2}}>{totalRemain.toLocaleString()}<span style={{fontSize:12,color:"#94A3B8"}}> pcs</span></div>
+        </div>
+        <div style={{padding:"16px 18px",borderRadius:10,background:"#EFF6FF",border:"1px solid #BFDBFE",textAlign:"center"}}>
+          <div style={{fontSize:10,fontWeight:600,color:"#2563EB",textTransform:"uppercase"}}>입고율</div>
+          <div style={{fontSize:26,fontWeight:800,color:"#2563EB",marginTop:2}}>{totalProgress}<span style={{fontSize:12,color:"#93C5FD"}}>%</span></div>
+          <div style={{marginTop:6,height:6,background:"#E2E8F0",borderRadius:3}}><div style={{height:"100%",borderRadius:3,background:totalProgress>=100?"#059669":totalProgress>=50?"#2563EB":"#F59E0B",width:Math.min(totalProgress,100)+"%",transition:"width 0.3s"}} /></div>
+        </div>
+      </div>
+
+      {/* 오더 수동 입력 */}
+      {manualMode&&<div style={{padding:18,borderRadius:12,background:"#F8FAFC",border:"1px solid #E2E8F0",marginBottom:16}}>
+        <div style={{fontSize:13,fontWeight:700,color:"#334155",marginBottom:8}}>📝 오더 데이터 입력 (탭 구분, 구글시트에서 복사 가능)</div>
+        <textarea value={manualText} onChange={e=>setManualText(e.target.value)} placeholder={"오더명\t스타일NO\t상품명\t업체\t컬러\t사이즈\t수량\t원가\n1차_코니키즈\tV24FT01UB400\t엘리멘트 후디\t코니키즈\t멜란지\tM\t1800\t14400\n1차_코니키즈\tV24FT01UB400\t엘리멘트 후디\t코니키즈\t멜란지\tL\t1200\t14400"} style={{width:"100%",height:120,padding:12,borderRadius:8,border:"1px solid #E2E8F0",fontSize:12,fontFamily:"monospace",background:"#FFF",resize:"vertical",outline:"none",boxSizing:"border-box"}} />
+        <div style={{marginTop:8,display:"flex",gap:8}}>
+          <SmallBtn primary onClick={parseManualOrder}>등록</SmallBtn>
+          <SmallBtn onClick={()=>{setManualText("");setManualMode(false);}}>취소</SmallBtn>
+        </div>
+      </div>}
+
+      {/* 패킹리스트 입고 기록 */}
+      {plMode&&<div style={{padding:18,borderRadius:12,background:"#F0FDF4",border:"1px solid #BBF7D0",marginBottom:16}}>
+        <div style={{fontSize:13,fontWeight:700,color:"#166534",marginBottom:8}}>📦 입고 기록 추가</div>
+        <div style={{display:"flex",gap:12,marginBottom:10,alignItems:"center",flexWrap:"wrap"}}>
+          <div style={{display:"flex",alignItems:"center",gap:6}}>
+            <span style={{fontSize:12,color:"#64748B"}}>입고일:</span>
+            <Input type="date" value={plDate} onChange={e=>setPlDate(e.target.value)} style={{width:150}} />
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:6}}>
+            <span style={{fontSize:12,color:"#64748B"}}>업체:</span>
+            <select value={plSupplier} onChange={e=>setPlSupplier(e.target.value)} style={{padding:"6px 10px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:12,outline:"none"}}>
+              <option>코니키즈</option><option>성은교역</option><option>인도</option><option>자체제작</option>
+            </select>
+          </div>
+        </div>
+        <textarea value={plText} onChange={e=>setPlText(e.target.value)} placeholder={"컬러\t사이즈\t수량\n멜란지\tM\t500\n멜란지\tL\t300\n네이비\tM\t200"} style={{width:"100%",height:100,padding:12,borderRadius:8,border:"1px solid #E2E8F0",fontSize:12,fontFamily:"monospace",background:"#FFF",resize:"vertical",outline:"none",boxSizing:"border-box"}} />
+        <div style={{marginTop:8,display:"flex",gap:8}}>
+          <SmallBtn primary onClick={parseInbound}>입고 등록</SmallBtn>
+          <SmallBtn onClick={()=>{setPlText("");setPlMode(false);}}>취소</SmallBtn>
+        </div>
+      </div>}
+
+      {/* 검색 */}
+      <div style={{marginBottom:12,display:"flex",gap:8,alignItems:"center"}}>
+        <Input value={search} onChange={e=>setSearch(e.target.value)} placeholder="상품명/컬러/스타일NO 검색..." style={{maxWidth:300}} />
+        <span style={{fontSize:12,color:"#64748B"}}>{filtered.length}건</span>
+      </div>
+
+      {/* 테이블 */}
+      {filtered.length>0?(
+        <Table headers={["상품명","스타일NO","컬러","사이즈","오더수량","입고수량","잔여수량","입고율","입고이력"]} maxH={420}>
+          {filtered.sort((a,b)=>(a.name||"").localeCompare(b.name||"")||(a.color||"").localeCompare(b.color||"")||(a.size||"").localeCompare(b.size||"")).map((r,i)=>(
+            <tr key={i} style={{background:r.remainQty<=0?"#F0FDF408":r.progress<50?"#FEF2F208":"transparent"}}>
+              <Td style={{fontWeight:600}}>{r.name}</Td>
+              <Td style={{fontFamily:"monospace",fontSize:11}}>{r.styleNo}</Td>
+              <Td style={{fontWeight:600}}>{r.color}</Td>
+              <Td>{r.size}</Td>
+              <Td style={{fontWeight:700}}>{r.orderQty.toLocaleString()}</Td>
+              <Td style={{fontWeight:700,color:"#059669"}}>{r.inboundQty.toLocaleString()}</Td>
+              <Td style={{fontWeight:700,color:r.remainQty>0?"#DC2626":"#059669"}}>{r.remainQty.toLocaleString()}</Td>
+              <Td><div style={{display:"flex",alignItems:"center",gap:6}}>
+                <div style={{flex:1,height:6,background:"#F1F5F9",borderRadius:3,maxWidth:60}}><div style={{height:"100%",borderRadius:3,background:r.progress>=100?"#059669":r.progress>=50?"#2563EB":"#DC2626",width:Math.min(r.progress,100)+"%"}} /></div>
+                <span style={{fontSize:11,fontWeight:600,color:r.progress>=100?"#059669":r.progress>=50?"#2563EB":"#DC2626"}}>{r.progress}%</span>
+              </div></Td>
+              <Td>{r.inboundHistory.length>0?(<div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{r.inboundHistory.map((h,j)=>(<span key={j} style={{fontSize:10,padding:"2px 6px",borderRadius:3,background:"#EFF6FF",color:"#2563EB",fontWeight:600}}>{(h.date||"").slice(5)}:{h.qty}</span>))}</div>):<span style={{fontSize:11,color:"#94A3B8"}}>-</span>}</Td>
+            </tr>))}
+        </Table>
+      ):(<div style={{padding:40,textAlign:"center",color:"#94A3B8",fontSize:13}}>오더 데이터가 없습니다. 위의 '📝 오더 입력'으로 작업지시서 데이터를 등록해주세요.</div>)}
+
+      {/* 날짜별 입고 이력 */}
+      {inboundByDate.length>0&&<div style={{marginTop:20}}>
+        <div style={{fontSize:14,fontWeight:700,color:"#0F172A",marginBottom:10}}>📅 날짜별 입고 이력</div>
+        {inboundByDate.map((d,i)=>(<div key={i} style={{padding:"12px 16px",borderRadius:8,background:"#F8FAFC",border:"1px solid #E2E8F0",marginBottom:8}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+            <span style={{fontSize:13,fontWeight:700,color:"#1E293B"}}>{d.date}</span>
+            <Badge color="#059669">총 {d.totalQty.toLocaleString()}pcs</Badge>
+          </div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{d.items.map((item,j)=>(<span key={j} style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"#EFF6FF",color:"#1E40AF",fontWeight:600}}>{item.color} {item.size} : {item.qty}pcs</span>))}</div>
+        </div>))}
+      </div>}
+    </SectionCard>
+  </>);
+}
+
+
 // ─── Tab: 상품 마스터 ───
 function ProductMasterTab(){
   const[search,setSearch]=useState("");
@@ -1209,6 +1416,7 @@ export default function Dashboard(){
     {id:"overview",label:"대시보드",icon:"⬡"},
     {id:"schedule",label:"입고 스케줄",icon:"📅"},
     {id:"reorder",label:"리오더",icon:"🔄"},
+    {id:"ordertrack",label:"오더 입고현황",icon:"📊"},
     {id:"packing",label:"패킹리스트",icon:"📦"},
     {id:"sample",label:"샘플 진행",icon:"🧪"},
     {id:"measure",label:"실측 사이즈",icon:"📐"},
@@ -1351,6 +1559,7 @@ export default function Dashboard(){
         {activeTab==="price"&&<PriceTab />}
         {activeTab==="sample"&&<SampleTab />}
         {activeTab==="reorder"&&<ReorderTab />}
+        {activeTab==="ordertrack"&&<OrderTrackingTab />}
         {activeTab==="measure"&&<MeasurementTab />}
       </div>
     </div>
