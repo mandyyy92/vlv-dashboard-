@@ -1031,20 +1031,20 @@ function ReorderTab(){
               {sorted.map((r,i)=>{const{color,bg}=statusStyle(r.status);return(
                 <tr key={i} style={{background:r.status==="긴급발주"?"#FEF2F208":r.status==="발주필요"?"#FFFBEB08":"transparent"}}>
                   <Td><span style={{padding:"3px 10px",borderRadius:4,fontSize:10,fontWeight:700,color,background:bg,whiteSpace:"nowrap"}}>{r.status}</span></Td>
-                  <Td style={{fontFamily:"monospace",fontSize:11,fontWeight:600}}>{r.code}</Td>
+                  <Td style={{fontFamily:"monospace",fontSize:11,fontWeight:600,whiteSpace:"nowrap"}}>{r.code}</Td>
                   <Td style={{padding:"6px 10px"}}><div style={{display:"flex",alignItems:"center",gap:8}}><ReorderImg code={r.code} /><span style={{maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.name}</span></div></Td>
-                  <Td>{r.option}</Td>
+                  <Td style={{whiteSpace:"nowrap",minWidth:120}}>{r.option}</Td>
                   <Td><Badge>{r.classification}</Badge></Td>
                   <Td style={{fontWeight:600}}>{Math.round(r.avgDailySales)}</Td>
-                  <Td style={{fontWeight:700,color:exhaustColor(r.exhaustDays)}}>{r.exhaustDays}일</Td>
-                  <Td style={{color:exhaustColor(r.exhaustDaysWithPending)}}>{r.exhaustDaysWithPending}일</Td>
-                  <Td style={{fontWeight:700}}>{r.stock?.toLocaleString()}</Td>
-                  <Td>{r.processing}</Td>
-                  <Td style={{fontWeight:600,color:r.requiredQty>0?"#DC2626":"#94A3B8"}}>{r.requiredQty||"-"}</Td>
-                  <Td style={{color:r.pendingTotal>0?"#3B82F6":"#94A3B8"}}>{r.pendingTotal||"-"}</Td>
-                  <Td style={{fontWeight:600,color:r.shortage30<0?"#DC2626":r.shortage30>0?"#059669":"#94A3B8"}}>{r.shortage30?.toLocaleString()}</Td>
-                  <Td style={{color:r.shortage60<0?"#DC2626":"#94A3B8"}}>{r.shortage60?.toLocaleString()}</Td>
-                  <Td style={{color:r.shortage90<0?"#DC2626":"#94A3B8"}}>{r.shortage90?.toLocaleString()}</Td>
+                  <Td style={{fontWeight:700,color:exhaustColor(Math.round(r.exhaustDays)),whiteSpace:"nowrap"}}>{Math.round(r.exhaustDays)}일</Td>
+                  <Td style={{color:exhaustColor(Math.round(r.exhaustDaysWithPending)),whiteSpace:"nowrap"}}>{Math.round(r.exhaustDaysWithPending)}일</Td>
+                  <Td style={{fontWeight:700}}>{Math.round(r.stock)?.toLocaleString()}</Td>
+                  <Td>{Math.round(r.processing)}</Td>
+                  <Td style={{fontWeight:600,color:r.requiredQty>0?"#DC2626":"#94A3B8"}}>{r.requiredQty?Math.round(r.requiredQty):"-"}</Td>
+                  <Td style={{color:r.pendingTotal>0?"#3B82F6":"#94A3B8"}}>{r.pendingTotal?Math.round(r.pendingTotal):"-"}</Td>
+                  <Td style={{fontWeight:600,color:r.shortage30<0?"#DC2626":r.shortage30>0?"#059669":"#94A3B8"}}>{Math.round(r.shortage30)?.toLocaleString()}</Td>
+                  <Td style={{color:r.shortage60<0?"#DC2626":"#94A3B8"}}>{Math.round(r.shortage60)?.toLocaleString()}</Td>
+                  <Td style={{color:r.shortage90<0?"#DC2626":"#94A3B8"}}>{Math.round(r.shortage90)?.toLocaleString()}</Td>
                 </tr>);})}
             </tbody>
           </table>
@@ -1082,18 +1082,18 @@ function ReorderTab(){
               {sorted.map((r,i)=>{const{color,bg}=statusStyle(r.status);return(
                 <tr key={i} style={{background:r.status==="긴급발주"?"#FEF2F208":r.status==="발주필요"?"#FFFBEB08":"transparent"}}>
                   <Td><span style={{padding:"3px 10px",borderRadius:4,fontSize:10,fontWeight:700,color,background:bg,whiteSpace:"nowrap"}}>{r.status}</span></Td>
-                  <Td style={{fontFamily:"monospace",fontSize:11,fontWeight:600}}>{r.code}</Td>
+                  <Td style={{fontFamily:"monospace",fontSize:11,fontWeight:600,whiteSpace:"nowrap"}}>{r.code}</Td>
                   <Td style={{padding:"6px 10px"}}><div style={{display:"flex",alignItems:"center",gap:8}}><ReorderImg code={r.code} /><span style={{maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.name}</span></div></Td>
-                  <Td>{r.option}</Td>
+                  <Td style={{whiteSpace:"nowrap",minWidth:120}}>{r.option}</Td>
                   <Td><Badge>{r.classification}</Badge></Td>
                   <Td style={{fontWeight:600}}>{Math.round(r.avgDailySales)}</Td>
-                  <Td style={{fontWeight:700,color:exhaustColor(r.exhaustDays)}}>{r.exhaustDays===9999?"-":Math.round(r.exhaustDays)+"일"}</Td>
-                  <Td style={{fontWeight:700}}>{r.stock?.toLocaleString()}</Td>
-                  <Td>{r.est30Sales?.toLocaleString()}</Td>
-                  <Td style={{fontWeight:600,color:r.est30Order>0?"#DC2626":"#94A3B8"}}>{r.est30Order||"-"}</Td>
-                  <Td>{r.est60Stock?.toLocaleString()}</Td>
-                  <Td style={{color:r.est60Order>0?"#DC2626":"#94A3B8"}}>{r.est60Order||"-"}</Td>
-                  <Td style={{color:r.pending>0?"#3B82F6":"#94A3B8"}}>{r.pending||"-"}</Td>
+                  <Td style={{fontWeight:700,color:exhaustColor(Math.round(r.exhaustDays)),whiteSpace:"nowrap"}}>{r.exhaustDays>=9999?"-":Math.round(r.exhaustDays)+"일"}</Td>
+                  <Td style={{fontWeight:700}}>{Math.round(r.stock)?.toLocaleString()}</Td>
+                  <Td>{Math.round(r.est30Sales)?.toLocaleString()}</Td>
+                  <Td style={{fontWeight:600,color:r.est30Order>0?"#DC2626":"#94A3B8"}}>{r.est30Order?Math.round(r.est30Order):"-"}</Td>
+                  <Td>{Math.round(r.est60Stock)?.toLocaleString()}</Td>
+                  <Td style={{color:r.est60Order>0?"#DC2626":"#94A3B8"}}>{r.est60Order?Math.round(r.est60Order):"-"}</Td>
+                  <Td style={{color:r.pending>0?"#3B82F6":"#94A3B8"}}>{r.pending?Math.round(r.pending):"-"}</Td>
                   <Td>{Math.round(r.avg30)}</Td>
                   <Td>{Math.round(r.avg7)}</Td>
                 </tr>);})}
