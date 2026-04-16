@@ -1412,6 +1412,25 @@ export default function Dashboard(){
   const[time,setTime]=useState(new Date());
   useEffect(()=>{const t=setInterval(()=>setTime(new Date()),60000);return()=>clearInterval(t);},[]);
 
+  // 리오더 구글시트 데이터를 대시보드에서도 불러오기
+  const[reorderData,setReorderData]=useState([]);
+  const[reorderLoading,setReorderLoading]=useState(true);
+  const SCRIPT_URL="https://script.google.com/macros/s/AKfycbzW_vBv-rYSgv8TCUGBHMQqPPuCi2dvzrksh8LEwgV6Tgjt4KUJhLDNfSbTwtgztDOZ/exec";
+
+  useEffect(()=>{(async()=>{
+    try{
+      const res=await fetch(SCRIPT_URL);
+      const json=await res.json();
+      const all=[...(json.basic||[]),...(json.artwork||[])];
+      setReorderData(all);
+    }catch(e){console.error("리오더 데이터 로드 실패:",e);}
+    setReorderLoading(false);
+  })();},[]);
+
+  const reorderUrgent=useMemo(()=>reorderData.filter(r=>{const d=r.exhaustDays||0;return d<=7||(r.stock===0&&r.avgDailySales>0);}),[reorderData]);
+  const reorderWarning=useMemo(()=>reorderData.filter(r=>{const d=r.exhaustDays||0;return d>7&&d<=14;}),[reorderData]);
+  const skuImgMap=useMemo(()=>{const m={};SKUS.forEach(s=>{if(s[F.IMG]&&!m[s[F.CODE]])m[s[F.CODE]]=s[F.IMG];});return m;},[]);
+
   const tabs=[
     {id:"overview",label:"대시보드",icon:"⬡"},
     {id:"schedule",label:"입고 스케줄",icon:"📅"},
@@ -1457,37 +1476,43 @@ export default function Dashboard(){
           </div>
         </div>
 
-        {/* 리오더 긴급발주 */}
+        {/* 리오더 긴급발주 - 구글시트 기반 */}
         <div style={{padding:"22px 24px",borderRadius:14,background:"linear-gradient(135deg,#FEF2F2 0%,#FFF7ED 100%)",border:"1px solid #FECACA",boxShadow:"0 2px 8px rgba(220,38,38,0.08)"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
             <div>
               <div style={{fontSize:11,fontWeight:600,color:"#DC2626",letterSpacing:0.5,textTransform:"uppercase",marginBottom:6}}>🔄 리오더 긴급발주</div>
-              <div style={{fontSize:36,fontWeight:800,color:"#DC2626",letterSpacing:-1.5}}>{LOW_STOCK.length.toLocaleString()}<span style={{fontSize:14,fontWeight:500,color:"#FCA5A5",marginLeft:4}}>건</span></div>
+              {reorderLoading?<div style={{fontSize:14,color:"#94A3B8"}}>불러오는 중...</div>
+              :<div style={{fontSize:36,fontWeight:800,color:"#DC2626",letterSpacing:-1.5}}>{reorderUrgent.length}<span style={{fontSize:14,fontWeight:500,color:"#FCA5A5",marginLeft:4}}>건</span></div>}
+              {!reorderLoading&&<div style={{fontSize:12,color:"#6B7280",marginTop:6}}>발주필요 {reorderWarning.length}건</div>}
             </div>
             <div style={{width:48,height:48,borderRadius:12,background:"#DC262620",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>🚨</div>
           </div>
-          <div style={{marginTop:14,display:"flex",gap:6,flexWrap:"wrap"}}>
-            {LOW_STOCK.slice(0,3).map((s,i)=>(<div key={i} style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:s[F.STOCK]<=2?"#FEE2E2":"#FEF3C7",color:s[F.STOCK]<=2?"#DC2626":"#D97706",fontWeight:600}}>{s[F.NAME].slice(0,8)}… 재고{s[F.STOCK]}</div>))}
-            {LOW_STOCK.length>3&&<div style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"#FEE2E2",color:"#DC2626",fontWeight:600}}>+{LOW_STOCK.length-3}건 → 리오더탭</div>}
-          </div>
+          {!reorderLoading&&<div style={{marginTop:14,display:"flex",gap:6,flexWrap:"wrap"}}>
+            {reorderUrgent.slice(0,3).map((r,i)=>(<div key={i} style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"#FEE2E2",color:"#DC2626",fontWeight:600}}>{(r.name||"").slice(0,10)} {r.option||""}</div>))}
+            {reorderUrgent.length>3&&<div style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"#FEE2E2",color:"#DC2626",fontWeight:600}}>+{reorderUrgent.length-3}건 → 리오더탭</div>}
+          </div>}
         </div>
       </div>
 
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
-        <SectionCard title="🔄 리오더 긴급발주 — 재고부족 품목">
-          {LOW_STOCK.slice(0,5).map((s,i)=>(
-            <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",borderRadius:8,background:s[F.STOCK]<=2?"#FEF2F2":"#FFFBEB",border:`1px solid ${s[F.STOCK]<=2?"#FECACA":"#FDE68A"}`,marginBottom:8}}>
-              <div>
-                <div style={{fontSize:13,fontWeight:700,color:s[F.STOCK]<=2?"#DC2626":"#D97706"}}>{s[F.NAME]} {s[F.OPT]}</div>
-                <div style={{fontSize:11,color:"#6B7280",marginTop:2}}>{s[F.CODE]} · {(s[F.CAT]||"")}</div>
+        <SectionCard title="🔄 리오더 긴급발주 — 소진임박 품목">
+          {reorderLoading?<div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:13}}>⏳ 구글시트 데이터 불러오는 중...</div>
+          :reorderUrgent.length>0?reorderUrgent.slice(0,5).map((r,i)=>(
+            <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",borderRadius:8,background:Math.round(r.exhaustDays)<=3?"#FEF2F2":"#FFFBEB",border:`1px solid ${Math.round(r.exhaustDays)<=3?"#FECACA":"#FDE68A"}`,marginBottom:8}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                {skuImgMap[r.code]&&<div style={{width:36,height:36,borderRadius:6,overflow:"hidden",border:"1px solid #E2E8F0",flexShrink:0}}><img src={skuImgMap[r.code]} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{e.target.style.display="none";}}/></div>}
+                <div>
+                  <div style={{fontSize:13,fontWeight:700,color:Math.round(r.exhaustDays)<=3?"#DC2626":"#D97706"}}>{r.name} {r.option}</div>
+                  <div style={{fontSize:11,color:"#6B7280",marginTop:2}}>{r.code} · 소진 {Math.round(r.exhaustDays)}일</div>
+                </div>
               </div>
               <div style={{textAlign:"right"}}>
-                <div style={{fontSize:18,fontWeight:800,color:s[F.STOCK]<=2?"#DC2626":"#D97706"}}>{s[F.STOCK]}개</div>
+                <div style={{fontSize:18,fontWeight:800,color:Math.round(r.exhaustDays)<=3?"#DC2626":"#D97706"}}>{Math.round(r.stock)}개</div>
                 <div style={{fontSize:10,color:"#94A3B8"}}>현재고</div>
               </div>
             </div>
-          ))}
-          {LOW_STOCK.length>5&&<div style={{textAlign:"center",fontSize:12,color:"#94A3B8",marginTop:4,cursor:"pointer"}} onClick={()=>setActiveTab("reorder")}>외 {LOW_STOCK.length-5}건 더보기 → 리오더 탭</div>}
+          )):<div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:13}}>긴급발주 항목이 없습니다</div>}
+          {reorderUrgent.length>5&&<div style={{textAlign:"center",fontSize:12,color:"#94A3B8",marginTop:4,cursor:"pointer"}} onClick={()=>setActiveTab("reorder")}>외 {reorderUrgent.length-5}건 더보기 → 리오더 탭</div>}
         </SectionCard>
 
         <SectionCard title="📦 입고대기 현황" subtitle={`${PENDING_SKUS.length}개 SKU · 총 ${TOTAL_PENDING.toLocaleString()}pcs`}>
