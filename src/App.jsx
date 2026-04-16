@@ -765,6 +765,15 @@ function PriceTab(){
 
 // ─── Tab 5: 리오더 ───
 function ReorderTab(){
+  // 상품코드 → 이미지 매핑 (상품 마스터 데이터 활용)
+  const skuImgMap=useMemo(()=>{const m={};SKUS.forEach(s=>{if(s[F.IMG]&&!m[s[F.CODE]])m[s[F.CODE]]=s[F.IMG];});return m;},[]);
+  const getImg=(code)=>skuImgMap[code]||"";
+  const ReorderImg=({code})=>{const src=getImg(code);return(
+    <div style={{width:40,height:40,borderRadius:6,overflow:"hidden",background:"#F1F5F9",flexShrink:0,border:"1px solid #E2E8F0"}}>
+      {src?<img src={src} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{e.target.style.display="none";e.target.parentNode.innerHTML='<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:14px;color:#CBD5E1">📷</div>';}} />
+      :<div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,color:"#CBD5E1"}}>📷</div>}
+    </div>);};
+
   // Google Apps Script Web App URL - 설정 후 여기에 입력
   const[scriptUrl,setScriptUrl]=useState("https://script.google.com/macros/s/AKfycbzW_vBv-rYSgv8TCUGBHMQqPPuCi2dvzrksh8LEwgV6Tgjt4KUJhLDNfSbTwtgztDOZ/exec");
   const[showSetup,setShowSetup]=useState(false);
@@ -1023,10 +1032,10 @@ function ReorderTab(){
                 <tr key={i} style={{background:r.status==="긴급발주"?"#FEF2F208":r.status==="발주필요"?"#FFFBEB08":"transparent"}}>
                   <Td><span style={{padding:"3px 10px",borderRadius:4,fontSize:10,fontWeight:700,color,background:bg,whiteSpace:"nowrap"}}>{r.status}</span></Td>
                   <Td style={{fontFamily:"monospace",fontSize:11,fontWeight:600}}>{r.code}</Td>
-                  <Td style={{maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.name}</Td>
+                  <Td style={{padding:"6px 10px"}}><div style={{display:"flex",alignItems:"center",gap:8}}><ReorderImg code={r.code} /><span style={{maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.name}</span></div></Td>
                   <Td>{r.option}</Td>
                   <Td><Badge>{r.classification}</Badge></Td>
-                  <Td style={{fontWeight:600}}>{r.avgDailySales}</Td>
+                  <Td style={{fontWeight:600}}>{Math.round(r.avgDailySales)}</Td>
                   <Td style={{fontWeight:700,color:exhaustColor(r.exhaustDays)}}>{r.exhaustDays}일</Td>
                   <Td style={{color:exhaustColor(r.exhaustDaysWithPending)}}>{r.exhaustDaysWithPending}일</Td>
                   <Td style={{fontWeight:700}}>{r.stock?.toLocaleString()}</Td>
@@ -1074,19 +1083,19 @@ function ReorderTab(){
                 <tr key={i} style={{background:r.status==="긴급발주"?"#FEF2F208":r.status==="발주필요"?"#FFFBEB08":"transparent"}}>
                   <Td><span style={{padding:"3px 10px",borderRadius:4,fontSize:10,fontWeight:700,color,background:bg,whiteSpace:"nowrap"}}>{r.status}</span></Td>
                   <Td style={{fontFamily:"monospace",fontSize:11,fontWeight:600}}>{r.code}</Td>
-                  <Td style={{maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.name}</Td>
+                  <Td style={{padding:"6px 10px"}}><div style={{display:"flex",alignItems:"center",gap:8}}><ReorderImg code={r.code} /><span style={{maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.name}</span></div></Td>
                   <Td>{r.option}</Td>
                   <Td><Badge>{r.classification}</Badge></Td>
-                  <Td style={{fontWeight:600}}>{r.avgDailySales}</Td>
-                  <Td style={{fontWeight:700,color:exhaustColor(r.exhaustDays)}}>{r.exhaustDays===9999?"-":r.exhaustDays+"일"}</Td>
+                  <Td style={{fontWeight:600}}>{Math.round(r.avgDailySales)}</Td>
+                  <Td style={{fontWeight:700,color:exhaustColor(r.exhaustDays)}}>{r.exhaustDays===9999?"-":Math.round(r.exhaustDays)+"일"}</Td>
                   <Td style={{fontWeight:700}}>{r.stock?.toLocaleString()}</Td>
                   <Td>{r.est30Sales?.toLocaleString()}</Td>
                   <Td style={{fontWeight:600,color:r.est30Order>0?"#DC2626":"#94A3B8"}}>{r.est30Order||"-"}</Td>
                   <Td>{r.est60Stock?.toLocaleString()}</Td>
                   <Td style={{color:r.est60Order>0?"#DC2626":"#94A3B8"}}>{r.est60Order||"-"}</Td>
                   <Td style={{color:r.pending>0?"#3B82F6":"#94A3B8"}}>{r.pending||"-"}</Td>
-                  <Td>{r.avg30}</Td>
-                  <Td>{r.avg7}</Td>
+                  <Td>{Math.round(r.avg30)}</Td>
+                  <Td>{Math.round(r.avg7)}</Td>
                 </tr>);})}
             </tbody>
           </table>
