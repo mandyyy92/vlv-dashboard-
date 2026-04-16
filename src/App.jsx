@@ -1458,35 +1458,23 @@ export default function Dashboard(){
         </div>
 
         {/* 리오더 긴급발주 */}
-        {(()=>{
-          const urgentItems=SKUS.filter(s=>{
-            const avg7=s[F.STOCK]>0?1:0;
-            const dailySales=avg7;
-            return s[F.STOCK]>0&&s[F.STOCK]<=20&&dailySales>=0;
-          }).sort((a,b)=>a[F.STOCK]-b[F.STOCK]);
-          const criticalItems=SKUS.filter(s=>s[F.STOCK]>0&&s[F.STOCK]<=5);
-          const warningItems=SKUS.filter(s=>s[F.STOCK]>5&&s[F.STOCK]<=20);
-          const urgentCount=criticalItems.length+warningItems.length;
-          return(
-          <div style={{padding:"22px 24px",borderRadius:14,background:"linear-gradient(135deg,#FEF2F2 0%,#FFF7ED 100%)",border:"1px solid #FECACA",boxShadow:"0 2px 8px rgba(220,38,38,0.08)"}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-              <div>
-                <div style={{fontSize:11,fontWeight:600,color:"#DC2626",letterSpacing:0.5,textTransform:"uppercase",marginBottom:6}}>🔄 리오더 긴급발주</div>
-                <div style={{fontSize:36,fontWeight:800,color:"#DC2626",letterSpacing:-1.5}}>{criticalItems.length.toLocaleString()}<span style={{fontSize:14,fontWeight:500,color:"#FCA5A5",marginLeft:4}}>건</span></div>
-                <div style={{fontSize:12,color:"#6B7280",marginTop:6}}>재고 5개 이하 · 발주검토 {warningItems.length}건</div>
-              </div>
-              <div style={{width:48,height:48,borderRadius:12,background:"#DC262620",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>🚨</div>
+        <div style={{padding:"22px 24px",borderRadius:14,background:"linear-gradient(135deg,#FEF2F2 0%,#FFF7ED 100%)",border:"1px solid #FECACA",boxShadow:"0 2px 8px rgba(220,38,38,0.08)"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+            <div>
+              <div style={{fontSize:11,fontWeight:600,color:"#DC2626",letterSpacing:0.5,textTransform:"uppercase",marginBottom:6}}>🔄 리오더 긴급발주</div>
+              <div style={{fontSize:36,fontWeight:800,color:"#DC2626",letterSpacing:-1.5}}>{LOW_STOCK.length.toLocaleString()}<span style={{fontSize:14,fontWeight:500,color:"#FCA5A5",marginLeft:4}}>건</span></div>
             </div>
-            <div style={{marginTop:14,display:"flex",gap:6,flexWrap:"wrap"}}>
-              {criticalItems.slice(0,3).map((s,i)=>(<div key={i} style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:s[F.STOCK]<=2?"#FEE2E2":"#FEF3C7",color:s[F.STOCK]<=2?"#DC2626":"#D97706",fontWeight:600}}>{s[F.NAME].slice(0,8)}… 재고{s[F.STOCK]}</div>))}
-              {criticalItems.length>3&&<div style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"#FEE2E2",color:"#DC2626",fontWeight:600}}>+{criticalItems.length-3}건 → 리오더탭</div>}
-            </div>
-          </div>);
-        })()}
+            <div style={{width:48,height:48,borderRadius:12,background:"#DC262620",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>🚨</div>
+          </div>
+          <div style={{marginTop:14,display:"flex",gap:6,flexWrap:"wrap"}}>
+            {LOW_STOCK.slice(0,3).map((s,i)=>(<div key={i} style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:s[F.STOCK]<=2?"#FEE2E2":"#FEF3C7",color:s[F.STOCK]<=2?"#DC2626":"#D97706",fontWeight:600}}>{s[F.NAME].slice(0,8)}… 재고{s[F.STOCK]}</div>))}
+            {LOW_STOCK.length>3&&<div style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"#FEE2E2",color:"#DC2626",fontWeight:600}}>+{LOW_STOCK.length-3}건 → 리오더탭</div>}
+          </div>
+        </div>
       </div>
 
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
-        <SectionCard title="🔄 리오더 긴급발주 — 재고부족 품목" subtitle={`재고 5개 이하 ${LOW_STOCK.length}건 · 즉시 발주 검토 필요`}>
+        <SectionCard title="🔄 리오더 긴급발주 — 재고부족 품목">
           {LOW_STOCK.slice(0,5).map((s,i)=>(
             <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",borderRadius:8,background:s[F.STOCK]<=2?"#FEF2F2":"#FFFBEB",border:`1px solid ${s[F.STOCK]<=2?"#FECACA":"#FDE68A"}`,marginBottom:8}}>
               <div>
@@ -1518,18 +1506,17 @@ export default function Dashboard(){
         </SectionCard>
       </div>
 
-      <div style={{display:"grid",gridTemplateColumns:"1fr",gap:20,marginTop:0}}>
-        <SectionCard title="🧪 샘플 진행 현황">
-          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-            {SAMPLE_STATUSES.map(st=>{
-              const count=[0,1,2,1,1,1][SAMPLE_STATUSES.indexOf(st)];
-              return(<div key={st} style={{flex:"1 1 80px",textAlign:"center",padding:"12px 8px",borderRadius:8,background:`${STATUS_COLORS[st]}10`}}>
-                <div style={{fontSize:22,fontWeight:800,color:STATUS_COLORS[st]}}>{count}</div>
-                <div style={{fontSize:10,color:STATUS_COLORS[st],fontWeight:600,marginTop:2}}>{st}</div>
-              </div>);
-            })}
-          </div>
-        </SectionCard>
+      <SectionCard title="🧪 샘플 진행 현황">
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          {SAMPLE_STATUSES.map(st=>{
+            const count=[0,1,2,1,1,1][SAMPLE_STATUSES.indexOf(st)];
+            return(<div key={st} style={{flex:"1 1 80px",textAlign:"center",padding:"12px 8px",borderRadius:8,background:`${STATUS_COLORS[st]}10`}}>
+              <div style={{fontSize:22,fontWeight:800,color:STATUS_COLORS[st]}}>{count}</div>
+              <div style={{fontSize:10,color:STATUS_COLORS[st],fontWeight:600,marginTop:2}}>{st}</div>
+            </div>);
+          })}
+        </div>
+      </SectionCard>
       </div>
     </>
   );
