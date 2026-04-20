@@ -792,20 +792,10 @@ function ReorderTab(){
   const[sortCol,setSortCol]=useState("exhaustDays");
   const[sortAsc,setSortAsc]=useState(true);
 
-  // 초기 로드: localStorage에서 캐시된 데이터 복원
-  useEffect(()=>{
-    try{
-      const cb=localStorage?.getItem?.("vlv_reorder_basic");
-      const ca=localStorage?.getItem?.("vlv_reorder_artwork");
-      if(cb)setBasicData(JSON.parse(cb));
-      if(ca)setArtworkData(JSON.parse(ca));
-    }catch(e){}
-  },[]);
-
   // Google Sheets에서 데이터 가져오기
-  const fetchData=async()=>{
-    if(!scriptUrl){setShowSetup(true);return;}
-    setLoading(true);
+  const fetchData=useCallback(async(silent)=>{
+    if(!scriptUrl)return;
+    if(!silent)setLoading(true);
     try{
       const res=await fetch(scriptUrl);
       const json=await res.json();
@@ -814,9 +804,29 @@ function ReorderTab(){
       const now=new Date().toLocaleString("ko-KR");
       setLastRefresh(now);
       try{localStorage?.setItem?.("vlv_reorder_last",now);}catch(e){}
-    }catch(e){alert("데이터를 가져오는데 실패했습니다.\nApps Script URL을 확인해주세요.\n\n오류: "+e.message);}
-    setLoading(false);
-  };
+    }catch(e){if(!silent)alert("데이터를 가져오는데 실패했습니다.\n\n오류: "+e.message);}
+    if(!silent)setLoading(false);
+  },[scriptUrl]);
+
+  // 페이지 접속 시 자동으로 데이터 불러오기
+  useEffect(()=>{
+    // 먼저 캐시된 데이터 복원
+    try{
+      const cb=localStorage?.getItem?.("vlv_reorder_basic");
+      const ca=localStorage?.getItem?.("vlv_reorder_artwork");
+      if(cb)setBasicData(JSON.parse(cb));
+      if(ca)setArtworkData(JSON.parse(ca));
+    }catch(e){}
+    // 자동으로 최신 데이터 불러오기
+    if(scriptUrl)fetchData(true);
+  },[fetchData]);
+
+  // 자동갱신: 1시간마다 체크하여 데이터 갱신
+  useEffect(()=>{
+    if(!autoEnabled||!scriptUrl)return;
+    const interval=setInterval(()=>{fetchData(true);},3600000); // 1시간마다
+    return()=>clearInterval(interval);
+  },[autoEnabled,scriptUrl,fetchData]);
 
   // 수동 데이터 입력 (복사-붙여넣기용)
   const[pasteMode,setPasteMode]=useState(false);
@@ -857,22 +867,17 @@ function ReorderTab(){
 
   // 상태 판별
   const getStatus=(item,type)=>{
-    if(type==="basic"){
-      if(item.exhaustDays<=7||item.shortage30<-50)return"긴급발주";
-      if(item.exhaustDays<=14||item.shortage30<0)return"발주필요";
-      if(item.exhaustDays<=30)return"발주검토";
-      return"재고충분";
-    }else{
-      if(item.exhaustDays<=7||(item.stock===0&&item.avgDailySales>0))return"긴급발주";
-      if(item.exhaustDays<=14)return"발주필요";
-      if(item.exhaustDays<=30)return"발주검토";
-      return"재고충분";
-    }
+    const d=Math.round(item.exhaustDays||0);
+    if(d===0)return"품절";
+    if(d<=60)return"긴급발주";
+    if(d<=75)return"발주필요";
+    if(d<=90)return"발주검토";
+    return"재고충분";
   };
 
-  const statusStyle=st=>({"긴급발주":{color:"#DC2626",bg:"#FEF2F2"},"발주필요":{color:"#D97706",bg:"#FFFBEB"},"발주검토":{color:"#2563EB",bg:"#EFF6FF"},"재고충분":{color:"#059669",bg:"#F0FDF4"}}[st]||{color:"#94A3B8",bg:"#F8FAFC"});
+  const statusStyle=st=>({"품절":{color:"#7F1D1D",bg:"#FEE2E2"},"긴급발주":{color:"#DC2626",bg:"#FEF2F2"},"발주필요":{color:"#D97706",bg:"#FFFBEB"},"발주검토":{color:"#2563EB",bg:"#EFF6FF"},"재고충분":{color:"#059669",bg:"#F0FDF4"}}[st]||{color:"#94A3B8",bg:"#F8FAFC"});
 
-  const exhaustColor=(d)=>d<=7?"#DC2626":d<=14?"#D97706":d<=30?"#2563EB":"#059669";
+  const exhaustColor=(d)=>d===0?"#7F1D1D":d<=60?"#DC2626":d<=75?"#D97706":d<=90?"#2563EB":"#059669";
 
   // 필터 & 정렬
   const currentData=subTab==="basic"?basicData:artworkData;
@@ -889,7 +894,7 @@ function ReorderTab(){
   });
 
   const statusCounts={};
-  ["긴급발주","발주필요","발주검토","재고충분"].forEach(st=>{statusCounts[st]=withStatus.filter(r=>r.status===st).length;});
+  ["품절","긴급발주","발주필요","발주검토","재고충분"].forEach(st=>{statusCounts[st]=withStatus.filter(r=>r.status===st).length;});
 
   const SortTh=({col,children})=>(<th onClick={()=>{if(sortCol===col)setSortAsc(!sortAsc);else{setSortCol(col);setSortAsc(true);}}} style={{padding:"10px 12px",textAlign:"left",fontWeight:600,color:"#64748B",fontSize:11,letterSpacing:0.4,borderBottom:"1px solid #E2E8F0",whiteSpace:"nowrap",textTransform:"uppercase",cursor:"pointer",userSelect:"none",background:"#F8FAFC"}}>{children}{sortCol===col?(sortAsc?" ▲":" ▼"):""}</th>);
 
@@ -990,7 +995,7 @@ function ReorderTab(){
 
       {/* 상태 카드 */}
       <div style={{display:"flex",gap:10,marginBottom:16}}>
-        {["긴급발주","발주필요","발주검토","재고충분"].map(st=>{const cnt=statusCounts[st]||0;const{color,bg}=statusStyle(st);
+        {["품절","긴급발주","발주필요","발주검토","재고충분"].map(st=>{const cnt=statusCounts[st]||0;const{color,bg}=statusStyle(st);
           return(<div key={st} onClick={()=>setFilter(filter===st?"전체":st)} style={{flex:1,padding:"12px 14px",borderRadius:10,background:bg,border:`1px solid ${color}20`,textAlign:"center",cursor:"pointer",outline:filter===st?`2px solid ${color}`:"none",transition:"all 0.15s"}}>
             <div style={{fontSize:22,fontWeight:800,color}}>{cnt}</div>
             <div style={{fontSize:10,fontWeight:600,color,marginTop:2}}>{st}</div>
@@ -1427,8 +1432,10 @@ export default function Dashboard(){
     setReorderLoading(false);
   })();},[]);
 
-  const reorderUrgent=useMemo(()=>reorderData.filter(r=>{const d=r.exhaustDays||0;return d<=7||(r.stock===0&&r.avgDailySales>0);}),[reorderData]);
-  const reorderWarning=useMemo(()=>reorderData.filter(r=>{const d=r.exhaustDays||0;return d>7&&d<=14;}),[reorderData]);
+  const reorderUrgent=useMemo(()=>reorderData.filter(r=>{const d=Math.round(r.exhaustDays||0);return d<=60;}).sort((a,b)=>(a.exhaustDays||0)-(b.exhaustDays||0)),[reorderData]);
+  const reorderWarning=useMemo(()=>reorderData.filter(r=>{const d=Math.round(r.exhaustDays||0);return d>60&&d<=75;}),[reorderData]);
+  const reorderReview=useMemo(()=>reorderData.filter(r=>{const d=Math.round(r.exhaustDays||0);return d>75&&d<=90;}),[reorderData]);
+  const reorderSafe=useMemo(()=>reorderData.filter(r=>{const d=Math.round(r.exhaustDays||0);return d>90;}),[reorderData]);
   const skuImgMap=useMemo(()=>{const m={};SKUS.forEach(s=>{if(s[F.IMG]&&!m[s[F.CODE]])m[s[F.CODE]]=s[F.IMG];});return m;},[]);
 
   const tabs=[
@@ -1444,8 +1451,9 @@ export default function Dashboard(){
 
   const renderOverview=()=>(
     <>
+      {/* 상단 3카드: 이번주 입고건 / 리오더 긴급발주 / 샘플 진행건 */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16,marginBottom:20}}>
-        {/* 이번주 입고건 */}
+        {/* 1. 이번주 입고건 */}
         <div style={{padding:"22px 24px",borderRadius:14,background:"linear-gradient(135deg,#EFF6FF 0%,#F5F3FF 100%)",border:"1px solid #BFDBFE",boxShadow:"0 2px 8px rgba(59,130,246,0.08)"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
             <div>
@@ -1461,7 +1469,24 @@ export default function Dashboard(){
           </div>
         </div>
 
-        {/* 샘플 진행건 */}
+        {/* 2. 리오더 긴급발주 */}
+        <div style={{padding:"22px 24px",borderRadius:14,background:"linear-gradient(135deg,#FEF2F2 0%,#FFF7ED 100%)",border:"1px solid #FECACA",boxShadow:"0 2px 8px rgba(220,38,38,0.08)"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+            <div>
+              <div style={{fontSize:11,fontWeight:600,color:"#DC2626",letterSpacing:0.5,textTransform:"uppercase",marginBottom:6}}>🔄 리오더 긴급발주</div>
+              {reorderLoading?<div style={{fontSize:14,color:"#94A3B8"}}>불러오는 중...</div>
+              :<div style={{fontSize:36,fontWeight:800,color:"#DC2626",letterSpacing:-1.5}}>{reorderUrgent.length}<span style={{fontSize:14,fontWeight:500,color:"#FCA5A5",marginLeft:4}}>건</span></div>}
+              {!reorderLoading&&<div style={{fontSize:12,color:"#6B7280",marginTop:6}}>소진 60일 이내 · 발주검토 {reorderWarning.length}건</div>}
+            </div>
+            <div style={{width:48,height:48,borderRadius:12,background:"#DC262620",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>🚨</div>
+          </div>
+          {!reorderLoading&&<div style={{marginTop:14,display:"flex",gap:6,flexWrap:"wrap"}}>
+            {reorderUrgent.slice(0,3).map((r,i)=>(<div key={i} style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"#FEE2E2",color:"#DC2626",fontWeight:600}}>{(r.name||"").slice(0,10)} 소진{Math.round(r.exhaustDays)}일</div>))}
+            {reorderUrgent.length>3&&<div style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"#FEE2E2",color:"#DC2626",fontWeight:600}}>+{reorderUrgent.length-3}건</div>}
+          </div>}
+        </div>
+
+        {/* 3. 샘플 진행건 */}
         <div style={{padding:"22px 24px",borderRadius:14,background:"linear-gradient(135deg,#F0FDF4 0%,#ECFDF5 100%)",border:"1px solid #BBF7D0",boxShadow:"0 2px 8px rgba(16,185,129,0.08)"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
             <div>
@@ -1475,73 +1500,64 @@ export default function Dashboard(){
             {[["샘플제작중",2,"#3B82F6"],["배송중",1,"#8B5CF6"],["검수완료",1,"#10B981"],["원단확인",1,"#F59E0B"]].map(([st,cnt,c],i)=>(<div key={i} style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:`${c}18`,color:c,fontWeight:600}}>{st} {cnt}</div>))}
           </div>
         </div>
-
-        {/* 리오더 긴급발주 - 구글시트 기반 */}
-        <div style={{padding:"22px 24px",borderRadius:14,background:"linear-gradient(135deg,#FEF2F2 0%,#FFF7ED 100%)",border:"1px solid #FECACA",boxShadow:"0 2px 8px rgba(220,38,38,0.08)"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-            <div>
-              <div style={{fontSize:11,fontWeight:600,color:"#DC2626",letterSpacing:0.5,textTransform:"uppercase",marginBottom:6}}>🔄 리오더 긴급발주</div>
-              {reorderLoading?<div style={{fontSize:14,color:"#94A3B8"}}>불러오는 중...</div>
-              :<div style={{fontSize:36,fontWeight:800,color:"#DC2626",letterSpacing:-1.5}}>{reorderUrgent.length}<span style={{fontSize:14,fontWeight:500,color:"#FCA5A5",marginLeft:4}}>건</span></div>}
-              {!reorderLoading&&<div style={{fontSize:12,color:"#6B7280",marginTop:6}}>발주필요 {reorderWarning.length}건</div>}
-            </div>
-            <div style={{width:48,height:48,borderRadius:12,background:"#DC262620",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>🚨</div>
-          </div>
-          {!reorderLoading&&<div style={{marginTop:14,display:"flex",gap:6,flexWrap:"wrap"}}>
-            {reorderUrgent.slice(0,3).map((r,i)=>(<div key={i} style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"#FEE2E2",color:"#DC2626",fontWeight:600}}>{(r.name||"").slice(0,10)} {r.option||""}</div>))}
-            {reorderUrgent.length>3&&<div style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"#FEE2E2",color:"#DC2626",fontWeight:600}}>+{reorderUrgent.length-3}건 → 리오더탭</div>}
-          </div>}
-        </div>
       </div>
 
+      {/* 하단: 왼쪽=리오더 긴급발주, 오른쪽=입고대기+샘플진행 */}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
+        {/* 왼쪽: 리오더 긴급발주 상세 */}
         <SectionCard title="🔄 리오더 긴급발주 — 소진임박 품목">
           {reorderLoading?<div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:13}}>⏳ 구글시트 데이터 불러오는 중...</div>
-          :reorderUrgent.length>0?reorderUrgent.slice(0,5).map((r,i)=>(
-            <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",borderRadius:8,background:Math.round(r.exhaustDays)<=3?"#FEF2F2":"#FFFBEB",border:`1px solid ${Math.round(r.exhaustDays)<=3?"#FECACA":"#FDE68A"}`,marginBottom:8}}>
+          :reorderUrgent.length>0?reorderUrgent.slice(0,7).map((r,i)=>{
+            const d=Math.round(r.exhaustDays||0);
+            const isRed=d<=30;
+            return(
+            <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",borderRadius:8,background:isRed?"#FEF2F2":"#FFFBEB",border:`1px solid ${isRed?"#FECACA":"#FDE68A"}`,marginBottom:6}}>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
                 {skuImgMap[r.code]&&<div style={{width:36,height:36,borderRadius:6,overflow:"hidden",border:"1px solid #E2E8F0",flexShrink:0}}><img src={skuImgMap[r.code]} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{e.target.style.display="none";}}/></div>}
                 <div>
-                  <div style={{fontSize:13,fontWeight:700,color:Math.round(r.exhaustDays)<=3?"#DC2626":"#D97706"}}>{r.name} {r.option}</div>
-                  <div style={{fontSize:11,color:"#6B7280",marginTop:2}}>{r.code} · 소진 {Math.round(r.exhaustDays)}일</div>
+                  <div style={{fontSize:12,fontWeight:700,color:isRed?"#DC2626":"#D97706"}}>{r.name} {r.option}</div>
+                  <div style={{fontSize:11,color:"#6B7280",marginTop:1}}>{r.code} · 소진 {d}일</div>
                 </div>
               </div>
               <div style={{textAlign:"right"}}>
-                <div style={{fontSize:18,fontWeight:800,color:Math.round(r.exhaustDays)<=3?"#DC2626":"#D97706"}}>{Math.round(r.stock)}개</div>
+                <div style={{fontSize:16,fontWeight:800,color:isRed?"#DC2626":"#D97706"}}>{Math.round(r.stock)}개</div>
                 <div style={{fontSize:10,color:"#94A3B8"}}>현재고</div>
               </div>
-            </div>
-          )):<div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:13}}>긴급발주 항목이 없습니다</div>}
-          {reorderUrgent.length>5&&<div style={{textAlign:"center",fontSize:12,color:"#94A3B8",marginTop:4,cursor:"pointer"}} onClick={()=>setActiveTab("reorder")}>외 {reorderUrgent.length-5}건 더보기 → 리오더 탭</div>}
-        </SectionCard>
-
-        <SectionCard title="📦 입고대기 현황" subtitle={`${PENDING_SKUS.length}개 SKU · 총 ${TOTAL_PENDING.toLocaleString()}pcs`}>
-          {PENDING_SKUS.slice(0,5).map((s,i)=>(
-            <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",borderRadius:8,marginBottom:6,background:"#EFF6FF",border:"1px solid #BFDBFE"}}>
-              <div>
-                <div style={{fontSize:13,fontWeight:600,color:"#1E293B"}}>{s[F.NAME]} {s[F.OPT]}</div>
-                <div style={{fontSize:11,color:"#64748B",marginTop:2}}>{s[F.CODE]} · {(s[F.CAT]||"")}</div>
-              </div>
-              <div style={{textAlign:"right"}}>
-                <div style={{fontSize:15,fontWeight:700,color:"#3B82F6"}}>{s[F.PENDING]}pcs</div>
-                <div style={{fontSize:10,color:"#94A3B8"}}>현재고 {s[F.STOCK]}</div>
-              </div>
-            </div>
-          ))}
-        </SectionCard>
-      </div>
-
-      <SectionCard title="🧪 샘플 진행 현황">
-        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          {SAMPLE_STATUSES.map(st=>{
-            const count=[0,1,2,1,1,1][SAMPLE_STATUSES.indexOf(st)];
-            return(<div key={st} style={{flex:"1 1 80px",textAlign:"center",padding:"12px 8px",borderRadius:8,background:`${STATUS_COLORS[st]}10`}}>
-              <div style={{fontSize:22,fontWeight:800,color:STATUS_COLORS[st]}}>{count}</div>
-              <div style={{fontSize:10,color:STATUS_COLORS[st],fontWeight:600,marginTop:2}}>{st}</div>
             </div>);
-          })}
+          }):<div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:13}}>긴급발주 항목이 없습니다</div>}
+          {reorderUrgent.length>7&&<div style={{textAlign:"center",fontSize:12,color:"#94A3B8",marginTop:4,cursor:"pointer"}} onClick={()=>setActiveTab("reorder")}>외 {reorderUrgent.length-7}건 더보기 → 리오더 탭</div>}
+        </SectionCard>
+
+        {/* 오른쪽: 입고대기 현황 + 샘플 진행 현황 */}
+        <div>
+          <SectionCard title="📦 입고대기 현황" subtitle={`${PENDING_SKUS.length}개 SKU · 총 ${TOTAL_PENDING.toLocaleString()}pcs`}>
+            {PENDING_SKUS.slice(0,4).map((s,i)=>(
+              <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",borderRadius:8,marginBottom:6,background:"#EFF6FF",border:"1px solid #BFDBFE"}}>
+                <div>
+                  <div style={{fontSize:13,fontWeight:600,color:"#1E293B"}}>{s[F.NAME]} {s[F.OPT]}</div>
+                  <div style={{fontSize:11,color:"#64748B",marginTop:2}}>{s[F.CODE]}</div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontSize:15,fontWeight:700,color:"#3B82F6"}}>{s[F.PENDING]}pcs</div>
+                  <div style={{fontSize:10,color:"#94A3B8"}}>현재고 {s[F.STOCK]}</div>
+                </div>
+              </div>
+            ))}
+          </SectionCard>
+
+          <SectionCard title="🧪 샘플 진행 현황">
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              {SAMPLE_STATUSES.map(st=>{
+                const count=[0,1,2,1,1,1][SAMPLE_STATUSES.indexOf(st)];
+                return(<div key={st} style={{flex:"1 1 70px",textAlign:"center",padding:"10px 6px",borderRadius:8,background:`${STATUS_COLORS[st]}10`}}>
+                  <div style={{fontSize:20,fontWeight:800,color:STATUS_COLORS[st]}}>{count}</div>
+                  <div style={{fontSize:9,color:STATUS_COLORS[st],fontWeight:600,marginTop:2}}>{st}</div>
+                </div>);
+              })}
+            </div>
+          </SectionCard>
         </div>
-      </SectionCard>
+      </div>
     </>
   );
 
