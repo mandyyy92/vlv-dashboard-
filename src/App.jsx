@@ -64,8 +64,8 @@ function matchBarcode(raw){
 
 function exportCSV(results,supplierName){
   if(!results.length)return;
-  let csv="\uFEFF바코드,대표상품코드,상품코드,상품명,옵션,컬러,사이즈,수량\n";
-  results.forEach(r=>{csv+=`"${r.barcode}","${r.repCode}","${r.code}","${r.name}","${r.option}","${r.color||""}","${r.size||""}",${r.qty}\n`;});
+  let csv="\uFEFF품번코드,상품코드,상품명,옵션,수량\n";
+  results.forEach(r=>{csv+=`"${r.repCode}","${r.code}","${r.name}","${r.option}",${r.qty}\n`;});
   const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
   const url=URL.createObjectURL(blob);const a=document.createElement("a");
   a.href=url;a.download=`패킹리스트_${supplierName}_${new Date().toISOString().slice(0,10)}.csv`;
@@ -84,16 +84,13 @@ function PackingResultTable({results}){
         {unmatched>0&&<Badge color="#DC2626">미매칭 {unmatched}</Badge>}
       </div>
     </div>
-    <Table headers={["바코드","대표코드","상품코드","상품명","옵션","컬러","사이즈","수량"]} maxH={300}>
+    <Table headers={["품번코드","상품코드","상품명","옵션","수량"]} maxH={300}>
       {results.map((item,i)=>(
         <tr key={i} style={{background:item.code==="-"?"#FEF2F2":"transparent"}}>
-          <Td style={{fontFamily:"monospace",fontSize:11}}>{item.barcode||"-"}</Td>
-          <Td style={{fontSize:11}}>{item.repCode}</Td>
+          <Td style={{fontFamily:"monospace",fontSize:11}}>{item.repCode||"-"}</Td>
           <Td><span style={{fontWeight:600,fontSize:11}}>{item.code}</span></Td>
-          <Td style={{maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.name}</Td>
+          <Td style={{maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.name}</Td>
           <Td>{item.option}</Td>
-          <Td style={{fontSize:12}}>{item.color||"-"}</Td>
-          <Td style={{fontSize:12}}>{item.size||"-"}</Td>
           <Td style={{fontWeight:700}}>{item.qty}</Td>
         </tr>
       ))}
@@ -111,7 +108,7 @@ function PackingEmpty({text}){
   </div>);
 }
 
-// ─── 인도: PDF → 엑셀 ───
+// ─── 인도: PDF → 엑셀 (DB 매칭) ───
 function PackingIndo(){
   const[results,setResults]=useState([]);
   const[fileName,setFileName]=useState("");
@@ -119,33 +116,154 @@ function PackingIndo(){
   const[mode,setMode]=useState("file");
   const fileRef=useRef(null);
 
+  // 영문 컬러 → 한글 매칭 맵
+  const ENG_TO_KR={"WHITE":"화이트","OFF WHITE":"화이트","BLACK":"블랙","NAVY":"네이비","GREY":"그레이","GRAY":"그레이","BEIGE":"베이지","RED":"레드","BLUE":"블루","GREEN":"그린","PINK":"핑크","BROWN":"브라운","CHARCOAL":"차콜","CREAM":"크림","IVORY":"아이보리","YELLOW":"옐로우","ORANGE":"오렌지","KHAKI":"카키","BURGUNDY":"버건디","MELANGE":"멜란지","OATMEAL":"오트밀","WINE":"와인","PURPLE":"퍼플","MINT":"민트","OLIVE":"올리브","CAMEL":"카멜","SAND":"샌드","MOCHA":"모카","CORAL":"코랄","LAVENDER":"라벤더","COBALT":"코발트"};
+
+  // STYLE NO + COLOUR + SIZE로 DB 매칭
+  const findMatch=(styleNo,colorEng,size)=>{
+    const colorKr=ENG_TO_KR[colorEng.toUpperCase()]||colorEng;
+    const sizeUp=size.toUpperCase();
+    // 1차: 바코드에 스타일번호가 포함된 항목에서 옵션으로 컬러+사이즈 매칭
+    const candidates=SKUS.filter(s=>(s[F.BC]||"").includes(styleNo));
+    if(candidates.length>0){
+      // 옵션에서 컬러+사이즈 매칭 (예: [화이트-S])
+      const exact=candidates.find(s=>{
+        const opt=(s[F.OPT]||"").replace(/[\[\]]/g,"");
+        const parts=opt.split("-");
+        const optColor=parts[0]||"";
+        const optSize=(parts[parts.length-1]||"").toUpperCase();
+        return (optColor.includes(colorKr)||colorKr.includes(optColor))&&optSize===sizeUp;
+      });
+      if(exact)return exact;
+      // 바코드 끝에 사이즈 코드가 있는 경우
+      const byBcSize=candidates.find(s=>{
+        const bc=(s[F.BC]||"").toUpperCase();
+        return bc.endsWith(sizeUp)&&(s[F.OPT]||"").includes(colorKr);
+      });
+      if(byBcSize)return byBcSize;
+    }
+    // 2차: 상품명으로 검색 후 옵션 매칭
+    const byName=SKUS.filter(s=>{
+      const opt=(s[F.OPT]||"").replace(/[\[\]]/g,"");
+      const parts=opt.split("-");
+      const optColor=parts[0]||"";
+      const optSize=(parts[parts.length-1]||"").toUpperCase();
+      return (optColor.includes(colorKr)||colorKr.includes(optColor))&&optSize===sizeUp&&(s[F.BC]||"").includes(styleNo.slice(0,8));
+    });
+    if(byName.length>0)return byName[0];
+    return null;
+  };
+
+  // 인도 패킹리스트 PDF 텍스트 파싱
   const parsePdfText=(raw)=>{
-    const lines=raw.split("\n").filter(l=>l.trim());
+    const lines=raw.split("\\n").filter(l=>l.trim());
     const items=[];
+    let currentStyle="",currentColor="";
+    const sizeLabels=["S","M","L","XL","XXL","2XL","3XL"];
+
     for(const line of lines){
-      const parts=line.split(/[\t|,;]+/).map(s=>s.trim()).filter(Boolean);
-      if(parts.length<2)continue;
-      let barcode="",qty=0,color="",size="",itemName="";
-      for(const p of parts){
-        const num=parseInt(p);
-        if(!isNaN(num)&&num>0&&num<100000&&p===String(num)){qty=num;}
-        else if(/^[A-Z0-9\-]{6,}$/i.test(p)&&!barcode){barcode=p;}
-        else if(/^(S|M|L|XL|XXL|F|OS|FREE|\d{2,3})$/i.test(p)){size=p;}
-        else if(p.length>=2&&!itemName){
-          if(/^[가-힣]/.test(p)||/black|white|navy|gray|grey|beige|cream|red|blue|green|pink|brown|khaki|charcoal|ivory/i.test(p))color=p;
-          else itemName=p;
+      const parts=line.split(/\\s+/).map(s=>s.trim()).filter(Boolean);
+      if(parts.length<3)continue;
+
+      // 스타일 번호 찾기 (V로 시작하는 코드)
+      const styleMatch=parts.find(p=>/^V\\d{2}[A-Z]/i.test(p)||/^['"]?V\\d{2}/i.test(p));
+      if(styleMatch)currentStyle=styleMatch.replace(/['"]/g,"");
+
+      // 컬러 찾기
+      const colorMatch=parts.find(p=>Object.keys(ENG_TO_KR).some(c=>p.toUpperCase()===c));
+      if(colorMatch)currentColor=colorMatch.toUpperCase();
+
+      if(!currentStyle||!currentColor)continue;
+
+      // 숫자들에서 사이즈별 수량 추출
+      // PDF 구조: CTN_FROM CTN_TO STYLE COLOUR [S_qty] [M_qty] [L_qty] PCS_PER_CTN TOTAL_CTNS TOTAL_PCS ...
+      const nums=parts.map(p=>parseInt(p)).filter(n=>!isNaN(n)&&n>=0);
+      
+      // TOTAL PCS 찾기 - 패턴에서 사이즈별 수량과 총수량 추출
+      // 각 행에서 사이즈별 수량은 80, 60 같은 숫자, TOTAL PCS는 400, 480 등
+      // 행에 숫자가 여러개 있으면 마지막에서 4번째쯤이 TOTAL PCS
+      
+      // 간단한 접근: 각 행의 TOTAL PCS (큰 숫자) 찾기
+      if(nums.length>=4){
+        // PDF 구조에서 사이즈별 수량 패턴 찾기
+        // 사이즈 수량은 보통 20~100 범위, TOTAL PCS는 300~1000 범위
+        const possibleQtys=nums.filter(n=>n>=10&&n<=200);
+        const totalPcs=nums.find(n=>n>=200&&n<=10000);
+        
+        if(totalPcs&&totalPcs>0){
+          // 이미 같은 스타일+컬러로 사이즈별 분류가 필요
+          // PDF에서 사이즈별로 분리되어있지 않고 박스별로 되어있으므로
+          // 일단 총수량으로 기록
+          const existing=items.find(it=>it._style===currentStyle&&it._colorEng===currentColor);
+          if(existing){
+            existing.qty+=totalPcs;
+          }else{
+            items.push({_style:currentStyle,_colorEng:currentColor,qty:totalPcs});
+          }
         }
       }
-      const matched=matchBarcode(barcode);
-      items.push({
-        barcode:barcode||"",qty:qty||1,
-        code:matched?matched[F.CODE]:"-",name:matched?matched[F.NAME]:(itemName||"(매칭필요)"),
-        option:matched?matched[F.OPT]:"-",repCode:matched?matched[F.REP]:"-",
-        color:color||(matched?matched[F.OPT].replace(/[\[\]]/g,"").split("-")[0]:""),
-        size:size||(matched?matched[F.OPT].replace(/[\[\]]/g,"").split("-").pop():"")
-      });
     }
-    return items;
+
+    // 만약 위 방식으로 파싱이 안되면, 텍스트 입력용 간단 파싱
+    if(items.length===0){
+      for(const line of lines){
+        const parts=line.split(/[\\t,|;]+/).map(s=>s.trim()).filter(Boolean);
+        if(parts.length>=2){
+          let style="",color="",size="",qty=0;
+          for(const p of parts){
+            const num=parseInt(p.replace(/,/g,""));
+            if(!isNaN(num)&&num>0&&num<100000&&p.replace(/,/g,"")===String(num))qty=num;
+            else if(/^V\\d{2}[A-Z]/i.test(p))style=p.replace(/['"]/g,"");
+            else if(sizeLabels.includes(p.toUpperCase()))size=p.toUpperCase();
+            else if(Object.keys(ENG_TO_KR).some(c=>p.toUpperCase()===c))color=p.toUpperCase();
+            else if(p.length>=2&&!color)color=p.toUpperCase();
+          }
+          if(style&&qty>0){
+            items.push({_style:style,_colorEng:color,_size:size,qty});
+          }
+        }
+      }
+    }
+
+    // DB 매칭
+    const matched=[];
+    for(const item of items){
+      if(item._size){
+        // 사이즈가 있으면 직접 매칭
+        const m=findMatch(item._style,item._colorEng,item._size);
+        const colorKr=ENG_TO_KR[item._colorEng]||item._colorEng;
+        matched.push({
+          repCode:m?m[F.REP]:"-",code:m?m[F.CODE]:"-",
+          name:m?m[F.NAME]:"(매칭필요)",
+          option:m?m[F.OPT]:`[${colorKr}-${item._size}]`,
+          qty:item.qty,barcode:m?m[F.BC]:""
+        });
+      }else{
+        // 사이즈 없이 총수량만 있으면, 해당 스타일+컬러의 모든 사이즈에 총수량 배분
+        const colorKr=ENG_TO_KR[item._colorEng]||item._colorEng;
+        const candidates=SKUS.filter(s=>{
+          const bc=(s[F.BC]||"");
+          const opt=(s[F.OPT]||"");
+          return bc.includes(item._style)&&opt.includes(colorKr);
+        });
+        if(candidates.length>0){
+          // 총수량을 하나의 행으로 표시 (사이즈 통합)
+          const first=candidates[0];
+          matched.push({
+            repCode:first[F.REP],code:first[F.CODE],
+            name:first[F.NAME],
+            option:`[${colorKr}-전사이즈]`,
+            qty:item.qty,barcode:first[F.BC]
+          });
+        }else{
+          matched.push({
+            repCode:"-",code:"-",name:"(매칭필요)",
+            option:`[${colorKr}]`,qty:item.qty,barcode:""
+          });
+        }
+      }
+    }
+    return matched;
   };
 
   const handleFile=(e)=>{
@@ -155,27 +273,23 @@ function PackingIndo(){
     const reader=new FileReader();
     if(file.name.endsWith(".pdf")){
       reader.onload=(ev)=>{
-        const text=atob(ev.target.result.split(",")[1]).replace(/[^\x20-\x7E\xA0-\xFF\uAC00-\uD7A3\u3131-\u3163\n\t]/g," ");
-        const items=parsePdfText(text);
+        const raw=atob(ev.target.result.split(",")[1]).replace(/[^\\x20-\\x7E\\xA0-\\xFF\\uAC00-\\uD7A3\\u3131-\\u3163\\n\\t]/g," ");
+        const items=parsePdfText(raw);
         if(items.length===0){
-          alert("PDF에서 텍스트를 추출했으나 패킹리스트 데이터를 찾지 못했습니다.\n아래 텍스트 입력란에 PDF 내용을 직접 붙여넣어 주세요.");
+          alert("PDF에서 텍스트를 추출했으나 데이터를 찾지 못했습니다.\\n아래 텍스트 입력란에 PDF 내용을 직접 붙여넣어 주세요.");
           setMode("text");
         }else setResults(items);
       };
       reader.readAsDataURL(file);
     }else{
-      reader.onload=(ev)=>{
-        const items=parsePdfText(ev.target.result);
-        setResults(items);
-      };
+      reader.onload=(ev)=>{setResults(parsePdfText(ev.target.result));};
       reader.readAsText(file);
     }
   };
 
   const parseText=()=>{
     if(!text.trim())return;
-    const items=parsePdfText(text);
-    setResults(items);
+    setResults(parsePdfText(text));
   };
 
   return(<>
@@ -198,18 +312,18 @@ function PackingIndo(){
           </div>
         ):(
           <div>
-            <textarea value={text} onChange={e=>setText(e.target.value)} placeholder={"인도 패킹리스트 PDF 내용을 복사하여 붙여넣기\n\n예시:\nbarcode\tcolor\tsize\tqty\nV26AA01UB600NVFRE\tNavy\tOS\t50\nW41A003MGYF\tGray\tF\t30"} style={{width:"100%",height:170,padding:14,borderRadius:10,border:"1px solid #E2E8F0",fontSize:12,fontFamily:"monospace",background:"#FFF7ED",resize:"vertical",outline:"none",boxSizing:"border-box",lineHeight:1.6}} />
+            <textarea value={text} onChange={e=>setText(e.target.value)} placeholder={"인도 패킹리스트 내용을 붙여넣기\\n\\n형식1 (사이즈별):\\n스타일NO\\t컬러\\t사이즈\\t수량\\nV26PT02WB600\\tWHITE\\tS\\t140\\nV26PT02WB600\\tWHITE\\tM\\t140\\n\\n형식2 (총수량):\\nV26PT02WB600\\tWHITE\\t1420\\nV26PT02WB600\\tBLACK\\t1540"} style={{width:"100%",height:170,padding:14,borderRadius:10,border:"1px solid #E2E8F0",fontSize:12,fontFamily:"monospace",background:"#FFF7ED",resize:"vertical",outline:"none",boxSizing:"border-box",lineHeight:1.6}} />
             <SmallBtn primary onClick={parseText}>변환하기</SmallBtn>
           </div>
         )}
 
         <div style={{marginTop:14,padding:12,background:"#FFF7ED",borderRadius:8,border:"1px solid #FED7AA"}}>
-          <div style={{fontSize:11,fontWeight:700,color:"#EA580C",marginBottom:6}}>📌 인도 패킹리스트 형식</div>
+          <div style={{fontSize:11,fontWeight:700,color:"#EA580C",marginBottom:6}}>📌 인도 패킹리스트 → DB 매칭</div>
           <div style={{fontSize:11,color:"#78716C",lineHeight:1.7}}>
-            • 입력: <b>PDF 파일</b> (또는 PDF에서 복사한 텍스트)<br/>
-            • 출력: 바코드 매칭된 엑셀(CSV) 파일<br/>
-            • PDF 내 바코드/상품코드/수량을 자동 인식<br/>
-            • 컬러·사이즈 정보가 있으면 함께 추출
+            • PDF의 STYLE NO + COLOUR → 상품 DB 바코드 매칭<br/>
+            • 영문 컬러(WHITE/BLACK 등) → 한글 옵션 자동 변환<br/>
+            • 출력: <b>품번코드, 상품코드, 상품명, 옵션, 수량</b><br/>
+            • PDF 추출 실패 시 텍스트 입력 모드 사용
           </div>
         </div>
       </div>
@@ -553,79 +667,235 @@ function PackingListTab(){
 }
 
 
-// ─── Tab 2: 입고 스케줄 (Supabase) ───
+// ─── Tab 2: 입고 스케줄 (Supabase - 캘린더+업체별) ───
 function ScheduleTab(){
   const[schedules,setSchedules]=useState([]);
   const[loading,setLoading]=useState(true);
+  const[viewMode,setViewMode]=useState("calendar");
   const[chatInput,setChatInput]=useState("");
-  const[viewMode,setViewMode]=useState("list");
-  const[filterSupplier,setFilterSupplier]=useState("전체");
+  const[currentMonth,setCurrentMonth]=useState(()=>{const d=new Date();return{year:d.getFullYear(),month:d.getMonth()};});
 
-  useEffect(()=>{(async()=>{setLoading(true);const data=await sb.get("schedules");if(data.length>0)setSchedules(data);else{
-    const defaults=[
-      {supplier:"자체제작",item:"공용 링거티 Seastar 480pcs",date:"2026-04-20",status:"입고대기",lead_days:7},
-      {supplier:"국내-베키(동대문)",item:"모자-Text 70pcs",date:"2026-04-22",status:"생산중",lead_days:14},
-      {supplier:"수입-(복건)GL",item:"엘리H 시리즈 300pcs",date:"2026-05-05",status:"선적완료",lead_days:30},
-      {supplier:"수입-(광동)BJ",item:"시그H 시리즈 200pcs",date:"2026-05-10",status:"생산중",lead_days:35},
-      {supplier:"수입-(복건)SY",item:"에센셜 시리즈 250pcs",date:"2026-04-28",status:"검수중",lead_days:25},
-    ];for(const d of defaults){const r=await sb.insert("schedules",d);if(r&&r[0])setSchedules(p=>[...p,r[0]]);}
-  }setLoading(false);})();},[]);
+  // 직접 등록 폼
+  const[formSupplier,setFormSupplier]=useState("인도");
+  const[formName,setFormName]=useState("");
+  const[formQty,setFormQty]=useState("");
+  const[formShipDate,setFormShipDate]=useState("");
+  const[formKrDate,setFormKrDate]=useState("");
+  const[formOzDate,setFormOzDate]=useState("");
+  const[formNote,setFormNote]=useState("");
+  const[formShipType,setFormShipType]=useState("Air Shipment");
 
-  const MAIN_SUPPLIERS=["자체제작","국내-베키(동대문)","수입-(복건)GL","수입-(광동)BJ","수입-(복건)SY"];
+  const SUPPLIERS=["인도","코니키즈","성은교역"];
+  const SUP_STYLES={"인도":{color:"#16A34A",bg:"#F0FDF4",icon:"🇮🇳"},"코니키즈":{color:"#2563EB",bg:"#EFF6FF",icon:"🏭"},"성은교역":{color:"#D97706",bg:"#FFFBEB",icon:"📦"}};
+
+  useEffect(()=>{(async()=>{setLoading(true);const data=await sb.get("schedules");setSchedules(data||[]);setLoading(false);})();},[]);
+
+  // 한국도착일 입력 시 오즈센터 도착일 자동계산 (+3일)
+  const handleKrDate=(v)=>{
+    setFormKrDate(v);
+    if(v){const d=new Date(v);d.setDate(d.getDate()+3);setFormOzDate(d.toISOString().slice(0,10));}
+  };
+
+  // 직접 등록
+  const addSchedule=async()=>{
+    if(!formName){alert("상품명을 입력하세요.");return;}
+    const row={supplier:formSupplier,item:formName,qty:parseInt(formQty)||0,
+      ship_date:formShipDate||null,kr_date:formKrDate||null,oz_date:formOzDate||null,
+      ship_type:formShipType,note:formNote,status:"입고예정",
+      date:formKrDate||formShipDate||new Date().toISOString().slice(0,10),lead_days:formSupplier==="인도"?30:formSupplier==="코니키즈"?21:14};
+    const r=await sb.insert("schedules",row);
+    if(r&&r[0]){setSchedules(p=>[r[0],...p]);setFormName("");setFormQty("");setFormShipDate("");setFormKrDate("");setFormOzDate("");setFormNote("");}
+  };
+
+  // AI 카톡 파싱
   const parseChat=async()=>{
-    if(!chatInput.trim())return;const lines=chatInput.split("\n");let curSup="";
-    for(const line of lines){const l=line.trim();
-      if(MAIN_SUPPLIERS.some(s=>l.includes(s)))curSup=MAIN_SUPPLIERS.find(s=>l.includes(s));
-      else if(l.includes("자체"))curSup="자체제작";else if(l.includes("베키")||l.includes("동대문"))curSup="국내-베키(동대문)";
-      else if(l.includes("복건")||l.includes("GL"))curSup="수입-(복건)GL";else if(l.includes("광동")||l.includes("BJ"))curSup="수입-(광동)BJ";
+    if(!chatInput.trim())return;
+    const lines=chatInput.split("\n");let curSup="인도";
+    for(const line of lines){
+      const l=line.trim();if(!l)continue;
+      if(l.includes("인도"))curSup="인도";else if(l.includes("코니키즈")||l.includes("코니"))curSup="코니키즈";else if(l.includes("성은교역")||l.includes("성은"))curSup="성은교역";
       const dm=l.match(/(\d{1,2})[\/.\-](\d{1,2})/);
-      if(dm){const mo=dm[1].padStart(2,"0"),dy=dm[2].padStart(2,"0"),it=l.replace(/\d{1,2}[\/.\-]\d{1,2}/,"").trim()||"입고건";
-        const ld=curSup.startsWith("수입")?30:curSup.startsWith("국내")?14:7;
-        const r=await sb.insert("schedules",{supplier:curSup||"자체제작",item:it,date:`2026-${mo}-${dy}`,status:"입고예정",lead_days:ld});
+      if(dm){
+        const mo=dm[1].padStart(2,"0"),dy=dm[2].padStart(2,"0");
+        const dateStr=`2026-${mo}-${dy}`;
+        const itemText=l.replace(/\d{1,2}[\/.\-]\d{1,2}/g,"").replace(/\[.*?\]/g,"").replace(/인도|코니키즈|성은교역|오전|오후|\d{1,2}:\d{2}/g,"").trim();
+        const qtyMatch=l.match(/(\d{1,6})\s*장/);const qty=qtyMatch?parseInt(qtyMatch[1]):0;
+        const nameText=itemText.replace(/\d{1,6}\s*장/,"").replace(/입고|예정|완료|선적/g,"").trim()||"입고건";
+        const krDate=dateStr;const ozD=new Date(krDate);ozD.setDate(ozD.getDate()+3);
+        const row={supplier:curSup,item:nameText,qty,ship_date:null,kr_date:krDate,oz_date:ozD.toISOString().slice(0,10),
+          ship_type:"",note:"",status:"입고예정",date:krDate,lead_days:curSup==="인도"?30:curSup==="코니키즈"?21:14};
+        const r=await sb.insert("schedules",row);
         if(r&&r[0])setSchedules(p=>[r[0],...p]);
       }
-    }setChatInput("");
+    }
+    setChatInput("");
   };
-  const delSch=async(id)=>{await sb.remove("schedules",id);setSchedules(p=>p.filter(s=>s.id!==id));};
-  const filtered=filterSupplier==="전체"?schedules:schedules.filter(s=>(s.supplier||"").includes(filterSupplier));
-  const stCol=st=>({"생산중":"#F59E0B","선적완료":"#3B82F6","입고예정":"#8B5CF6","검수중":"#10B981","입고대기":"#D97706","입고완료":"#059669"}[st]||"#94A3B8");
+
+  const delSchedule=async(id)=>{await sb.remove("schedules",id);setSchedules(p=>p.filter(s=>s.id!==id));};
+
+  // 캘린더 데이터
+  const{year,month}=currentMonth;
+  const daysInMonth=new Date(year,month+1,0).getDate();
+  const firstDayOfWeek=new Date(year,month,1).getDay();
+  const monthStr=`${year}-${String(month+1).padStart(2,"0")}`;
+  const today=new Date().toISOString().slice(0,10);
+
+  const getEventsForDay=(day)=>{
+    const dayStr=`${monthStr}-${String(day).padStart(2,"0")}`;
+    const events=[];
+    schedules.forEach(s=>{
+      if(s.ship_date===dayStr)events.push({...s,eventType:"ship",label:"선적일"});
+      if(s.kr_date===dayStr||(!s.kr_date&&!s.ship_date&&s.date===dayStr))events.push({...s,eventType:"kr",label:"KR 한국 도착"});
+      if(s.oz_date===dayStr)events.push({...s,eventType:"oz",label:"오즈센터 도착"});
+    });
+    return events;
+  };
+  const evtColor=(type,sup)=>{
+    if(type==="ship")return{bg:"#DCFCE7",color:"#16A34A",icon:"🚢"};
+    if(type==="kr")return{bg:"#DBEAFE",color:"#2563EB",icon:"🇰🇷"};
+    return{bg:"#FDE8E8",color:"#DC2626",icon:"📦"};
+  };
+
+  // D-day 계산
+  const dday=(dateStr)=>{if(!dateStr)return"";const d=Math.ceil((new Date(dateStr)-new Date())/(86400000));return d<0?`${Math.abs(d)}일 지남`:d===0?"오늘":`D-${d}`;};
+  const ddayColor=(dateStr)=>{if(!dateStr)return"#94A3B8";const d=Math.ceil((new Date(dateStr)-new Date())/(86400000));return d<0?"#DC2626":d<=3?"#D97706":"#2563EB";};
 
   if(loading)return <SectionCard title="📅 입고 스케줄 관리"><div style={{textAlign:"center",padding:40,color:"#94A3B8"}}>⏳ 데이터 불러오는 중...</div></SectionCard>;
-  return(
-    <SectionCard title="📅 입고 스케줄 관리" subtitle="☁️ 서버 실시간 저장 · 카톡 대화 파싱"
-      actions={<div style={{display:"flex",gap:6}}>{["전체","자체제작","국내","수입-(복건)","수입-(광동)"].map(s=>(<SmallBtn key={s} primary={filterSupplier===s} onClick={()=>setFilterSupplier(s)}>{s.replace("수입-","")}</SmallBtn>))}</div>}>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 2fr",gap:20}}>
-        <div>
-          <label style={{fontSize:12,fontWeight:600,color:"#64748B",marginBottom:6,display:"block"}}>카톡 대화 입력</label>
-          <textarea value={chatInput} onChange={e=>setChatInput(e.target.value)} placeholder={"[자체제작]\n4/20 링거티 480장 입고\n\n[복건GL]\n5/5 엘리H 300장 선적완료"} style={{width:"100%",height:160,padding:14,borderRadius:10,border:"1px solid #E2E8F0",fontSize:13,background:"#FFFBEB",resize:"vertical",outline:"none",boxSizing:"border-box",lineHeight:1.6}} />
-          <div style={{marginTop:8,display:"flex",gap:8}}>
-            <SmallBtn primary onClick={parseChat}>일정 추출</SmallBtn>
-            <SmallBtn onClick={()=>{const i=document.createElement("input");i.type="file";i.accept="image/*";i.onchange=()=>alert("이미지 OCR 기능\n(실제 구현 시 OCR API 연동)");i.click();}}>📷 캡처본</SmallBtn>
-          </div>
-          <div style={{marginTop:16}}>
-            <div style={{fontSize:12,fontWeight:600,color:"#64748B",marginBottom:8}}>업체별 리드타임</div>
-            {[["자체제작","7일","#E8A87C"],["국내업체","14일","#85CDCA"],["수입업체","30일","#D5A4CF"]].map(([n,d,c])=>(
-              <div key={n} style={{display:"flex",justifyContent:"space-between",padding:"8px 12px",marginBottom:4,borderRadius:6,background:`${c}15`,border:`1px solid ${c}30`}}>
-                <span style={{fontSize:13,fontWeight:600,color:"#334155"}}>{n}</span><span style={{fontSize:12,color:"#64748B"}}>{d}</span>
-              </div>))}
-          </div>
-        </div>
-        <div>
-          <Table headers={["업체","입고 품목","입고일","상태","리드타임","D-Day",""]} maxH={380}>
-            {filtered.sort((a,b)=>(a.date||"").localeCompare(b.date||"")).map((s,i)=>{
-              const dd=Math.ceil((new Date(s.date)-new Date())/(1000*60*60*24));
-              return(<tr key={s.id||i}>
-                <Td><Badge color={getSupColor(s.supplier)}>{(s.supplier||"").length>12?(s.supplier||"").slice(0,12)+"…":s.supplier}</Badge></Td>
-                <Td style={{fontWeight:600}}>{s.item}</Td><Td>{s.date}</Td>
-                <Td><Badge color={stCol(s.status)}>{s.status}</Badge></Td>
-                <Td>{s.lead_days}일</Td>
-                <Td style={{fontWeight:700,color:dd<=0?"#059669":dd<=7?"#DC2626":"#64748B"}}>{dd<=0?"입고완료":`D-${dd}`}</Td>
-                <Td><SmallBtn danger onClick={()=>delSch(s.id)}>삭제</SmallBtn></Td>
-              </tr>);})}
-          </Table>
-        </div>
+
+  return(<>
+    {/* 헤더 */}
+    <div style={{background:"#FFF",borderRadius:14,padding:"20px 28px",border:"1px solid #E2E8F0",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10}}>
+        <span style={{fontSize:20}}>📅</span>
+        <span style={{fontSize:17,fontWeight:700,color:"#0F172A"}}>입고 스케줄 관리</span>
       </div>
-    </SectionCard>);
+      <div style={{fontSize:13,fontWeight:600,color:"#3B82F6"}}>{year}년 {month+1}월 {new Date().getDate()}일</div>
+    </div>
+
+    {/* 안내 */}
+    <div style={{padding:"12px 20px",borderRadius:10,background:"#FFFBEB",border:"1px solid #FDE68A",marginBottom:16,fontSize:12,color:"#92400E"}}>
+      💡 카카오톡 대화 내용을 붙여넣으면 AI가 자동으로 스케줄을 분석하거나, 직접 입력할 수 있습니다.
+    </div>
+
+    {/* 뷰 전환 */}
+    <div style={{display:"flex",gap:8,marginBottom:16}}>
+      <SmallBtn primary={viewMode==="calendar"} onClick={()=>setViewMode("calendar")}>📅 캘린더</SmallBtn>
+      <SmallBtn primary={viewMode==="supplier"} onClick={()=>setViewMode("supplier")}>🏢 업체별</SmallBtn>
+      <SmallBtn primary={viewMode==="input"} onClick={()=>setViewMode("input")}>✏️ 등록</SmallBtn>
+    </div>
+
+    {/* 캘린더 뷰 */}
+    {viewMode==="calendar"&&<SectionCard title={`${year}년 ${month+1}월`} actions={
+      <div style={{display:"flex",gap:6}}>
+        <SmallBtn onClick={()=>setCurrentMonth(p=>{let m=p.month-1,y=p.year;if(m<0){m=11;y--;}return{year:y,month:m};})}>◀ 이전</SmallBtn>
+        <SmallBtn primary onClick={()=>{const d=new Date();setCurrentMonth({year:d.getFullYear(),month:d.getMonth()});}}>오늘</SmallBtn>
+        <SmallBtn onClick={()=>setCurrentMonth(p=>{let m=p.month+1,y=p.year;if(m>11){m=0;y++;}return{year:y,month:m};})}>다음 ▶</SmallBtn>
+      </div>
+    }>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:1,background:"#E2E8F0",borderRadius:10,overflow:"hidden"}}>
+        {["일","월","화","수","목","금","토"].map((d,i)=>(<div key={d} style={{textAlign:"center",padding:"8px 4px",fontSize:12,fontWeight:700,color:i===0?"#DC2626":i===6?"#2563EB":"#64748B",background:"#F8FAFC"}}>{d}</div>))}
+        {Array.from({length:firstDayOfWeek},(_,i)=>(<div key={`e${i}`} style={{background:"#FAFAFA",minHeight:100}} />))}
+        {Array.from({length:daysInMonth},(_,i)=>{
+          const day=i+1;const dayStr=`${monthStr}-${String(day).padStart(2,"0")}`;
+          const events=getEventsForDay(day);
+          const isToday=dayStr===today;
+          const dow=(firstDayOfWeek+i)%7;
+          return(<div key={day} style={{background:isToday?"#EFF6FF":"#FFF",minHeight:100,padding:6,position:"relative",borderTop:isToday?"2px solid #3B82F6":"none"}}>
+            <div style={{fontSize:12,fontWeight:isToday?800:500,color:isToday?"#2563EB":dow===0?"#DC2626":dow===6?"#2563EB":"#334155",marginBottom:4}}>{day}</div>
+            {events.slice(0,3).map((ev,j)=>{const ec=evtColor(ev.eventType,ev.supplier);return(
+              <div key={j} style={{padding:"3px 6px",borderRadius:4,marginBottom:2,background:ec.bg,fontSize:10,lineHeight:1.4}}>
+                <div style={{color:ec.color,fontWeight:600}}>{ec.icon} {ev.label}</div>
+                <div style={{fontWeight:700,color:"#1E293B",fontSize:11}}>{ev.item}</div>
+                {ev.qty>0&&<div style={{color:"#64748B"}}>{ev.qty.toLocaleString()}장</div>}
+              </div>);})}
+            {events.length>3&&<div style={{fontSize:9,color:"#94A3B8",textAlign:"center"}}>+{events.length-3}건</div>}
+          </div>);
+        })}
+      </div>
+    </SectionCard>}
+
+    {/* 업체별 뷰 */}
+    {viewMode==="supplier"&&<div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16}}>
+      {SUPPLIERS.map(sup=>{
+        const st=SUP_STYLES[sup];
+        const items=schedules.filter(s=>s.supplier===sup).sort((a,b)=>(a.kr_date||a.date||"").localeCompare(b.kr_date||b.date||""));
+        return(<div key={sup} style={{background:st.bg,borderRadius:14,border:`1px solid ${st.color}20`,overflow:"hidden"}}>
+          <div style={{padding:"12px 18px",background:`${st.color}15`,borderBottom:`1px solid ${st.color}20`}}>
+            <span style={{fontSize:14,fontWeight:700,color:st.color}}>{st.icon} {sup}</span>
+          </div>
+          <div style={{padding:12,maxHeight:500,overflowY:"auto"}}>
+            {items.length>0?items.map((s,i)=>(<div key={s.id||i} style={{background:"#FFF",borderRadius:10,padding:"12px 14px",marginBottom:8,border:"1px solid #E2E8F0",position:"relative"}}>
+              <button onClick={()=>delSchedule(s.id)} style={{position:"absolute",top:8,right:8,background:"none",border:"none",cursor:"pointer",fontSize:16,color:"#94A3B8"}}>×</button>
+              {s.ship_date&&<div style={{fontSize:11,color:"#16A34A",fontWeight:600}}>🚢 선적일: {s.ship_date}</div>}
+              <div style={{fontSize:11,color:"#64748B"}}>🇰🇷 한국 도착: {s.kr_date||s.date||"-"}</div>
+              {s.oz_date&&<div style={{fontSize:11,display:"flex",alignItems:"center",gap:4}}>
+                📦 <span style={{fontWeight:600}}>오즈센터: {s.oz_date}</span>
+                <span style={{padding:"1px 6px",borderRadius:3,fontSize:10,fontWeight:700,color:ddayColor(s.oz_date),background:`${ddayColor(s.oz_date)}15`}}>{dday(s.oz_date)}</span>
+              </div>}
+              <div style={{fontSize:15,fontWeight:800,color:"#1E293B",marginTop:6}}>{s.item}</div>
+              <div style={{fontSize:13,color:"#334155",marginTop:2}}>{s.qty?s.qty.toLocaleString():""} {s.qty?"장":""}</div>
+              {s.ship_type&&<div style={{fontSize:11,color:"#94A3B8"}}>{s.ship_type}</div>}
+            </div>)):(
+              <div style={{textAlign:"center",padding:30,color:"#94A3B8"}}>
+                <div style={{fontSize:30,marginBottom:8}}>📭</div>
+                <div style={{fontSize:13}}>스케줄 없음</div>
+              </div>
+            )}
+          </div>
+        </div>);
+      })}
+    </div>}
+
+    {/* 등록 뷰 */}
+    {viewMode==="input"&&<>
+      {/* AI 스케줄 분석 */}
+      <SectionCard title="🤖 AI 스케줄 분석" subtitle="카카오톡 대화 내용 붙여넣기">
+        <textarea value={chatInput} onChange={e=>setChatInput(e.target.value)} placeholder={"예시:\n[인도] 오전 10:45\n다음주 화요일에 브이넥티 300장 입고 예정입니다\n리드타임은 14일이에요\n\n[성은교역] 오후 2:13\n린넨팬츠 500장 4/5 입고..."} style={{width:"100%",height:120,padding:14,borderRadius:10,border:"1px solid #E2E8F0",fontSize:13,background:"#F8FAFC",resize:"vertical",outline:"none",boxSizing:"border-box",lineHeight:1.6}} />
+        <div style={{marginTop:10,display:"flex",gap:8}}>
+          <SmallBtn primary onClick={parseChat}>🤖 AI 분석</SmallBtn>
+          <SmallBtn onClick={()=>alert("엑셀 다운로드 기능\n(구현 예정)")}>📊 엑셀 다운로드</SmallBtn>
+          <SmallBtn danger onClick={async()=>{if(window.confirm("전체 스케줄을 삭제하시겠습니까?")){for(const s of schedules)await sb.remove("schedules",s.id);setSchedules([]);}}}>🗑 전체 삭제</SmallBtn>
+        </div>
+      </SectionCard>
+
+      {/* 직접 등록 */}
+      <SectionCard title="✏️ 직접 등록">
+        <div style={{display:"grid",gridTemplateColumns:"120px 1fr 100px 140px 140px 140px 1fr 100px",gap:10,alignItems:"end"}}>
+          <div>
+            <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>업체</div>
+            <select value={formSupplier} onChange={e=>setFormSupplier(e.target.value)} style={{width:"100%",padding:"8px 10px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:12,outline:"none"}}>
+              {SUPPLIERS.map(s=><option key={s}>{s}</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>상품명</div>
+            <Input value={formName} onChange={e=>setFormName(e.target.value)} placeholder="상품명 입력" />
+          </div>
+          <div>
+            <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>수량</div>
+            <Input value={formQty} onChange={e=>setFormQty(e.target.value)} placeholder="수량" type="number" />
+          </div>
+          <div>
+            <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>🚢 선적일</div>
+            <Input type="date" value={formShipDate} onChange={e=>setFormShipDate(e.target.value)} />
+          </div>
+          <div>
+            <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>🇰🇷 한국 도착일</div>
+            <Input type="date" value={formKrDate} onChange={e=>handleKrDate(e.target.value)} />
+          </div>
+          <div>
+            <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>📦 오즈센터 도착일 (+3일)</div>
+            <Input type="date" value={formOzDate} onChange={e=>setFormOzDate(e.target.value)} />
+          </div>
+          <div>
+            <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>비고</div>
+            <Input value={formNote} onChange={e=>setFormNote(e.target.value)} placeholder="메모" />
+          </div>
+          <SmallBtn primary onClick={addSchedule}>✅ 등록</SmallBtn>
+        </div>
+      </SectionCard>
+    </>}
+  </>);
 }
 
 // ─── Tab 4: 샘플 진행 (Supabase) ───
@@ -1433,10 +1703,11 @@ export default function Dashboard(){
     setReorderLoading(false);
   })();},[]);
 
-  const reorderUrgent=useMemo(()=>reorderData.filter(r=>{const d=Math.round(r.exhaustDays||0);return d<=60;}).sort((a,b)=>(a.exhaustDays||0)-(b.exhaustDays||0)),[reorderData]);
-  const reorderWarning=useMemo(()=>reorderData.filter(r=>{const d=Math.round(r.exhaustDays||0);return d>60&&d<=75;}),[reorderData]);
-  const reorderReview=useMemo(()=>reorderData.filter(r=>{const d=Math.round(r.exhaustDays||0);return d>75&&d<=90;}),[reorderData]);
+  const reorderUrgent=useMemo(()=>reorderData.filter(r=>{const d=Math.round(r.exhaustDays||0);const s=Math.round(r.stock||0);return d>0&&s>0&&d<=60;}).sort((a,b)=>(a.exhaustDays||0)-(b.exhaustDays||0)),[reorderData]);
+  const reorderWarning=useMemo(()=>reorderData.filter(r=>{const d=Math.round(r.exhaustDays||0);const s=Math.round(r.stock||0);return d>0&&s>0&&d>60&&d<=75;}),[reorderData]);
+  const reorderReview=useMemo(()=>reorderData.filter(r=>{const d=Math.round(r.exhaustDays||0);const s=Math.round(r.stock||0);return d>0&&s>0&&d>75&&d<=90;}),[reorderData]);
   const reorderSafe=useMemo(()=>reorderData.filter(r=>{const d=Math.round(r.exhaustDays||0);return d>90;}),[reorderData]);
+  const reorderActionItems=useMemo(()=>[...reorderUrgent,...reorderWarning,...reorderReview].sort((a,b)=>(a.exhaustDays||0)-(b.exhaustDays||0)),[reorderUrgent,reorderWarning,reorderReview]);
   const skuImgMap=useMemo(()=>{const m={};SKUS.forEach(s=>{if(s[F.IMG]&&!m[s[F.CODE]])m[s[F.CODE]]=s[F.IMG];});return m;},[]);
 
   const tabs=[
@@ -1476,14 +1747,14 @@ export default function Dashboard(){
             <div>
               <div style={{fontSize:11,fontWeight:600,color:"#DC2626",letterSpacing:0.5,textTransform:"uppercase",marginBottom:6}}>🔄 리오더 긴급발주</div>
               {reorderLoading?<div style={{fontSize:14,color:"#94A3B8"}}>불러오는 중...</div>
-              :<div style={{fontSize:36,fontWeight:800,color:"#DC2626",letterSpacing:-1.5}}>{reorderUrgent.length}<span style={{fontSize:14,fontWeight:500,color:"#FCA5A5",marginLeft:4}}>건</span></div>}
-              {!reorderLoading&&<div style={{fontSize:12,color:"#6B7280",marginTop:6}}>소진 60일 이내 · 발주검토 {reorderWarning.length}건</div>}
+              :<div style={{fontSize:36,fontWeight:800,color:"#DC2626",letterSpacing:-1.5}}>{reorderActionItems.length}<span style={{fontSize:14,fontWeight:500,color:"#FCA5A5",marginLeft:4}}>건</span></div>}
+              {!reorderLoading&&<div style={{fontSize:12,color:"#6B7280",marginTop:6}}>긴급 {reorderUrgent.length} · 필요 {reorderWarning.length} · 검토 {reorderReview.length}</div>}
             </div>
             <div style={{width:48,height:48,borderRadius:12,background:"#DC262620",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>🚨</div>
           </div>
           {!reorderLoading&&<div style={{marginTop:14,display:"flex",gap:6,flexWrap:"wrap"}}>
-            {reorderUrgent.slice(0,3).map((r,i)=>(<div key={i} style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"#FEE2E2",color:"#DC2626",fontWeight:600}}>{(r.name||"").slice(0,10)} 소진{Math.round(r.exhaustDays)}일</div>))}
-            {reorderUrgent.length>3&&<div style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"#FEE2E2",color:"#DC2626",fontWeight:600}}>+{reorderUrgent.length-3}건</div>}
+            {reorderActionItems.slice(0,3).map((r,i)=>{const d=Math.round(r.exhaustDays||0);const c=d<=60?"#DC2626":d<=75?"#D97706":"#2563EB";return(<div key={i} style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:`${c}15`,color:c,fontWeight:600}}>{(r.name||"").slice(0,10)} {Math.round(d)}일</div>);})}
+            {reorderActionItems.length>3&&<div style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"#FEE2E2",color:"#DC2626",fontWeight:600}}>+{reorderActionItems.length-3}건</div>}
           </div>}
         </div>
 
@@ -1505,28 +1776,33 @@ export default function Dashboard(){
 
       {/* 하단: 왼쪽=리오더 긴급발주, 오른쪽=입고대기+샘플진행 */}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
-        {/* 왼쪽: 리오더 긴급발주 상세 */}
-        <SectionCard title="🔄 리오더 긴급발주 — 소진임박 품목">
+        {/* 왼쪽: 리오더 발주 필요 품목 */}
+        <SectionCard title="🔄 리오더 — 발주 필요 품목">
           {reorderLoading?<div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:13}}>⏳ 구글시트 데이터 불러오는 중...</div>
-          :reorderUrgent.length>0?reorderUrgent.slice(0,7).map((r,i)=>{
+          :reorderActionItems.length>0?reorderActionItems.slice(0,8).map((r,i)=>{
             const d=Math.round(r.exhaustDays||0);
-            const isRed=d<=30;
+            const st=d<=60?"긴급발주":d<=75?"발주필요":"발주검토";
+            const stColor=d<=60?"#DC2626":d<=75?"#D97706":"#2563EB";
+            const stBg=d<=60?"#FEF2F2":d<=75?"#FFFBEB":"#EFF6FF";
             return(
-            <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",borderRadius:8,background:isRed?"#FEF2F2":"#FFFBEB",border:`1px solid ${isRed?"#FECACA":"#FDE68A"}`,marginBottom:6}}>
+            <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",borderRadius:8,background:stBg,border:`1px solid ${stColor}20`,marginBottom:6}}>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
                 {skuImgMap[r.code]&&<div style={{width:36,height:36,borderRadius:6,overflow:"hidden",border:"1px solid #E2E8F0",flexShrink:0}}><img src={skuImgMap[r.code]} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{e.target.style.display="none";}}/></div>}
                 <div>
-                  <div style={{fontSize:12,fontWeight:700,color:isRed?"#DC2626":"#D97706"}}>{r.name} {r.option}</div>
-                  <div style={{fontSize:11,color:"#6B7280",marginTop:1}}>{r.code} · 소진 {d}일</div>
+                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                    <span style={{padding:"1px 6px",borderRadius:3,fontSize:9,fontWeight:700,color:stColor,background:`${stColor}15`}}>{st}</span>
+                    <span style={{fontSize:12,fontWeight:700,color:"#334155"}}>{r.name}</span>
+                  </div>
+                  <div style={{fontSize:11,color:"#6B7280",marginTop:1}}>{r.code} {r.option} · 소진 {d}일</div>
                 </div>
               </div>
               <div style={{textAlign:"right"}}>
-                <div style={{fontSize:16,fontWeight:800,color:isRed?"#DC2626":"#D97706"}}>{Math.round(r.stock)}개</div>
+                <div style={{fontSize:16,fontWeight:800,color:stColor}}>{Math.round(r.stock)}개</div>
                 <div style={{fontSize:10,color:"#94A3B8"}}>현재고</div>
               </div>
             </div>);
-          }):<div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:13}}>긴급발주 항목이 없습니다</div>}
-          {reorderUrgent.length>7&&<div style={{textAlign:"center",fontSize:12,color:"#94A3B8",marginTop:4,cursor:"pointer"}} onClick={()=>setActiveTab("reorder")}>외 {reorderUrgent.length-7}건 더보기 → 리오더 탭</div>}
+          }):<div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:13}}>발주 필요 항목이 없습니다</div>}
+          {reorderActionItems.length>8&&<div style={{textAlign:"center",fontSize:12,color:"#94A3B8",marginTop:4,cursor:"pointer"}} onClick={()=>setActiveTab("reorder")}>외 {reorderActionItems.length-8}건 더보기 → 리오더 탭</div>}
         </SectionCard>
 
         {/* 오른쪽: 입고대기 현황 + 샘플 진행 현황 */}
