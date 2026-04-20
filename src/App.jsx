@@ -868,7 +868,8 @@ function ReorderTab(){
   // 상태 판별
   const getStatus=(item,type)=>{
     const d=Math.round(item.exhaustDays||0);
-    if(d===0)return"품절";
+    const s=Math.round(item.stock||0);
+    if(d===0||s===0)return"품절";
     if(d<=60)return"긴급발주";
     if(d<=75)return"발주필요";
     if(d<=90)return"발주검토";
