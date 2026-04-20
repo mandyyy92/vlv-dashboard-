@@ -710,25 +710,126 @@ function ScheduleTab(){
   // AI 카톡 파싱
   const parseChat=async()=>{
     if(!chatInput.trim())return;
-    const lines=chatInput.split("\n");let curSup="인도";
+    // 영문 월 매핑
+    const MON={JAN:"01",FEB:"02",MAR:"03",APR:"04",APRIL:"04",MAY:"05",JUN:"06",JUNE:"06",JUL:"07",JULY:"07",AUG:"08",SEP:"09",OCT:"10",NOV:"11",DEC:"12",JANUARY:"01",FEBRUARY:"02",MARCH:"03",AUGUST:"08",SEPTEMBER:"09",OCTOBER:"10",NOVEMBER:"11",DECEMBER:"12"};
+
+    // 전체 텍스트를 하나로 합쳐서 분석
+    const text=chatInput.trim();
+    const lines=text.split("\n").filter(l=>l.trim());
+    let curSup="인도";
+    let curShipType="";
+    const parsed=[];
+
+    // 날짜 추출 함수
+    const extractDate=(str)=>{
+      // "08 April" / "April 10" / "10th April" / "3 April" / "April 3"
+      const engMatch=str.match(/(\d{1,2})(?:st|nd|rd|th)?\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)/i)
+        ||str.match(/(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?/i);
+      if(engMatch){
+        let day,monStr;
+        if(/^\d/.test(engMatch[1])){day=engMatch[1];monStr=engMatch[2];}
+        else{monStr=engMatch[1];day=engMatch[2];}
+        const mo=MON[monStr.toUpperCase()]||MON[monStr.toUpperCase().slice(0,3)];
+        if(mo)return`2026-${mo}-${day.padStart(2,"0")}`;
+      }
+      // "4/8" / "4-8" / "4.8"
+      const numMatch=str.match(/(\d{1,2})[\/.\-](\d{1,2})/);
+      if(numMatch)return`2026-${numMatch[1].padStart(2,"0")}-${numMatch[2].padStart(2,"0")}`;
+      return null;
+    };
+
+    // 수량 추출 함수
+    const extractQty=(str)=>{
+      const m=str.match(/([\d,]+)\s*(?:pcs|장|ea|개|PCS)/i)||str.match(/(?:Approx\.?\s*)([\d,]+)\s*(?:pcs|장)?/i);
+      if(m)return parseInt(m[1].replace(/,/g,""));
+      return 0;
+    };
+
+    // 상품명 추출 (숫자, 날짜, 키워드 제거)
+    const extractName=(str)=>{
+      return str
+        .replace(/\d{1,2}(?:st|nd|rd|th)?\s*(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)/gi,"")
+        .replace(/(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s*\d{1,2}(?:st|nd|rd|th)?/gi,"")
+        .replace(/[\d,]+\s*(?:pcs|장|ea)/gi,"")
+        .replace(/Approx\.?/gi,"")
+        .replace(/Delivery\s*Date\s*Korea:?/gi,"")
+        .replace(/will\s+(?:also\s+)?be\s+(?:dispatched|delivered|shipped|ready)/gi,"")
+        .replace(/(?:from|on|in)\s+(?:the\s+)?(?:factory|Korea)/gi,"")
+        .replace(/(?:are\s+)?packed\s+ready/gi,"")
+        .replace(/Air\s+Shipment:?|Sea\s+Shipment:?/gi,"")
+        .replace(/[인도|코니키즈|성은교역]/g,"")
+        .replace(/[\/.\-]/g," ")
+        .replace(/\s+/g," ").trim();
+    };
+
+    // 멀티라인 분석: 여러 줄에 걸쳐 정보가 분산될 수 있음
+    // 전체를 한 덩어리씩 나누기 (빈줄 또는 날짜 기준)
+    let buffer="";
+    const chunks=[];
     for(const line of lines){
-      const l=line.trim();if(!l)continue;
-      if(l.includes("인도"))curSup="인도";else if(l.includes("코니키즈")||l.includes("코니"))curSup="코니키즈";else if(l.includes("성은교역")||l.includes("성은"))curSup="성은교역";
-      const dm=l.match(/(\d{1,2})[\/.\-](\d{1,2})/);
-      if(dm){
-        const mo=dm[1].padStart(2,"0"),dy=dm[2].padStart(2,"0");
-        const dateStr=`2026-${mo}-${dy}`;
-        const itemText=l.replace(/\d{1,2}[\/.\-]\d{1,2}/g,"").replace(/\[.*?\]/g,"").replace(/인도|코니키즈|성은교역|오전|오후|\d{1,2}:\d{2}/g,"").trim();
-        const qtyMatch=l.match(/(\d{1,6})\s*장/);const qty=qtyMatch?parseInt(qtyMatch[1]):0;
-        const nameText=itemText.replace(/\d{1,6}\s*장/,"").replace(/입고|예정|완료|선적/g,"").trim()||"입고건";
-        const krDate=dateStr;const ozD=new Date(krDate);ozD.setDate(ozD.getDate()+3);
-        const row={supplier:curSup,item:nameText,qty,ship_date:null,kr_date:krDate,oz_date:ozD.toISOString().slice(0,10),
-          ship_type:"",note:"",status:"입고예정",date:krDate,lead_days:curSup==="인도"?30:curSup==="코니키즈"?21:14};
-        const r=await sb.insert("schedules",row);
-        if(r&&r[0])setSchedules(p=>[r[0],...p]);
+      const l=line.trim();
+      if(!l){if(buffer)chunks.push(buffer);buffer="";continue;}
+      // 업체 감지
+      if(/인도/i.test(l))curSup="인도";
+      if(/코니키즈|코니/i.test(l))curSup="코니키즈";
+      if(/성은교역|성은/i.test(l))curSup="성은교역";
+      // shipment type
+      if(/Air\s+Shipment/i.test(l))curShipType="Air Shipment";
+      if(/Sea\s+Shipment/i.test(l))curShipType="Sea Shipment";
+      buffer+=(buffer?" ":"")+l;
+    }
+    if(buffer)chunks.push(buffer);
+
+    // 각 청크 분석
+    let addedCount=0;
+    for(const chunk of chunks){
+      // 여러 아이템이 "-"로 구분될 수 있음
+      // "1,600pcs - Graychill 2000 pcs - Pigment Tees are packed ready"
+      const subItems=chunk.split(/\s+-\s+/).filter(s=>s.trim());
+      const chunkDate=extractDate(chunk);
+      const chunkShipType=/Air\s+Shipment/i.test(chunk)?"Air Shipment":/Sea\s+Shipment/i.test(chunk)?"Sea Shipment":curShipType;
+
+      // 날짜가 포함된 아이템과 아닌 아이템 분리
+      for(const sub of subItems){
+        const qty=extractQty(sub);
+        const date=extractDate(sub)||chunkDate;
+        const name=extractName(sub);
+        if(!name&&!qty)continue;
+        if(name||qty){
+          parsed.push({supplier:curSup,item:name||"입고건",qty,krDate:date,shipType:chunkShipType});
+        }
+      }
+
+      // 서브아이템이 없는 경우 전체 청크를 하나로
+      if(subItems.length<=1&&!parsed.find(p=>p===parsed[parsed.length-1])){
+        const qty=extractQty(chunk);
+        const name=extractName(chunk);
+        if((name||qty)&&!parsed.find(p=>p.item===name&&p.krDate===chunkDate)){
+          parsed.push({supplier:curSup,item:name||"입고건",qty,krDate:chunkDate,shipType:chunkShipType});
+        }
       }
     }
+
+    // 중복 제거 및 Supabase 저장
+    const seen=new Set();
+    for(const p of parsed){
+      const key=`${p.item}_${p.qty}_${p.krDate}`;
+      if(seen.has(key)||(!p.item&&!p.qty))continue;
+      seen.add(key);
+      const krDate=p.krDate;
+      const ozD=krDate?new Date(krDate):null;
+      if(ozD)ozD.setDate(ozD.getDate()+3);
+      const row={supplier:p.supplier,item:p.item,qty:p.qty,
+        ship_date:null,kr_date:krDate,oz_date:ozD?ozD.toISOString().slice(0,10):null,
+        ship_type:p.shipType||"",note:"",status:"입고예정",
+        date:krDate||new Date().toISOString().slice(0,10),
+        lead_days:p.supplier==="인도"?30:p.supplier==="코니키즈"?21:14};
+      const r=await sb.insert("schedules",row);
+      if(r&&r[0]){setSchedules(prev=>[r[0],...prev]);addedCount++;}
+    }
     setChatInput("");
+    if(addedCount>0)alert(`${addedCount}건의 스케줄이 등록되었습니다.`);
+    else alert("스케줄을 파싱할 수 없습니다. 날짜와 상품 정보를 확인해주세요.");
   };
 
   const delSchedule=async(id)=>{await sb.remove("schedules",id);setSchedules(p=>p.filter(s=>s.id!==id));};
