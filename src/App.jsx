@@ -1256,6 +1256,13 @@ function ReorderTab(){
     return true;
   });
   const sorted=[...filtered].sort((a,b)=>{
+    // 1차: 상품명 가나다순
+    const nameComp=(a.name||"").localeCompare(b.name||"","ko");
+    if(nameComp!==0)return nameComp;
+    // 2차: 옵션 가나다순 (같은 상품끼리 묶기)
+    const optComp=(a.option||"").localeCompare(b.option||"","ko");
+    if(optComp!==0)return optComp;
+    // 3차: 사용자 선택 정렬
     const av=a[sortCol]??0,bv=b[sortCol]??0;
     if(typeof av==="string")return sortAsc?av.localeCompare(bv):bv.localeCompare(av);
     return sortAsc?av-bv:bv-av;
@@ -1505,16 +1512,10 @@ function OrderTrackingTab(){
     reader.onload=async(ev)=>{
       try{
         const data=new Uint8Array(ev.target.result);
-        // xlsx를 CSV 텍스트로 변환하는 대신 HTML table 파싱 또는 텍스트 파싱
-        // 브라우저에서 xlsx 직접 파싱은 어려우므로 xls(HTML) 또는 csv 지원
-        // SheetJS가 있으면 사용
-        let workbook;
-        if(typeof XLSX!=="undefined"){workbook=XLSX.read(data,{type:"array"});}
-        else{
-          // XLSX 라이브러리 동적 로드
+        if(typeof XLSX==="undefined"){
           await new Promise((res,rej)=>{const s=document.createElement("script");s.src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";s.onload=res;s.onerror=rej;document.head.appendChild(s);});
-          workbook=XLSX.read(data,{type:"array"});
         }
+        const workbook=XLSX.read(data,{type:"array"});
         const allItems=[];
         const orderName=file.name.replace(/\.[^.]+$/,"");
 
@@ -1522,90 +1523,94 @@ function OrderTrackingTab(){
           const ws=workbook.Sheets[sheetName];
           const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:""});
           
-          // Row 4: STYLE NO, 상품명, 작업처
+          // Row 3~4: STYLE NO, 상품명, 작업처
           let styleNo="",productName="",supplier="";
           for(let i=0;i<Math.min(6,rows.length);i++){
-            const r=rows[i]||[];
-            const joined=r.join(" ");
-            if(/STYLE/i.test(joined)){
-              const next=rows[i+1]||[];
-              styleNo=String(next[1]||"").trim();
-              productName=String(next[2]||"").trim();
-              supplier=String(next[3]||"").trim();
+            const r=(rows[i]||[]).map(v=>String(v||""));
+            if(r.some(v=>/STYLE/i.test(v))){
+              const nr=(rows[i+1]||[]).map(v=>String(v||""));
+              styleNo=(nr[1]||"").trim();
+              productName=(nr[2]||"").trim();
+              supplier=(nr[3]||"").trim();
               break;
             }
           }
           if(!styleNo)continue;
 
-          // COLOR/SIZE 테이블 찾기 (row 25~40)
-          let sizeRow=-1,colorStartRow=-1;
-          let sizes=[];
-          for(let i=25;i<Math.min(rows.length,42);i++){
-            const r=rows[i]||[];
-            const joined=r.map(v=>String(v||"")).join(" ");
-            if(/COLOR/i.test(joined)&&(/SIZE/i.test(joined)||/Q'?[Tt][Yy]/i.test(joined))){
-              // 다음 행에 사이즈 라벨
-              const nextR=rows[i+1]||[];
-              sizes=nextR.map(v=>String(v||"").trim()).filter(v=>/^(S|M|L|XL|2XL|3XL|XXL|FREE|F|OS|\d+\(\d+\)|M\(\d+\)|L\(\d+\)|XL\(\d+\))$/i.test(v));
-              if(sizes.length===0){
-                // 사이즈가 같은 행에 있을 수 있음
-                sizes=r.map(v=>String(v||"").trim()).filter(v=>/^(S|M|L|XL|2XL|3XL|XXL|FREE|F|OS)$/i.test(v));
-              }
-              colorStartRow=i+2;
-              break;
+          // COLOR/SIZE/Q'TY 테이블 찾기 - row 20 이후에서 COLOR+SIZE 또는 COLOR+Q'TY가 같은 행에 있는 경우
+          let tableRow=-1;
+          for(let i=20;i<Math.min(rows.length,42);i++){
+            const r=(rows[i]||[]).map(v=>String(v||"").trim());
+            const hasColor=r.some(v=>/^COLOR$/i.test(v));
+            const hasSizeOrQty=r.some(v=>/^SIZE$/i.test(v)||/Q.*T/i.test(v));
+            if(hasColor&&hasSizeOrQty){tableRow=i;break;}
+          }
+          if(tableRow<0)continue;
+
+          // 사이즈 라벨 추출 (다음 행, col 14~18 부근)
+          const sizeRow=(rows[tableRow+1]||[]).map(v=>String(v||"").trim());
+          const sizes=[];const sizeIdxs=[];
+          for(let j=14;j<sizeRow.length;j++){
+            const v=sizeRow[j];
+            if(/^(S|M|L|XL|2XL|3XL|XXL|FREE|F|OS)$/i.test(v)||/^M\(/.test(v)||/^L\(/.test(v)||/^XL\(/.test(v)){
+              sizes.push(v.replace(/\(.*\)/,"").trim());sizeIdxs.push(j);
             }
           }
-          if(colorStartRow<0||sizes.length===0)continue;
+          // 사이즈가 없으면 tableRow 자체에서 찾기
+          if(sizes.length===0){
+            const tr=(rows[tableRow]||[]).map(v=>String(v||"").trim());
+            for(let j=14;j<tr.length;j++){
+              const v=tr[j];
+              if(/^(S|M|L|XL|2XL|3XL|XXL|FREE|F|OS)$/i.test(v)){sizes.push(v);sizeIdxs.push(j);}
+            }
+          }
 
-          // 컬러 행 파싱
-          for(let i=colorStartRow;i<Math.min(rows.length,colorStartRow+10);i++){
-            const r=rows[i]||[];
-            const rStr=r.map(v=>String(v||"").trim());
-            
-            // 컬러 찾기 (숫자가 아니고, 빈값이 아니고, 키워드가 아닌 셀)
-            let colorIdx=-1,color="";
-            for(let j=0;j<rStr.length;j++){
-              const v=rStr[j];
-              if(v&&v.length>=2&&!/^\d+$/.test(v)&&!/^총수량|^SIZE|^Q'|^0$/i.test(v)&&!/^\*/.test(v)){
-                // 숫자가 뒤따르는지 확인 (수량이 있는 행인지)
-                const hasNums=rStr.slice(j+1).some(x=>/^\d+$/.test(x)&&parseInt(x)>0);
-                if(hasNums){color=v;colorIdx=j;break;}
+          // 컬러+수량 행 파싱 (tableRow+2부터)
+          for(let i=tableRow+2;i<Math.min(rows.length,tableRow+12);i++){
+            const r=(rows[i]||[]).map(v=>String(v||"").trim());
+            // col 14 부근에서 컬러 찾기
+            let color="";
+            for(let j=11;j<=14;j++){
+              const v=r[j]||"";
+              if(v&&v.length>=2&&!/^\d+$/.test(v)&&!/^총수량|^0$|^SIZE/i.test(v)&&!/^\*/.test(v)){
+                color=v.replace(/\(\d+\)/g,"").trim();
+                break;
               }
             }
             if(!color||color==="총수량")continue;
-            
-            // 수량 추출 - 사이즈 개수만큼 숫자 추출
-            const nums=[];
-            for(let j=colorIdx+1;j<rStr.length;j++){
-              const n=parseInt(String(rStr[j]).replace(/,/g,""));
-              if(!isNaN(n)&&n>=0)nums.push(n);
-              if(nums.length>=sizes.length+1)break; // +1 for total
-            }
-            
-            // 사이즈별 아이템 생성
-            for(let si=0;si<sizes.length&&si<nums.length;si++){
-              const qty=nums[si];
-              if(qty>0){
-                allItems.push({
-                  order_name:orderName,style_no:styleNo,product_name:productName,
-                  supplier,color:color.replace(/\(\d+\)/g,"").trim(),
-                  size:sizes[si].replace(/\(\d+\)/g,"").trim(),
-                  order_qty:qty,sheet_name:sheetName
-                });
+
+            // 사이즈별 수량 추출
+            if(sizeIdxs.length>0){
+              for(let si=0;si<sizes.length;si++){
+                const idx=sizeIdxs[si];
+                const qVal=r[idx]||"0";
+                const qty=parseInt(String(qVal).replace(/,/g,""));
+                if(qty>0){
+                  allItems.push({order_name:orderName,style_no:styleNo,product_name:productName,supplier,color,size:sizes[si],order_qty:qty,sheet_name:sheetName});
+                }
+              }
+            }else{
+              // 사이즈 인덱스 없으면 col 15~18에서 숫자 추출
+              const nums=[];
+              for(let j=15;j<Math.min(r.length,20);j++){
+                const n=parseInt(String(r[j]).replace(/,/g,""));
+                if(!isNaN(n)&&n>0)nums.push(n);
+              }
+              if(nums.length>0){
+                const total=nums.reduce((a,b)=>a+b,0);
+                allItems.push({order_name:orderName,style_no:styleNo,product_name:productName,supplier,color,size:"ALL",order_qty:total,sheet_name:sheetName});
               }
             }
           }
         }
 
-        if(allItems.length===0){alert("작업지시서에서 데이터를 파싱할 수 없습니다.");return;}
-
-        // Supabase 저장
+        if(allItems.length===0){alert("작업지시서에서 데이터를 파싱할 수 없습니다.\n시트 내 COLOR/SIZE 테이블을 확인해주세요.");return;}
         let count=0;
         for(const item of allItems){
           const r=await sb.insert("orders",item);
           if(r&&r[0]){setOrders(p=>[r[0],...p]);count++;}
         }
-        alert(`${count}건의 오더 데이터가 등록되었습니다.`);
+        alert(count+"건의 오더 데이터가 등록되었습니다.");
       }catch(e){alert("파일 파싱 오류: "+e.message);console.error(e);}
     };
     reader.readAsArrayBuffer(file);
