@@ -710,120 +710,116 @@ function ScheduleTab(){
   // AI 카톡 파싱
   const parseChat=async()=>{
     if(!chatInput.trim())return;
-    // 영문 월 매핑
     const MON={JAN:"01",FEB:"02",MAR:"03",APR:"04",APRIL:"04",MAY:"05",JUN:"06",JUNE:"06",JUL:"07",JULY:"07",AUG:"08",SEP:"09",OCT:"10",NOV:"11",DEC:"12",JANUARY:"01",FEBRUARY:"02",MARCH:"03",AUGUST:"08",SEPTEMBER:"09",OCTOBER:"10",NOVEMBER:"11",DECEMBER:"12"};
-
-    // 전체 텍스트를 하나로 합쳐서 분석
     const text=chatInput.trim();
-    const lines=text.split("\n").filter(l=>l.trim());
-    let curSup="인도";
-    let curShipType="";
-    const parsed=[];
+    let curSup="인도";let addedCount=0;
 
-    // 날짜 추출 함수
-    const extractDate=(str)=>{
-      // "08 April" / "April 10" / "10th April" / "3 April" / "April 3"
-      const engMatch=str.match(/(\d{1,2})(?:st|nd|rd|th)?\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)/i)
-        ||str.match(/(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?/i);
-      if(engMatch){
-        let day,monStr;
-        if(/^\d/.test(engMatch[1])){day=engMatch[1];monStr=engMatch[2];}
-        else{monStr=engMatch[1];day=engMatch[2];}
-        const mo=MON[monStr.toUpperCase()]||MON[monStr.toUpperCase().slice(0,3)];
-        if(mo)return`2026-${mo}-${day.padStart(2,"0")}`;
-      }
-      // "4/8" / "4-8" / "4.8"
-      const numMatch=str.match(/(\d{1,2})[\/.\-](\d{1,2})/);
-      if(numMatch)return`2026-${numMatch[1].padStart(2,"0")}-${numMatch[2].padStart(2,"0")}`;
+    // 날짜 추출
+    const findDate=(s)=>{
+      let m=s.match(/(\d{1,2})(?:st|nd|rd|th)?\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)/i);
+      if(m){const mo=MON[m[2].toUpperCase()]||MON[m[2].toUpperCase().slice(0,3)];if(mo)return`2026-${mo}-${m[1].padStart(2,"0")}`;}
+      m=s.match(/(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?/i);
+      if(m){const mo=MON[m[1].toUpperCase()]||MON[m[1].toUpperCase().slice(0,3)];if(mo)return`2026-${mo}-${m[2].padStart(2,"0")}`;}
+      m=s.match(/(\d{1,2})[\/.\-](\d{1,2})/);
+      if(m)return`2026-${m[1].padStart(2,"0")}-${m[2].padStart(2,"0")}`;
       return null;
     };
-
-    // 수량 추출 함수
-    const extractQty=(str)=>{
-      const m=str.match(/([\d,]+)\s*(?:pcs|장|ea|개|PCS)/i)||str.match(/(?:Approx\.?\s*)([\d,]+)\s*(?:pcs|장)?/i);
-      if(m)return parseInt(m[1].replace(/,/g,""));
-      return 0;
+    // 수량 추출
+    const findQty=(s)=>{
+      const m=s.match(/([\d,]+)\s*(?:pcs|장|ea|개)/i)||s.match(/Approx\.?\s*([\d,]+)\s*(?:pcs|장)?/i)||s.match(/\(([\d,]+)\s*(?:pcs|장)?\)/i);
+      return m?parseInt(m[1].replace(/,/g,"")):0;
     };
+    // 상품명 정리
+    const cleanName=(s)=>s.replace(/[\d,]+\s*(?:pcs|장|ea|개)/gi,"").replace(/Approx\.?/gi,"")
+      .replace(/Delivery\s+Date\s+Korea\s*:?/gi,"").replace(/Air\s+Shipment\s*:?|Sea\s+Shipment\s*:?/gi,"")
+      .replace(/will\s+(?:also\s+)?be\s+(?:dispatched|delivered|shipped|ready|packed)/gi,"")
+      .replace(/(?:are\s+)?packed\s+ready/gi,"").replace(/(?:from|on|in)\s+(?:the\s+)?(?:factory|Korea)/gi,"")
+      .replace(/\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*/gi,"")
+      .replace(/(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{1,2}(?:st|nd|rd|th)?/gi,"")
+      .replace(/[().]/g," ").replace(/^\s*-\s*|\s*-\s*$/g,"").replace(/\s+/g," ").trim();
 
-    // 상품명 추출 (숫자, 날짜, 키워드 제거)
-    const extractName=(str)=>{
-      return str
-        .replace(/\d{1,2}(?:st|nd|rd|th)?\s*(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)/gi,"")
-        .replace(/(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s*\d{1,2}(?:st|nd|rd|th)?/gi,"")
-        .replace(/[\d,]+\s*(?:pcs|장|ea)/gi,"")
-        .replace(/Approx\.?/gi,"")
-        .replace(/Delivery\s*Date\s*Korea:?/gi,"")
-        .replace(/will\s+(?:also\s+)?be\s+(?:dispatched|delivered|shipped|ready)/gi,"")
-        .replace(/(?:from|on|in)\s+(?:the\s+)?(?:factory|Korea)/gi,"")
-        .replace(/(?:are\s+)?packed\s+ready/gi,"")
-        .replace(/Air\s+Shipment:?|Sea\s+Shipment:?/gi,"")
-        .replace(/[인도|코니키즈|성은교역]/g,"")
-        .replace(/[\/.\-]/g," ")
-        .replace(/\s+/g," ").trim();
-    };
+    // 업체 감지
+    if(/인도/i.test(text))curSup="인도";
+    if(/코니키즈|코니/i.test(text))curSup="코니키즈";
+    if(/성은교역|성은/i.test(text))curSup="성은교역";
 
-    // 멀티라인 분석: 여러 줄에 걸쳐 정보가 분산될 수 있음
-    // 전체를 한 덩어리씩 나누기 (빈줄 또는 날짜 기준)
-    let buffer="";
-    const chunks=[];
-    for(const line of lines){
-      const l=line.trim();
-      if(!l){if(buffer)chunks.push(buffer);buffer="";continue;}
-      // 업체 감지
-      if(/인도/i.test(l))curSup="인도";
-      if(/코니키즈|코니/i.test(l))curSup="코니키즈";
-      if(/성은교역|성은/i.test(l))curSup="성은교역";
-      // shipment type
-      if(/Air\s+Shipment/i.test(l))curShipType="Air Shipment";
-      if(/Sea\s+Shipment/i.test(l))curShipType="Sea Shipment";
-      buffer+=(buffer?" ":"")+l;
-    }
-    if(buffer)chunks.push(buffer);
+    // "Delivery Date Korea" 블록 기반 파싱
+    const deliveryBlocks=text.split(/(?=Delivery\s+Date\s+Korea)/i);
+    const results=[];
 
-    // 각 청크 분석
-    let addedCount=0;
-    for(const chunk of chunks){
-      // 여러 아이템이 "-"로 구분될 수 있음
-      // "1,600pcs - Graychill 2000 pcs - Pigment Tees are packed ready"
-      const subItems=chunk.split(/\s+-\s+/).filter(s=>s.trim());
-      const chunkDate=extractDate(chunk);
-      const chunkShipType=/Air\s+Shipment/i.test(chunk)?"Air Shipment":/Sea\s+Shipment/i.test(chunk)?"Sea Shipment":curShipType;
-
-      // 날짜가 포함된 아이템과 아닌 아이템 분리
-      for(const sub of subItems){
-        const qty=extractQty(sub);
-        const date=extractDate(sub)||chunkDate;
-        const name=extractName(sub);
-        if(!name&&!qty)continue;
-        if(name||qty){
-          parsed.push({supplier:curSup,item:name||"입고건",qty,krDate:date,shipType:chunkShipType});
+    if(deliveryBlocks.length>1){
+      let pendingItems=[];
+      for(const block of deliveryBlocks){
+        const b=block.trim();if(!b)continue;
+        if(/^Delivery\s+Date\s+Korea/i.test(b)){
+          // 날짜 추출
+          const date=findDate(b);
+          // 앞서 모인 아이템들에 이 날짜 적용
+          pendingItems.forEach(it=>{if(!it.krDate)it.krDate=date;});
+          results.push(...pendingItems);
+          pendingItems=[];
+          // 이 블록 자체에도 아이템이 있을 수 있음 (같은 줄에)
+          const rest=b.replace(/Delivery\s+Date\s+Korea\s*:\s*/i,"");
+          const restDate=findDate(rest);
+          const restClean=cleanName(rest);
+          const restQty=findQty(rest);
+          if(restClean&&restClean.length>2&&restQty>0){
+            results.push({item:restClean,qty:restQty,krDate:restDate||date,shipType:""});
+          }
+        }else{
+          // 아이템 영역 (Delivery Date Korea 앞)
+          let shipType="";
+          if(/Air\s+Shipment/i.test(b))shipType="Air Shipment";
+          if(/Sea\s+Shipment/i.test(b))shipType="Sea Shipment";
+          // 줄 단위 + "-" 구분으로 아이템 추출
+          const lines=b.split("\n").map(l=>l.trim()).filter(l=>l);
+          for(const line of lines){
+            if(/^Air\s+Shipment\s*:?$/i.test(line)||/^Sea\s+Shipment\s*:?$/i.test(line)){
+              if(/Air/i.test(line))shipType="Air Shipment";else shipType="Sea Shipment";
+              continue;
+            }
+            const subItems=line.split(/\s+-\s+/);
+            const lineDate=findDate(line);
+            if(/Air\s+Shipment/i.test(line))shipType="Air Shipment";
+            if(/Sea\s+Shipment/i.test(line))shipType="Sea Shipment";
+            for(const sub of subItems){
+              const qty=findQty(sub);
+              const name=cleanName(sub);
+              if((name&&name.length>1)||(qty>0)){
+                pendingItems.push({item:name||"입고건",qty,krDate:lineDate,shipType});
+              }
+            }
+          }
         }
       }
-
-      // 서브아이템이 없는 경우 전체 청크를 하나로
-      if(subItems.length<=1&&!parsed.find(p=>p===parsed[parsed.length-1])){
-        const qty=extractQty(chunk);
-        const name=extractName(chunk);
-        if((name||qty)&&!parsed.find(p=>p.item===name&&p.krDate===chunkDate)){
-          parsed.push({supplier:curSup,item:name||"입고건",qty,krDate:chunkDate,shipType:chunkShipType});
-        }
+      if(pendingItems.length>0)results.push(...pendingItems);
+    }else{
+      // Delivery Date Korea 패턴 없음 - 줄 단위 파싱
+      const lines=text.split("\n").map(l=>l.trim()).filter(l=>l);
+      for(const line of lines){
+        if(/인도/i.test(line))curSup="인도";
+        if(/코니키즈|코니/i.test(line))curSup="코니키즈";
+        if(/성은교역|성은/i.test(line))curSup="성은교역";
+        const date=findDate(line);const qty=findQty(line);
+        const qm=line.match(/([\d,]+)\s*장/);const qty2=qm?parseInt(qm[1].replace(/,/g,"")):qty;
+        const name=cleanName(line);
+        if(date&&(name||qty2)){results.push({item:name||"입고건",qty:qty2,krDate:date,shipType:""});}
       }
     }
 
-    // 중복 제거 및 Supabase 저장
+    // 중복 제거 후 Supabase 저장
     const seen=new Set();
-    for(const p of parsed){
+    for(const p of results){
+      if(!p.krDate&&!p.qty)continue;
       const key=`${p.item}_${p.qty}_${p.krDate}`;
-      if(seen.has(key)||(!p.item&&!p.qty))continue;
-      seen.add(key);
-      const krDate=p.krDate;
-      const ozD=krDate?new Date(krDate):null;
+      if(seen.has(key))continue;seen.add(key);
+      const krDate=p.krDate;const ozD=krDate?new Date(krDate):null;
       if(ozD)ozD.setDate(ozD.getDate()+3);
-      const row={supplier:p.supplier,item:p.item,qty:p.qty,
+      const row={supplier:p.supplier||curSup,item:p.item||"입고건",qty:p.qty||0,
         ship_date:null,kr_date:krDate,oz_date:ozD?ozD.toISOString().slice(0,10):null,
         ship_type:p.shipType||"",note:"",status:"입고예정",
         date:krDate||new Date().toISOString().slice(0,10),
-        lead_days:p.supplier==="인도"?30:p.supplier==="코니키즈"?21:14};
+        lead_days:(p.supplier||curSup)==="인도"?30:(p.supplier||curSup)==="코니키즈"?21:14};
       const r=await sb.insert("schedules",row);
       if(r&&r[0]){setSchedules(prev=>[r[0],...prev]);addedCount++;}
     }
@@ -1486,90 +1482,217 @@ function ReorderTab(){
   </>);
 }
 
-// ─── Tab: 오더 누적 입고 수량 (Supabase) ───
+// ─── Tab: 오더 누적 입고 수량 (Supabase + 파일업로드) ───
 function OrderTrackingTab(){
   const[orders,setOrders]=useState([]);
   const[inbounds,setInbounds]=useState([]);
   const[loading,setLoading]=useState(true);
   const[search,setSearch]=useState("");
-  const[manualMode,setManualMode]=useState(false);
-  const[manualText,setManualText]=useState("");
-  const[plMode,setPlMode]=useState(false);
+  const[woFileName,setWoFileName]=useState("");
   const[plDate,setPlDate]=useState(new Date().toISOString().slice(0,10));
-  const[plText,setPlText]=useState("");
-  const[plSupplier,setPlSupplier]=useState("코니키즈");
+  const woRef=useRef(null);
+  const plRef=useRef(null);
 
-  useEffect(()=>{(async()=>{
-    setLoading(true);
-    const o=await sb.get("orders");if(o.length>0)setOrders(o);
-    const ib=await sb.get("inbounds");if(ib.length>0)setInbounds(ib);
+  useEffect(()=>{(async()=>{setLoading(true);
+    const o=await sb.get("orders");if(o)setOrders(o);
+    const ib=await sb.get("inbounds");if(ib)setInbounds(ib);
     setLoading(false);
   })();},[]);
 
-  // 수동 오더 입력
-  const parseManualOrder=async()=>{
-    const lines=manualText.trim().split("\n").filter(l=>l.trim());
-    if(lines.length<2){alert("헤더 포함 2줄 이상 입력해주세요.");return;}
-    let count=0;
-    for(let i=1;i<lines.length;i++){
-      const p=lines[i].split("\t").map(s=>s.trim());
-      if(p.length>=4){
-        const r=await sb.insert("orders",{
-          order_name:p[0]||"수동입력",style_no:p[1]||"",product_name:p[2]||"",
-          supplier:p[3]||"",color:p[4]||"",size:p[5]||"",
-          order_qty:parseInt(p[6])||0,cost:p[7]||""
+  // ─── 작업지시서 파싱 ───
+  const parseWorkOrder=async(file)=>{
+    const reader=new FileReader();
+    reader.onload=async(ev)=>{
+      try{
+        const data=new Uint8Array(ev.target.result);
+        // xlsx를 CSV 텍스트로 변환하는 대신 HTML table 파싱 또는 텍스트 파싱
+        // 브라우저에서 xlsx 직접 파싱은 어려우므로 xls(HTML) 또는 csv 지원
+        // SheetJS가 있으면 사용
+        let workbook;
+        if(typeof XLSX!=="undefined"){workbook=XLSX.read(data,{type:"array"});}
+        else{
+          // XLSX 라이브러리 동적 로드
+          await new Promise((res,rej)=>{const s=document.createElement("script");s.src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";s.onload=res;s.onerror=rej;document.head.appendChild(s);});
+          workbook=XLSX.read(data,{type:"array"});
+        }
+        const allItems=[];
+        const orderName=file.name.replace(/\.[^.]+$/,"");
+
+        for(const sheetName of workbook.SheetNames){
+          const ws=workbook.Sheets[sheetName];
+          const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:""});
+          
+          // Row 4: STYLE NO, 상품명, 작업처
+          let styleNo="",productName="",supplier="";
+          for(let i=0;i<Math.min(6,rows.length);i++){
+            const r=rows[i]||[];
+            const joined=r.join(" ");
+            if(/STYLE/i.test(joined)){
+              const next=rows[i+1]||[];
+              styleNo=String(next[1]||"").trim();
+              productName=String(next[2]||"").trim();
+              supplier=String(next[3]||"").trim();
+              break;
+            }
+          }
+          if(!styleNo)continue;
+
+          // COLOR/SIZE 테이블 찾기 (row 25~40)
+          let sizeRow=-1,colorStartRow=-1;
+          let sizes=[];
+          for(let i=25;i<Math.min(rows.length,42);i++){
+            const r=rows[i]||[];
+            const joined=r.map(v=>String(v||"")).join(" ");
+            if(/COLOR/i.test(joined)&&(/SIZE/i.test(joined)||/Q'?[Tt][Yy]/i.test(joined))){
+              // 다음 행에 사이즈 라벨
+              const nextR=rows[i+1]||[];
+              sizes=nextR.map(v=>String(v||"").trim()).filter(v=>/^(S|M|L|XL|2XL|3XL|XXL|FREE|F|OS|\d+\(\d+\)|M\(\d+\)|L\(\d+\)|XL\(\d+\))$/i.test(v));
+              if(sizes.length===0){
+                // 사이즈가 같은 행에 있을 수 있음
+                sizes=r.map(v=>String(v||"").trim()).filter(v=>/^(S|M|L|XL|2XL|3XL|XXL|FREE|F|OS)$/i.test(v));
+              }
+              colorStartRow=i+2;
+              break;
+            }
+          }
+          if(colorStartRow<0||sizes.length===0)continue;
+
+          // 컬러 행 파싱
+          for(let i=colorStartRow;i<Math.min(rows.length,colorStartRow+10);i++){
+            const r=rows[i]||[];
+            const rStr=r.map(v=>String(v||"").trim());
+            
+            // 컬러 찾기 (숫자가 아니고, 빈값이 아니고, 키워드가 아닌 셀)
+            let colorIdx=-1,color="";
+            for(let j=0;j<rStr.length;j++){
+              const v=rStr[j];
+              if(v&&v.length>=2&&!/^\d+$/.test(v)&&!/^총수량|^SIZE|^Q'|^0$/i.test(v)&&!/^\*/.test(v)){
+                // 숫자가 뒤따르는지 확인 (수량이 있는 행인지)
+                const hasNums=rStr.slice(j+1).some(x=>/^\d+$/.test(x)&&parseInt(x)>0);
+                if(hasNums){color=v;colorIdx=j;break;}
+              }
+            }
+            if(!color||color==="총수량")continue;
+            
+            // 수량 추출 - 사이즈 개수만큼 숫자 추출
+            const nums=[];
+            for(let j=colorIdx+1;j<rStr.length;j++){
+              const n=parseInt(String(rStr[j]).replace(/,/g,""));
+              if(!isNaN(n)&&n>=0)nums.push(n);
+              if(nums.length>=sizes.length+1)break; // +1 for total
+            }
+            
+            // 사이즈별 아이템 생성
+            for(let si=0;si<sizes.length&&si<nums.length;si++){
+              const qty=nums[si];
+              if(qty>0){
+                allItems.push({
+                  order_name:orderName,style_no:styleNo,product_name:productName,
+                  supplier,color:color.replace(/\(\d+\)/g,"").trim(),
+                  size:sizes[si].replace(/\(\d+\)/g,"").trim(),
+                  order_qty:qty,sheet_name:sheetName
+                });
+              }
+            }
+          }
+        }
+
+        if(allItems.length===0){alert("작업지시서에서 데이터를 파싱할 수 없습니다.");return;}
+
+        // Supabase 저장
+        let count=0;
+        for(const item of allItems){
+          const r=await sb.insert("orders",item);
+          if(r&&r[0]){setOrders(p=>[r[0],...p]);count++;}
+        }
+        alert(`${count}건의 오더 데이터가 등록되었습니다.`);
+      }catch(e){alert("파일 파싱 오류: "+e.message);console.error(e);}
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  // ─── 패킹리스트 파싱 ───
+  const parsePackingList=async(file)=>{
+    const reader=new FileReader();
+    reader.onload=async(ev)=>{
+      try{
+        const data=new Uint8Array(ev.target.result);
+        if(typeof XLSX==="undefined"){
+          await new Promise((res,rej)=>{const s=document.createElement("script");s.src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";s.onload=res;s.onerror=rej;document.head.appendChild(s);});
+        }
+        const wb=XLSX.read(data,{type:"array"});
+        const ws=wb.Sheets[wb.SheetNames[0]];
+        const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:""});
+        
+        if(rows.length<2){alert("데이터가 없습니다.");return;}
+        
+        // 헤더 분석
+        const header=rows[0].map(v=>String(v||"").toLowerCase());
+        let codeIdx=-1,nameIdx=-1,optIdx=-1,colorIdx=-1,sizeIdx=-1,qtyIdx=-1,noteIdx=-1;
+        header.forEach((h,i)=>{
+          if(/상품코드|code|sku/i.test(h))codeIdx=i;
+          if(/상품명|name|product/i.test(h))nameIdx=i;
+          if(/옵션|option/i.test(h))optIdx=i;
+          if(/색상|color|colour/i.test(h))colorIdx=i;
+          if(/사이즈|size/i.test(h))sizeIdx=i;
+          if(/수량|qty|quantity|작업수량|pcs/i.test(h))qtyIdx=i;
+          if(/메모|note|비고|memo/i.test(h))noteIdx=i;
         });
-        if(r&&r[0]){setOrders(prev=>[r[0],...prev]);count++;}
-      }
-    }
-    setManualText("");setManualMode(false);
-    alert(count+"건 등록 완료");
+        
+        const plName=file.name.replace(/\.[^.]+$/,"");
+        let count=0;
+        for(let i=1;i<rows.length;i++){
+          const r=rows[i];
+          const qty=parseInt(String(r[qtyIdx>=0?qtyIdx:4]||"0").replace(/,/g,""));
+          if(!qty||qty<=0)continue;
+          
+          const code=String(r[codeIdx>=0?codeIdx:0]||"");
+          const name=String(r[nameIdx>=0?nameIdx:1]||"");
+          const opt=String(r[optIdx>=0?optIdx:colorIdx>=0?colorIdx:2]||"");
+          const size=sizeIdx>=0?String(r[sizeIdx]||""):"";
+          const note=noteIdx>=0?String(r[noteIdx]||""):plName;
+          
+          // 옵션에서 컬러/사이즈 추출 [화이트-L] -> color=화이트, size=L
+          let color=opt;
+          let sz=size;
+          const optMatch=opt.match(/\[?([^\]-]+?)[-\s]*(S|M|L|XL|2XL|3XL|XXL|FREE|F|OS)?\]?$/i);
+          if(optMatch){color=optMatch[1].trim();if(optMatch[2]&&!sz)sz=optMatch[2];}
+          
+          const row={inbound_date:plDate,supplier:"",packing_no:plName,
+            product_code:code,product_name:name,color,size:sz,qty,option:opt,note};
+          const res=await sb.insert("inbounds",row);
+          if(res&&res[0]){setInbounds(p=>[res[0],...p]);count++;}
+        }
+        alert(`${count}건 입고 기록 완료 (${plDate})`);
+      }catch(e){alert("파일 파싱 오류: "+e.message);console.error(e);}
+    };
+    reader.readAsArrayBuffer(file);
   };
 
-  // 패킹리스트 입고 기록
-  const parseInbound=async()=>{
-    const lines=plText.trim().split("\n").filter(l=>l.trim());
-    let count=0;
-    for(const line of lines){
-      const parts=line.split(/[\t,|;]+/).map(s=>s.trim());
-      if(parts.length>=2){
-        let color="",size="",qty=0;
-        for(const p of parts){
-          const num=parseInt(p.replace(/,/g,""));
-          if(!isNaN(num)&&num>0&&num<100000&&p.replace(/,/g,"")===String(num))qty=num;
-          else if(/^(S|M|L|XL|2XL|3XL|F|OS|FREE)$/i.test(p))size=p;
-          else if(p.length>=2&&!color)color=p;
-        }
-        if(qty>0){
-          const r=await sb.insert("inbounds",{inbound_date:plDate,supplier:plSupplier,color,size,qty});
-          if(r&&r[0]){setInbounds(prev=>[r[0],...prev]);count++;}
-        }
-      }
-    }
-    setPlText("");setPlMode(false);
-    if(count>0)alert(count+"건 입고 기록 완료 ("+plDate+")");
-    else alert("입고 데이터를 파싱할 수 없습니다.");
-  };
-
-  // 데이터 집계
+  // ─── 데이터 집계 ───
   const orderSummary=useMemo(()=>{
     const map={};
     orders.forEach(o=>{
-      const key=(o.product_name||"")+"__"+(o.color||"")+"__"+(o.size||"");
-      if(!map[key])map[key]={styleNo:o.style_no,name:o.product_name,supplier:o.supplier,color:o.color,size:o.size,orderQty:0,cost:o.cost,orderName:o.order_name};
+      const key=`${o.product_name||""}__${o.color||""}__${o.size||""}`;
+      if(!map[key])map[key]={styleNo:o.style_no,name:o.product_name,supplier:o.supplier,color:o.color,size:o.size,orderQty:0,orderName:o.order_name};
       map[key].orderQty+=(o.order_qty||0);
     });
+    // 입고 매칭
     Object.values(map).forEach(item=>{
       item.inboundQty=0;item.inboundHistory=[];
       inbounds.forEach(ib=>{
-        const cm=(ib.color||"").includes(item.color)||item.color.includes(ib.color||"");
-        const sm=(ib.size||"").toUpperCase()===(item.size||"").toUpperCase();
-        if(cm&&sm){item.inboundQty+=(ib.qty||0);item.inboundHistory.push({date:ib.inbound_date,qty:ib.qty});}
+        const cm=(ib.color||"").includes(item.color)||item.color.includes(ib.color||"")||(ib.option||"").includes(item.color);
+        const sm=!item.size||!ib.size||(ib.size||"").toUpperCase()===(item.size||"").toUpperCase();
+        const nm=(ib.product_name||"").includes(item.name)||item.name.includes(ib.product_name||"");
+        if((cm&&sm)||(nm&&cm)){
+          item.inboundQty+=(ib.qty||0);
+          item.inboundHistory.push({date:ib.inbound_date,qty:ib.qty,packingNo:ib.packing_no||ib.note||""});
+        }
       });
       item.remainQty=item.orderQty-item.inboundQty;
       item.progress=item.orderQty>0?Math.round((item.inboundQty/item.orderQty)*100):0;
     });
-    return Object.values(map).filter(v=>v.orderQty>0);
+    return Object.values(map).filter(v=>v.orderQty>0).sort((a,b)=>(a.name||"").localeCompare(b.name||"")||(a.color||"").localeCompare(b.color||"")||(a.size||"").localeCompare(b.size||""));
   },[orders,inbounds]);
 
   const filtered=orderSummary.filter(r=>{
@@ -1579,8 +1702,13 @@ function OrderTrackingTab(){
 
   const inboundByDate=useMemo(()=>{
     const map={};
-    inbounds.forEach(ib=>{const d=ib.inbound_date||"미지정";if(!map[d])map[d]={date:d,totalQty:0,items:[]};map[d].totalQty+=(ib.qty||0);map[d].items.push(ib);});
-    return Object.values(map).sort((a,b)=>b.date.localeCompare(a.date));
+    inbounds.forEach(ib=>{
+      const key=ib.packing_no||ib.inbound_date||"미지정";
+      if(!map[key])map[key]={label:key,date:ib.inbound_date,totalQty:0,items:[]};
+      map[key].totalQty+=(ib.qty||0);
+      map[key].items.push(ib);
+    });
+    return Object.values(map).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
   },[inbounds]);
 
   const totalOrder=orderSummary.reduce((a,b)=>a+b.orderQty,0);
@@ -1591,107 +1719,120 @@ function OrderTrackingTab(){
   if(loading)return <SectionCard title="📊 오더 누적 입고 수량"><div style={{textAlign:"center",padding:40,color:"#94A3B8"}}>⏳ 데이터 불러오는 중...</div></SectionCard>;
 
   return(<>
-    <SectionCard title="📊 오더 누적 입고 수량" subtitle="☁️ 서버 실시간 저장 · 작업지시서 대비 입고 현황 추적"
-      actions={<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-        <SmallBtn primary onClick={()=>setManualMode(!manualMode)}>{manualMode?"✕ 닫기":"📝 오더 입력"}</SmallBtn>
-        <SmallBtn primary onClick={()=>setPlMode(!plMode)}>{plMode?"✕ 닫기":"📦 입고 기록"}</SmallBtn>
-      </div>}>
-
-      {/* 전체 현황 카드 */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:20}}>
-        <div style={{padding:"16px 18px",borderRadius:10,background:"#F8FAFC",border:"1px solid #E2E8F0",textAlign:"center"}}>
-          <div style={{fontSize:10,fontWeight:600,color:"#94A3B8",textTransform:"uppercase"}}>총 오더</div>
-          <div style={{fontSize:26,fontWeight:800,color:"#1E293B",marginTop:2}}>{totalOrder.toLocaleString()}<span style={{fontSize:12,color:"#94A3B8"}}> pcs</span></div>
-        </div>
-        <div style={{padding:"16px 18px",borderRadius:10,background:"#F0FDF4",border:"1px solid #BBF7D0",textAlign:"center"}}>
-          <div style={{fontSize:10,fontWeight:600,color:"#059669",textTransform:"uppercase"}}>누적 입고</div>
-          <div style={{fontSize:26,fontWeight:800,color:"#059669",marginTop:2}}>{totalInbound.toLocaleString()}<span style={{fontSize:12,color:"#6EE7B7"}}> pcs</span></div>
-        </div>
-        <div style={{padding:"16px 18px",borderRadius:10,background:totalRemain>0?"#FEF2F2":"#F0FDF4",border:"1px solid "+(totalRemain>0?"#FECACA":"#BBF7D0"),textAlign:"center"}}>
-          <div style={{fontSize:10,fontWeight:600,color:totalRemain>0?"#DC2626":"#059669",textTransform:"uppercase"}}>잔여 수량</div>
-          <div style={{fontSize:26,fontWeight:800,color:totalRemain>0?"#DC2626":"#059669",marginTop:2}}>{totalRemain.toLocaleString()}<span style={{fontSize:12,color:"#94A3B8"}}> pcs</span></div>
-        </div>
-        <div style={{padding:"16px 18px",borderRadius:10,background:"#EFF6FF",border:"1px solid #BFDBFE",textAlign:"center"}}>
-          <div style={{fontSize:10,fontWeight:600,color:"#2563EB",textTransform:"uppercase"}}>입고율</div>
-          <div style={{fontSize:26,fontWeight:800,color:"#2563EB",marginTop:2}}>{totalProgress}<span style={{fontSize:12,color:"#93C5FD"}}>%</span></div>
-          <div style={{marginTop:6,height:6,background:"#E2E8F0",borderRadius:3}}><div style={{height:"100%",borderRadius:3,background:totalProgress>=100?"#059669":totalProgress>=50?"#2563EB":"#F59E0B",width:Math.min(totalProgress,100)+"%",transition:"width 0.3s"}} /></div>
-        </div>
+    {/* 헤더 */}
+    <div style={{background:"#FFF",borderRadius:14,padding:"20px 28px",border:"1px solid #E2E8F0",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10}}>
+        <span style={{fontSize:20}}>📊</span>
+        <span style={{fontSize:17,fontWeight:700,color:"#0F172A"}}>오더 누적 입고 수량</span>
       </div>
+      <div style={{fontSize:13,fontWeight:600,color:"#3B82F6"}}>{new Date().toLocaleDateString("ko-KR",{year:"numeric",month:"long",day:"numeric"})}</div>
+    </div>
 
-      {/* 오더 수동 입력 */}
-      {manualMode&&<div style={{padding:18,borderRadius:12,background:"#F8FAFC",border:"1px solid #E2E8F0",marginBottom:16}}>
-        <div style={{fontSize:13,fontWeight:700,color:"#334155",marginBottom:8}}>📝 오더 데이터 입력 (탭 구분, 구글시트에서 복사 가능)</div>
-        <textarea value={manualText} onChange={e=>setManualText(e.target.value)} placeholder={"오더명\t스타일NO\t상품명\t업체\t컬러\t사이즈\t수량\t원가\n1차_코니키즈\tV24FT01UB400\t엘리멘트 후디\t코니키즈\t멜란지\tM\t1800\t14400\n1차_코니키즈\tV24FT01UB400\t엘리멘트 후디\t코니키즈\t멜란지\tL\t1200\t14400"} style={{width:"100%",height:120,padding:12,borderRadius:8,border:"1px solid #E2E8F0",fontSize:12,fontFamily:"monospace",background:"#FFF",resize:"vertical",outline:"none",boxSizing:"border-box"}} />
-        <div style={{marginTop:8,display:"flex",gap:8}}>
-          <SmallBtn primary onClick={parseManualOrder}>등록</SmallBtn>
-          <SmallBtn onClick={()=>{setManualText("");setManualMode(false);}}>취소</SmallBtn>
-        </div>
-      </div>}
+    {/* 안내 */}
+    <div style={{padding:"12px 20px",borderRadius:10,background:"#EFF6FF",border:"1px solid #BFDBFE",marginBottom:16,fontSize:12,color:"#1E40AF"}}>
+      📋 작업지시서를 업로드하면 상품별 총 오더 수량이 자동 정리됩니다. 이후 패킹리스트 파일을 날짜별로 업로드하면 입고 수량이 누적됩니다.
+    </div>
 
-      {/* 패킹리스트 입고 기록 */}
-      {plMode&&<div style={{padding:18,borderRadius:12,background:"#F0FDF4",border:"1px solid #BBF7D0",marginBottom:16}}>
-        <div style={{fontSize:13,fontWeight:700,color:"#166534",marginBottom:8}}>📦 입고 기록 추가</div>
-        <div style={{display:"flex",gap:12,marginBottom:10,alignItems:"center",flexWrap:"wrap"}}>
-          <div style={{display:"flex",alignItems:"center",gap:6}}>
-            <span style={{fontSize:12,color:"#64748B"}}>입고일:</span>
-            <Input type="date" value={plDate} onChange={e=>setPlDate(e.target.value)} style={{width:150}} />
-          </div>
-          <div style={{display:"flex",alignItems:"center",gap:6}}>
-            <span style={{fontSize:12,color:"#64748B"}}>업체:</span>
-            <select value={plSupplier} onChange={e=>setPlSupplier(e.target.value)} style={{padding:"6px 10px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:12,outline:"none"}}>
-              <option>코니키즈</option><option>성은교역</option><option>인도</option><option>자체제작</option>
-            </select>
-          </div>
-        </div>
-        <textarea value={plText} onChange={e=>setPlText(e.target.value)} placeholder={"컬러\t사이즈\t수량\n멜란지\tM\t500\n멜란지\tL\t300\n네이비\tM\t200"} style={{width:"100%",height:100,padding:12,borderRadius:8,border:"1px solid #E2E8F0",fontSize:12,fontFamily:"monospace",background:"#FFF",resize:"vertical",outline:"none",boxSizing:"border-box"}} />
-        <div style={{marginTop:8,display:"flex",gap:8}}>
-          <SmallBtn primary onClick={parseInbound}>입고 등록</SmallBtn>
-          <SmallBtn onClick={()=>{setPlText("");setPlMode(false);}}>취소</SmallBtn>
-        </div>
-      </div>}
-
-      {/* 검색 */}
-      <div style={{marginBottom:12,display:"flex",gap:8,alignItems:"center"}}>
-        <Input value={search} onChange={e=>setSearch(e.target.value)} placeholder="상품명/컬러/스타일NO 검색..." style={{maxWidth:300}} />
-        <span style={{fontSize:12,color:"#64748B"}}>{filtered.length}건</span>
+    {/* 업로드 영역 */}
+    <SectionCard title="📁 작업지시서 업로드">
+      <div onClick={()=>woRef.current?.click()} style={{height:120,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"#FFFBEB",borderRadius:12,border:"2px dashed #FDE68A",cursor:"pointer",gap:6}}
+        onDragOver={e=>{e.preventDefault();e.currentTarget.style.borderColor="#F59E0B";}}
+        onDragLeave={e=>{e.currentTarget.style.borderColor="#FDE68A";}}
+        onDrop={e=>{e.preventDefault();e.currentTarget.style.borderColor="#FDE68A";if(e.dataTransfer.files[0]){setWoFileName(e.dataTransfer.files[0].name);parseWorkOrder(e.dataTransfer.files[0]);}}}>
+        <input ref={woRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={e=>{if(e.target.files[0]){setWoFileName(e.target.files[0].name);parseWorkOrder(e.target.files[0]);}}} />
+        <span style={{fontSize:28}}>📂</span>
+        {woFileName?<span style={{fontSize:13,fontWeight:600,color:"#D97706"}}>{woFileName}</span>
+        :<><span style={{fontSize:13,fontWeight:600,color:"#D97706"}}>작업지시서 엑셀 드래그 또는 클릭</span><span style={{fontSize:11,color:"#94A3B8"}}>.xlsx / .xls</span></>}
       </div>
-
-      {/* 테이블 */}
-      {filtered.length>0?(
-        <Table headers={["상품명","스타일NO","컬러","사이즈","오더수량","입고수량","잔여수량","입고율","입고이력"]} maxH={420}>
-          {filtered.sort((a,b)=>(a.name||"").localeCompare(b.name||"")||(a.color||"").localeCompare(b.color||"")||(a.size||"").localeCompare(b.size||"")).map((r,i)=>(
-            <tr key={i} style={{background:r.remainQty<=0?"#F0FDF408":r.progress<50?"#FEF2F208":"transparent"}}>
-              <Td style={{fontWeight:600}}>{r.name}</Td>
-              <Td style={{fontFamily:"monospace",fontSize:11}}>{r.styleNo}</Td>
-              <Td style={{fontWeight:600}}>{r.color}</Td>
-              <Td>{r.size}</Td>
-              <Td style={{fontWeight:700}}>{r.orderQty.toLocaleString()}</Td>
-              <Td style={{fontWeight:700,color:"#059669"}}>{r.inboundQty.toLocaleString()}</Td>
-              <Td style={{fontWeight:700,color:r.remainQty>0?"#DC2626":"#059669"}}>{r.remainQty.toLocaleString()}</Td>
-              <Td><div style={{display:"flex",alignItems:"center",gap:6}}>
-                <div style={{flex:1,height:6,background:"#F1F5F9",borderRadius:3,maxWidth:60}}><div style={{height:"100%",borderRadius:3,background:r.progress>=100?"#059669":r.progress>=50?"#2563EB":"#DC2626",width:Math.min(r.progress,100)+"%"}} /></div>
-                <span style={{fontSize:11,fontWeight:600,color:r.progress>=100?"#059669":r.progress>=50?"#2563EB":"#DC2626"}}>{r.progress}%</span>
-              </div></Td>
-              <Td>{r.inboundHistory.length>0?(<div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{r.inboundHistory.map((h,j)=>(<span key={j} style={{fontSize:10,padding:"2px 6px",borderRadius:3,background:"#EFF6FF",color:"#2563EB",fontWeight:600}}>{(h.date||"").slice(5)}:{h.qty}</span>))}</div>):<span style={{fontSize:11,color:"#94A3B8"}}>-</span>}</Td>
-            </tr>))}
-        </Table>
-      ):(<div style={{padding:40,textAlign:"center",color:"#94A3B8",fontSize:13}}>오더 데이터가 없습니다. 위의 '📝 오더 입력'으로 작업지시서 데이터를 등록해주세요.</div>)}
-
-      {/* 날짜별 입고 이력 */}
-      {inboundByDate.length>0&&<div style={{marginTop:20}}>
-        <div style={{fontSize:14,fontWeight:700,color:"#0F172A",marginBottom:10}}>📅 날짜별 입고 이력</div>
-        {inboundByDate.map((d,i)=>(<div key={i} style={{padding:"12px 16px",borderRadius:8,background:"#F8FAFC",border:"1px solid #E2E8F0",marginBottom:8}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-            <span style={{fontSize:13,fontWeight:700,color:"#1E293B"}}>{d.date}</span>
-            <Badge color="#059669">총 {d.totalQty.toLocaleString()}pcs</Badge>
-          </div>
-          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{d.items.map((item,j)=>(<span key={j} style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"#EFF6FF",color:"#1E40AF",fontWeight:600}}>{item.color} {item.size} : {item.qty}pcs</span>))}</div>
-        </div>))}
-      </div>}
     </SectionCard>
+
+    {/* 하단 버튼 영역 */}
+    <div style={{display:"flex",gap:10,marginBottom:16,alignItems:"center",flexWrap:"wrap"}}>
+      <div style={{display:"flex",alignItems:"center",gap:6}}>
+        <span style={{fontSize:12,color:"#64748B"}}>입고날짜</span>
+        <Input type="date" value={plDate} onChange={e=>setPlDate(e.target.value)} style={{width:150}} />
+      </div>
+      <SmallBtn primary onClick={()=>plRef.current?.click()}>📦 패킹리스트 업로드</SmallBtn>
+      <input ref={plRef} type="file" accept=".xlsx,.xls,.csv" style={{display:"none"}} onChange={e=>{if(e.target.files[0])parsePackingList(e.target.files[0]);}} />
+      <SmallBtn danger onClick={async()=>{if(window.confirm("전체 데이터를 초기화하시겠습니까?")){for(const o of orders)await sb.remove("orders",o.id);for(const ib of inbounds)await sb.remove("inbounds",ib.id);setOrders([]);setInbounds([]);}}}>🗑 전체 초기화</SmallBtn>
+      <SmallBtn onClick={()=>{
+        if(!orderSummary.length)return;
+        let csv="\uFEFF스타일NO,상품명,업체,컬러,사이즈,오더수량,입고수량,잔여수량,입고율\n";
+        orderSummary.forEach(r=>{csv+=`"${r.styleNo}","${r.name}","${r.supplier}","${r.color}","${r.size}",${r.orderQty},${r.inboundQty},${r.remainQty},${r.progress}%\n`;});
+        const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});const url=URL.createObjectURL(blob);
+        const a=document.createElement("a");a.href=url;a.download=`오더입고현황_${new Date().toISOString().slice(0,10)}.csv`;a.click();
+      }}>📊 엑셀 다운로드</SmallBtn>
+    </div>
+
+    {/* 전체 현황 카드 */}
+    {totalOrder>0&&<div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:16}}>
+      <div style={{padding:"14px 16px",borderRadius:10,background:"#F8FAFC",border:"1px solid #E2E8F0",textAlign:"center"}}>
+        <div style={{fontSize:10,fontWeight:600,color:"#94A3B8",textTransform:"uppercase"}}>총 오더</div>
+        <div style={{fontSize:24,fontWeight:800,color:"#1E293B",marginTop:2}}>{totalOrder.toLocaleString()}<span style={{fontSize:11,color:"#94A3B8"}}> pcs</span></div>
+      </div>
+      <div style={{padding:"14px 16px",borderRadius:10,background:"#F0FDF4",border:"1px solid #BBF7D0",textAlign:"center"}}>
+        <div style={{fontSize:10,fontWeight:600,color:"#059669",textTransform:"uppercase"}}>누적 입고</div>
+        <div style={{fontSize:24,fontWeight:800,color:"#059669",marginTop:2}}>{totalInbound.toLocaleString()}<span style={{fontSize:11,color:"#6EE7B7"}}> pcs</span></div>
+      </div>
+      <div style={{padding:"14px 16px",borderRadius:10,background:totalRemain>0?"#FEF2F2":"#F0FDF4",border:"1px solid "+(totalRemain>0?"#FECACA":"#BBF7D0"),textAlign:"center"}}>
+        <div style={{fontSize:10,fontWeight:600,color:totalRemain>0?"#DC2626":"#059669",textTransform:"uppercase"}}>잔여 수량</div>
+        <div style={{fontSize:24,fontWeight:800,color:totalRemain>0?"#DC2626":"#059669",marginTop:2}}>{totalRemain.toLocaleString()}<span style={{fontSize:11,color:"#94A3B8"}}> pcs</span></div>
+      </div>
+      <div style={{padding:"14px 16px",borderRadius:10,background:"#EFF6FF",border:"1px solid #BFDBFE",textAlign:"center"}}>
+        <div style={{fontSize:10,fontWeight:600,color:"#2563EB",textTransform:"uppercase"}}>입고율</div>
+        <div style={{fontSize:24,fontWeight:800,color:"#2563EB",marginTop:2}}>{totalProgress}%</div>
+        <div style={{marginTop:4,height:5,background:"#E2E8F0",borderRadius:3}}><div style={{height:"100%",borderRadius:3,background:totalProgress>=100?"#059669":"#2563EB",width:Math.min(totalProgress,100)+"%"}} /></div>
+      </div>
+    </div>}
+
+    {/* 검색 */}
+    {orderSummary.length>0&&<div style={{marginBottom:12,display:"flex",gap:8,alignItems:"center"}}>
+      <Input value={search} onChange={e=>setSearch(e.target.value)} placeholder="상품명/컬러/스타일NO 검색..." style={{maxWidth:300}} />
+      <span style={{fontSize:12,color:"#64748B"}}>{filtered.length}건</span>
+    </div>}
+
+    {/* 오더/입고 테이블 */}
+    {filtered.length>0?(
+      <Table headers={["상품명","스타일NO","업체","컬러","사이즈","오더수량","입고수량","잔여수량","입고율","입고이력"]} maxH={450}>
+        {filtered.map((r,i)=>(
+          <tr key={i} style={{background:r.remainQty<=0?"#F0FDF408":r.progress<30?"#FEF2F208":"transparent"}}>
+            <Td style={{fontWeight:600,maxWidth:150,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.name}</Td>
+            <Td style={{fontFamily:"monospace",fontSize:11}}>{r.styleNo}</Td>
+            <Td style={{fontSize:11}}>{(r.supplier||"").length>8?(r.supplier||"").slice(0,8)+"…":r.supplier}</Td>
+            <Td style={{fontWeight:600}}>{r.color}</Td>
+            <Td>{r.size}</Td>
+            <Td style={{fontWeight:700}}>{r.orderQty.toLocaleString()}</Td>
+            <Td style={{fontWeight:700,color:"#059669"}}>{r.inboundQty.toLocaleString()}</Td>
+            <Td style={{fontWeight:700,color:r.remainQty>0?"#DC2626":"#059669"}}>{r.remainQty.toLocaleString()}</Td>
+            <Td><div style={{display:"flex",alignItems:"center",gap:6}}>
+              <div style={{flex:1,height:6,background:"#F1F5F9",borderRadius:3,maxWidth:50}}><div style={{height:"100%",borderRadius:3,background:r.progress>=100?"#059669":r.progress>=50?"#2563EB":"#DC2626",width:Math.min(r.progress,100)+"%"}} /></div>
+              <span style={{fontSize:11,fontWeight:600,color:r.progress>=100?"#059669":r.progress>=50?"#2563EB":"#DC2626",whiteSpace:"nowrap"}}>{r.progress}%</span>
+            </div></Td>
+            <Td>{r.inboundHistory.length>0?(<div style={{display:"flex",gap:3,flexWrap:"wrap"}}>{r.inboundHistory.map((h,j)=>(<span key={j} style={{fontSize:9,padding:"2px 5px",borderRadius:3,background:"#EFF6FF",color:"#2563EB",fontWeight:600,whiteSpace:"nowrap"}}>{(h.date||"").slice(5)} {h.qty}</span>))}</div>):<span style={{fontSize:11,color:"#94A3B8"}}>-</span>}</Td>
+          </tr>))}
+      </Table>
+    ):orders.length===0?(
+      <div style={{padding:60,textAlign:"center",color:"#94A3B8"}}>
+        <div style={{fontSize:40,marginBottom:12}}>📋</div>
+        <div style={{fontSize:14}}>작업지시서 엑셀 파일을 업로드하면 오더 데이터가 자동 정리됩니다.</div>
+      </div>
+    ):(
+      <div style={{padding:30,textAlign:"center",color:"#94A3B8",fontSize:13}}>검색 결과가 없습니다.</div>
+    )}
+
+    {/* 날짜/패킹별 입고 이력 */}
+    {inboundByDate.length>0&&<div style={{marginTop:20}}>
+      <div style={{fontSize:14,fontWeight:700,color:"#0F172A",marginBottom:10}}>📅 입고 이력</div>
+      {inboundByDate.map((d,i)=>(<div key={i} style={{padding:"12px 16px",borderRadius:8,background:"#F8FAFC",border:"1px solid #E2E8F0",marginBottom:8}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+          <span style={{fontSize:13,fontWeight:700,color:"#1E293B"}}>{d.label} {d.date&&d.label!==d.date?`(${d.date})`:""}</span>
+          <Badge color="#059669">총 {d.totalQty.toLocaleString()}pcs</Badge>
+        </div>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{d.items.slice(0,10).map((item,j)=>(<span key={j} style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"#EFF6FF",color:"#1E40AF",fontWeight:600}}>{item.product_name||item.color} {item.size} {item.qty}pcs</span>))}{d.items.length>10&&<span style={{fontSize:10,color:"#94A3B8"}}>+{d.items.length-10}건</span>}</div>
+      </div>))}
+    </div>}
   </>);
 }
-
 
 // ─── Tab: 상품 마스터 ───
 function ProductMasterTab(){
@@ -1816,7 +1957,6 @@ export default function Dashboard(){
     {id:"schedule",label:"입고 스케줄",icon:"📅"},
     {id:"reorder",label:"리오더",icon:"🔄"},
     {id:"ordertrack",label:"오더 입고현황",icon:"📊"},
-    {id:"packing",label:"패킹리스트",icon:"📦"},
     {id:"sample",label:"샘플 진행",icon:"🧪"},
     {id:"measure",label:"실측 사이즈",icon:"📐"},
     {id:"products",label:"상품 마스터",icon:"📋"},
