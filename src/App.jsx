@@ -1156,7 +1156,7 @@ function ReorderTab(){
   const[autoEnabled,setAutoEnabled]=useState(true);
   const[filter,setFilter]=useState("전체");
   const[search,setSearch]=useState("");
-  const[sortCol,setSortCol]=useState("exhaustDays");
+  const[sortCol,setSortCol]=useState("name");
   const[sortAsc,setSortAsc]=useState(true);
 
   // Google Sheets에서 데이터 가져오기
@@ -1256,16 +1256,22 @@ function ReorderTab(){
     return true;
   });
   const sorted=[...filtered].sort((a,b)=>{
-    // 1차: 상품명 가나다순
-    const nameComp=(a.name||"").localeCompare(b.name||"","ko");
-    if(nameComp!==0)return nameComp;
-    // 2차: 옵션 가나다순 (같은 상품끼리 묶기)
-    const optComp=(a.option||"").localeCompare(b.option||"","ko");
-    if(optComp!==0)return optComp;
-    // 3차: 사용자 선택 정렬
+    if(sortCol==="name"){
+      // 상품명 가나다순 → 옵션순
+      const nc=(a.name||"").localeCompare(b.name||"","ko");
+      if(nc!==0)return sortAsc?nc:-nc;
+      return(a.option||"").localeCompare(b.option||"","ko");
+    }
+    // 사용자 지정 정렬이지만, 같은 상품끼리는 묶기
     const av=a[sortCol]??0,bv=b[sortCol]??0;
-    if(typeof av==="string")return sortAsc?av.localeCompare(bv):bv.localeCompare(av);
-    return sortAsc?av-bv:bv-av;
+    let cmp=0;
+    if(typeof av==="string")cmp=av.localeCompare(bv);
+    else cmp=av-bv;
+    if(cmp!==0)return sortAsc?cmp:-cmp;
+    // 같은 값이면 상품명+옵션으로 묶기
+    const nc=(a.name||"").localeCompare(b.name||"","ko");
+    if(nc!==0)return nc;
+    return(a.option||"").localeCompare(b.option||"","ko");
   });
 
   const statusCounts={};
