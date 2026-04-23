@@ -1502,6 +1502,7 @@ function OrderTrackingTab(){
   const[loading,setLoading]=useState(true);
   const[search,setSearch]=useState("");
   const[woFileName,setWoFileName]=useState("");
+  const[woDate,setWoDate]=useState("");
   const[plDate,setPlDate]=useState(new Date().toISOString().slice(0,10));
   const woRef=useRef(null);
   const plRef=useRef(null);
@@ -1549,9 +1550,15 @@ function OrderTrackingTab(){
           const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:""});
 
           // Row 3~4: STYLE NO(col1), 상품명(col2), 작업처(col3)
-          let styleNo="",productName="",supplier="";
+          let styleNo="",productName="",supplier="",woDate="";
           for(let i=0;i<Math.min(6,rows.length);i++){
             const r=(rows[i]||[]).map(v=>String(v||""));
+            // 작성일 찾기
+            if(r.some(v=>/작\s*성\s*일/i.test(v))){
+              for(let j=0;j<r.length;j++){
+                if(/\d{4}[.\-\/]\s*\d{1,2}[.\-\/]\s*\d{1,2}/.test(r[j])){woDate=r[j].trim();break;}
+              }
+            }
             if(r.some(v=>/STYLE/i.test(v))){
               const nr=(rows[i+1]||[]).map(v=>String(v||"").trim());
               styleNo=(nr[1]||"").trim();
@@ -1616,7 +1623,8 @@ function OrderTrackingTab(){
                   supplier,color:colorKr,size:sizes[si],
                   order_qty:qty,
                   option:match?match[F.OPT]:"["+colorKr+"-"+sizes[si]+"]",
-                  sheet_name:sheetName
+                  sheet_name:sheetName,
+                  _woDate:woDate
                 });
               }
             }
@@ -1624,9 +1632,13 @@ function OrderTrackingTab(){
         }
 
         if(allItems.length===0){alert("작업지시서에서 데이터를 파싱할 수 없습니다.");return;}
+        // 작성일 추출 (첫번째 시트 기준)
+        const foundDate=allItems[0]?._woDate||"";
+        if(foundDate)setWoDate(foundDate);
         let count=0;
         for(const item of allItems){
-          const r=await sb.insert("orders",item);
+          const{_woDate,...saveItem}=item;
+          const r=await sb.insert("orders",saveItem);
           if(r&&r[0]){setOrders(p=>[r[0],...p]);count++;}
         }
         const dbMatched=allItems.filter(x=>x.product_code).length;
@@ -1818,7 +1830,7 @@ function OrderTrackingTab(){
 
     {/* 오더/입고 테이블 */}
     {filtered.length>0?(
-      <Table headers={["상품명","스타일NO","업체","컬러","사이즈","오더수량","입고수량","잔여수량","입고율","입고이력"]} maxH={450}>
+      <Table headers={["상품명","스타일NO","업체","컬러","사이즈","오더수량"+(woDate?" ("+woDate+")":""),"입고수량","잔여수량","입고율","입고이력"]} maxH={450}>
         {filtered.map((r,i)=>(
           <tr key={i} style={{background:r.remainQty<=0?"#F0FDF408":r.progress<30?"#FEF2F208":"transparent"}}>
             <Td style={{fontWeight:600,maxWidth:150,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.name}</Td>
