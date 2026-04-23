@@ -1525,16 +1525,35 @@ function OrderTrackingTab(){
         const allItems=[];
         const orderName=file.name.replace(/\.[^.]+$/,"");
 
+        const ENG_KR={"WHITE":"화이트","BLACK":"블랙","NAVY":"네이비","CHARCOAL":"차콜","MELANGE":"멜란지","CREAM":"크림","BURGUNDY":"버건디","BROWN":"브라운","BEIGE":"베이지","RED":"레드","BLUE":"블루","GREEN":"그린","PINK":"핑크","KHAKI":"카키","WINE":"와인","WHITE MELANGE":"백멜란지"};
+
+        const findInDB=(styleNo,colorKr,size)=>{
+          const sUp=(size||"").toUpperCase();
+          const cands=SKUS.filter(s=>(s[F.BC]||"").includes(styleNo));
+          if(cands.length>0){
+            const exact=cands.find(s=>{
+              const opt=(s[F.OPT]||"").replace(/[\[\]]/g,"");
+              const parts=opt.split("-");
+              const oC=parts[0]||"";const oS=(parts[parts.length-1]||"").toUpperCase();
+              return oC===colorKr&&oS===sUp;
+            });
+            if(exact)return exact;
+            const partial=cands.find(s=>(s[F.OPT]||"").includes(colorKr)&&(s[F.OPT]||"").toUpperCase().includes(sUp));
+            if(partial)return partial;
+          }
+          return null;
+        };
+
         for(const sheetName of workbook.SheetNames){
           const ws=workbook.Sheets[sheetName];
           const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:""});
-          
-          // Row 3~4: STYLE NO, 상품명, 작업처
+
+          // Row 3~4: STYLE NO(col1), 상품명(col2), 작업처(col3)
           let styleNo="",productName="",supplier="";
           for(let i=0;i<Math.min(6,rows.length);i++){
             const r=(rows[i]||[]).map(v=>String(v||""));
             if(r.some(v=>/STYLE/i.test(v))){
-              const nr=(rows[i+1]||[]).map(v=>String(v||""));
+              const nr=(rows[i+1]||[]).map(v=>String(v||"").trim());
               styleNo=(nr[1]||"").trim();
               productName=(nr[2]||"").trim();
               supplier=(nr[3]||"").trim();
@@ -1542,81 +1561,76 @@ function OrderTrackingTab(){
             }
           }
           if(!styleNo)continue;
+          const baseStyle=styleNo.replace(/\s*-\s*\d+$/,"").trim();
 
-          // COLOR/SIZE/Q'TY 테이블 찾기 - row 20 이후에서 COLOR+SIZE 또는 COLOR+Q'TY가 같은 행에 있는 경우
-          let tableRow=-1;
+          // COLOR 헤더 찾기: col 11에 "COLOR"가 있는 행 (row 20 이후)
+          let colorHeaderRow=-1;
           for(let i=20;i<Math.min(rows.length,42);i++){
-            const r=(rows[i]||[]).map(v=>String(v||"").trim());
-            const hasColor=r.some(v=>/^COLOR$/i.test(v));
-            const hasSizeOrQty=r.some(v=>/^SIZE$/i.test(v)||/Q.*T/i.test(v));
-            if(hasColor&&hasSizeOrQty){tableRow=i;break;}
+            const v=String((rows[i]||[])[11]||"").trim().toUpperCase();
+            if(v==="COLOR"||v==="COLOUR"){colorHeaderRow=i;break;}
           }
-          if(tableRow<0)continue;
+          if(colorHeaderRow<0)continue;
 
-          // 사이즈 라벨 추출 (다음 행, col 14~18 부근)
-          const sizeRow=(rows[tableRow+1]||[]).map(v=>String(v||"").trim());
-          const sizes=[];const sizeIdxs=[];
-          for(let j=14;j<sizeRow.length;j++){
-            const v=sizeRow[j];
-            if(/^(S|M|L|XL|2XL|3XL|XXL|FREE|F|OS)$/i.test(v)||/^M\(/.test(v)||/^L\(/.test(v)||/^XL\(/.test(v)){
-              sizes.push(v.replace(/\(.*\)/,"").trim());sizeIdxs.push(j);
-            }
-          }
-          // 사이즈가 없으면 tableRow 자체에서 찾기
-          if(sizes.length===0){
-            const tr=(rows[tableRow]||[]).map(v=>String(v||"").trim());
-            for(let j=14;j<tr.length;j++){
-              const v=tr[j];
+          // SIZE 라벨 찾기: colorHeaderRow+1 또는 colorHeaderRow+2의 col 12~16
+          let sizes=[],sizeIdxs=[];
+          for(let offset=1;offset<=2;offset++){
+            const sr=(rows[colorHeaderRow+offset]||[]).map(v=>String(v||"").trim());
+            sizes=[];sizeIdxs=[];
+            for(let j=12;j<=16;j++){
+              const v=(sr[j]||"").replace(/\(.*\)/g,"").trim();
               if(/^(S|M|L|XL|2XL|3XL|XXL|FREE|F|OS)$/i.test(v)){sizes.push(v);sizeIdxs.push(j);}
             }
+            if(sizes.length>0)break;
           }
 
-          // 컬러+수량 행 파싱 (tableRow+2부터)
-          for(let i=tableRow+2;i<Math.min(rows.length,tableRow+12);i++){
-            const r=(rows[i]||[]).map(v=>String(v||"").trim());
-            // col 14 부근에서 컬러 찾기
-            let color="";
-            for(let j=11;j<=14;j++){
-              const v=r[j]||"";
-              if(v&&v.length>=2&&!/^\d+$/.test(v)&&!/^총수량|^0$|^SIZE/i.test(v)&&!/^\*/.test(v)){
-                color=v.replace(/\(\d+\)/g,"").trim();
-                break;
-              }
-            }
-            if(!color||color==="총수량")continue;
+          // 수량 데이터 행: SIZE 라벨이 있는 행 다음부터
+          const dataStartRow=colorHeaderRow+(sizes.length>0?2:2);
+          // 실제로 sizes가 colorHeaderRow+1에 있으면 data는 +2, +2에 있으면 +3
+          let actualDataStart=colorHeaderRow+2;
+          const checkRow=(rows[colorHeaderRow+2]||[]).map(v=>String(v||"").trim());
+          if(sizes.length>0&&sizeIdxs[0]&&/^(S|M|L|XL|2XL|3XL|XXL|FREE)$/i.test(checkRow[sizeIdxs[0]]||"")){
+            actualDataStart=colorHeaderRow+3;
+          }
 
-            // 사이즈별 수량 추출
-            if(sizeIdxs.length>0){
-              for(let si=0;si<sizes.length;si++){
-                const idx=sizeIdxs[si];
-                const qVal=r[idx]||"0";
-                const qty=parseInt(String(qVal).replace(/,/g,""));
-                if(qty>0){
-                  allItems.push({order_name:orderName,style_no:styleNo,product_name:productName,supplier,color,size:sizes[si],order_qty:qty,sheet_name:sheetName});
-                }
-              }
-            }else{
-              // 사이즈 인덱스 없으면 col 15~18에서 숫자 추출
-              const nums=[];
-              for(let j=15;j<Math.min(r.length,20);j++){
-                const n=parseInt(String(r[j]).replace(/,/g,""));
-                if(!isNaN(n)&&n>0)nums.push(n);
-              }
-              if(nums.length>0){
-                const total=nums.reduce((a,b)=>a+b,0);
-                allItems.push({order_name:orderName,style_no:styleNo,product_name:productName,supplier,color,size:"ALL",order_qty:total,sheet_name:sheetName});
+          for(let i=actualDataStart;i<Math.min(rows.length,actualDataStart+10);i++){
+            const r=(rows[i]||[]).map(v=>String(v||"").trim());
+            // 컬러: col 11
+            const colorRaw=(r[11]||"");
+            if(!colorRaw||colorRaw==="총수량")continue;
+            const color=colorRaw.replace(/\(\d+\)/g,"").replace(/\(새로.*\)/g,"").trim();
+            if(!color||color.length<1)continue;
+            const colorKr=ENG_KR[color.toUpperCase()]||color;
+
+            // 수량: sizeIdxs 위치에서 추출
+            for(let si=0;si<sizes.length;si++){
+              const idx=sizeIdxs[si];
+              const qStr=r[idx]||"0";
+              const qty=parseInt(String(qStr).replace(/,/g,""));
+              if(qty>0){
+                const match=findInDB(baseStyle,colorKr,sizes[si]);
+                allItems.push({
+                  order_name:orderName,style_no:baseStyle,
+                  product_name:match?match[F.NAME]:productName,
+                  product_code:match?match[F.CODE]:"",
+                  rep_code:match?match[F.REP]:"",
+                  supplier,color:colorKr,size:sizes[si],
+                  order_qty:qty,
+                  option:match?match[F.OPT]:"["+colorKr+"-"+sizes[si]+"]",
+                  sheet_name:sheetName
+                });
               }
             }
           }
         }
 
-        if(allItems.length===0){alert("작업지시서에서 데이터를 파싱할 수 없습니다.\n시트 내 COLOR/SIZE 테이블을 확인해주세요.");return;}
+        if(allItems.length===0){alert("작업지시서에서 데이터를 파싱할 수 없습니다.");return;}
         let count=0;
         for(const item of allItems){
           const r=await sb.insert("orders",item);
           if(r&&r[0]){setOrders(p=>[r[0],...p]);count++;}
         }
-        alert(count+"건의 오더 데이터가 등록되었습니다.");
+        const dbMatched=allItems.filter(x=>x.product_code).length;
+        alert(count+"건 오더 등록 완료 (DB매칭: "+dbMatched+"/"+count+"건)");
       }catch(e){alert("파일 파싱 오류: "+e.message);console.error(e);}
     };
     reader.readAsArrayBuffer(file);
