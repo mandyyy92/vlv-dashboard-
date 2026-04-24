@@ -711,128 +711,164 @@ function ScheduleTab(){
   const parseChat=async()=>{
     if(!chatInput.trim())return;
     const MON={JAN:"01",FEB:"02",MAR:"03",APR:"04",APRIL:"04",MAY:"05",JUN:"06",JUNE:"06",JUL:"07",JULY:"07",AUG:"08",SEP:"09",OCT:"10",NOV:"11",DEC:"12",JANUARY:"01",FEBRUARY:"02",MARCH:"03",AUGUST:"08",SEPTEMBER:"09",OCTOBER:"10",NOVEMBER:"11",DECEMBER:"12"};
-    const text=chatInput.trim();
-    let curSup="인도";let addedCount=0;
-
-    // 날짜 추출
-    const findDate=(s)=>{
-      let m=s.match(/(\d{1,2})(?:st|nd|rd|th)?\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)/i);
-      if(m){const mo=MON[m[2].toUpperCase()]||MON[m[2].toUpperCase().slice(0,3)];if(mo)return`2026-${mo}-${m[1].padStart(2,"0")}`;}
-      m=s.match(/(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?/i);
-      if(m){const mo=MON[m[1].toUpperCase()]||MON[m[1].toUpperCase().slice(0,3)];if(mo)return`2026-${mo}-${m[2].padStart(2,"0")}`;}
-      m=s.match(/(\d{1,2})[\/.\-](\d{1,2})/);
-      if(m)return`2026-${m[1].padStart(2,"0")}-${m[2].padStart(2,"0")}`;
-      return null;
+    // 영문→한글 상품명 번역
+    const ENG_NAME={"PIGMENT TEE":"피그먼트 티셔츠","PIGMENT TEES":"피그먼트 티셔츠","GRAYCHILL":"그레이칠","RINGER T-SHIRT":"링거 티셔츠","UNISEX RINGER T-SHIRT":"유니섹스 링거 티셔츠","WOMEN'S LONG SLEEVE":"여성용 긴팔","WOMEN'S LONG SLEEVES":"여성용 긴팔","LONG SLEEVE":"긴팔","HOODIE":"후디","SWEATSHIRT":"맨투맨","T-SHIRT":"티셔츠","CREWNECK":"크루넥","WINDBREAKER":"바람막이","JOGGER":"조거팬츠","RAGLAN":"레글런"};
+    const translateName=(name)=>{
+      const up=(name||"").toUpperCase().trim();
+      for(const[eng,kr] of Object.entries(ENG_NAME)){if(up.includes(eng))return kr;}
+      return name;
     };
-    // 수량 추출
-    const findQty=(s)=>{
-      const m=s.match(/([\d,]+)\s*(?:pcs|장|ea|개)/i)||s.match(/Approx\.?\s*([\d,]+)\s*(?:pcs|장)?/i)||s.match(/\(([\d,]+)\s*(?:pcs|장)?\)/i);
-      return m?parseInt(m[1].replace(/,/g,"")):0;
-    };
-    // 상품명 정리
-    const cleanName=(s)=>s.replace(/[\d,]+\s*(?:pcs|장|ea|개)/gi,"").replace(/Approx\.?/gi,"")
-      .replace(/Delivery\s+Date\s+Korea\s*:?/gi,"").replace(/Air\s+Shipment\s*:?|Sea\s+Shipment\s*:?/gi,"")
-      .replace(/will\s+(?:also\s+)?be\s+(?:dispatched|delivered|shipped|ready|packed)/gi,"")
-      .replace(/(?:are\s+)?packed\s+ready/gi,"").replace(/(?:from|on|in)\s+(?:the\s+)?(?:factory|Korea)/gi,"")
-      .replace(/\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*/gi,"")
-      .replace(/(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{1,2}(?:st|nd|rd|th)?/gi,"")
-      .replace(/[().]/g," ").replace(/^\s*-\s*|\s*-\s*$/g,"").replace(/\s+/g," ").trim();
 
-    // 업체 감지
-    if(/인도/i.test(text))curSup="인도";
-    if(/코니키즈|코니/i.test(text))curSup="코니키즈";
-    if(/성은교역|성은/i.test(text))curSup="성은교역";
+    try{
+      const raw=chatInput.trim();
+      let curSup="인도";let addedCount=0;
+      const results=[];
 
-    // "Delivery Date Korea" 블록 기반 파싱
-    const normalizedText=text.replace(/\\n/g,"\n").replace(/\r\n/g,"\n").replace(/\r/g,"\n");
-    const deliveryBlocks=normalizedText.split(/(?=Delivery\s+Date\s+Korea)/i);
-    const results=[];
+      // 날짜 추출
+      const findDate=(s)=>{
+        if(!s)return null;
+        let m;
+        // "08 April" / "3 April"
+        m=s.match(/(\d{1,2})(?:st|nd|rd|th)?\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)/i);
+        if(m){const mo=MON[m[2].toUpperCase()]||MON[m[2].toUpperCase().slice(0,3)];if(mo)return"2026-"+mo+"-"+m[1].padStart(2,"0");}
+        // "April 10" / "April 10th"
+        m=s.match(/(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?/i);
+        if(m){const mo=MON[m[1].toUpperCase()]||MON[m[1].toUpperCase().slice(0,3)];if(mo)return"2026-"+mo+"-"+m[2].padStart(2,"0");}
+        // "4/8" "4-8" "4.8"
+        m=s.match(/(\d{1,2})[\/.\-](\d{1,2})/);
+        if(m)return"2026-"+m[1].padStart(2,"0")+"-"+m[2].padStart(2,"0");
+        return null;
+      };
+      // 수량 추출
+      const findQty=(s)=>{
+        if(!s)return 0;
+        const m=s.match(/([\d,]+)\s*(?:pcs|장|ea|개)/i)||s.match(/Approx\.?\s*([\d,]+)/i)||s.match(/\(([\d,]+)\s*(?:pcs|장)?\)/i);
+        return m?parseInt(m[1].replace(/,/g,"")):0;
+      };
 
-    if(deliveryBlocks.length>1){
-      let pendingItems=[];
-      for(const block of deliveryBlocks){
-        const b=block.trim();if(!b)continue;
-        if(/^Delivery\s+Date\s+Korea/i.test(b)){
-          // 날짜 추출
-          const date=findDate(b);
-          // 앞서 모인 아이템들에 이 날짜 적용
-          pendingItems.forEach(it=>{if(!it.krDate)it.krDate=date;});
-          results.push(...pendingItems);
-          pendingItems=[];
-          // 이 블록 자체에도 아이템이 있을 수 있음 (같은 줄에)
-          const rest=b.replace(/Delivery\s+Date\s+Korea\s*:\s*/i,"");
-          const restDate=findDate(rest);
-          const restClean=cleanName(rest);
-          const restQty=findQty(rest);
-          if(restClean&&restClean.length>2&&restQty>0){
-            results.push({item:restClean,qty:restQty,krDate:restDate||date,shipType:""});
+      // 업체 감지
+      if(/인도|\bINDIA\b/i.test(raw))curSup="인도";
+      if(/코니키즈|코니/i.test(raw))curSup="코니키즈";
+      if(/성은교역|성은/i.test(raw))curSup="성은교역";
+
+      // === 방법1: "Delivery Date Korea" 패턴이 있는 경우 ===
+      if(/Delivery\s+Date\s+Korea/i.test(raw)){
+        // 전체를 한 줄로 합침
+        const oneLine=raw.replace(/\r?\n/g," ").replace(/\s+/g," ");
+        
+        // 전략: "Delivery Date Korea: [날짜]" 를 마커로 사용
+        // 각 마커 앞에 있는 아이템들을 그 날짜에 연결
+        const ddkPattern=/Delivery\s+Date\s+Korea\s*:\s*/gi;
+        const splits=oneLine.split(ddkPattern);
+        // splits[0] = 첫 DDK 앞 아이템들
+        // splits[1] = "08 April Sea Shipment..." (날짜 + 다음 아이템)
+        // splits[2] = "20 April Unisex..." (날짜 + 다음 아이템)
+        // splits[3] = "14th April. Women's..." (날짜 + 후속 문장)
+        
+        // 각 split에서 날짜를 추출하고, 날짜 뒤의 텍스트는 다음 블록 아이템
+        const blocks=[];
+        for(let i=1;i<splits.length;i++){
+          const date=findDate(splits[i]);
+          // 날짜 텍스트를 제거하고 남은 부분 = 다음 블록 아이템
+          let remaining=splits[i]
+            .replace(/^\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*/i,"")
+            .replace(/^(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{1,2}(?:st|nd|rd|th)?/i,"")
+            .replace(/^\.\s*/,"").trim();
+          // 이전 텍스트 (이 날짜에 연결될 아이템들)
+          let itemText=i===1?splits[0]:(blocks[blocks.length-1]?blocks[blocks.length-1]._remaining||"":"");
+          blocks.push({date,itemText,_remaining:remaining});
+        }
+        // 마지막 remaining 처리 (Delivery Date Korea가 없는 후속 문장)
+        const lastRemaining=blocks.length>0?blocks[blocks.length-1]._remaining:"";
+        
+        // 각 블록에서 아이템 추출
+        const extractFromText=(text,date,defaultShipType)=>{
+          if(!text||!date)return;
+          let st=defaultShipType||"";
+          if(/Air\s+Shipment/i.test(text))st="Air Shipment";
+          if(/Sea\s+Shipment/i.test(text))st="Sea Shipment";
+          const parts=text.split(/\s+-\s+/);
+          for(const part of parts){
+            const qty=findQty(part);
+            let name=part.replace(/([\d,]+)\s*(?:pcs|장|ea|개)/gi,"")
+              .replace(/Air\s+Shipment\s*:?|Sea\s+Shipment\s*:?/gi,"")
+              .replace(/(?:are\s+)?packed\s+ready/gi,"")
+              .replace(/will\s+(?:also\s+)?be\s+(?:dispatched|delivered|shipped)/gi,"")
+              .replace(/(?:from|on|in)\s+(?:the\s+)?(?:factory|Korea)/gi,"")
+              .replace(/Approx\.?/gi,"")
+              .replace(/\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*/gi,"")
+              .replace(/(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{1,2}(?:st|nd|rd|th)?/gi,"")
+              .replace(/[().]/g," ").replace(/\s+/g," ").trim();
+            if(name.length>1&&qty>0){
+              results.push({item:translateName(name),qty,krDate:date,shipType:st,supplier:curSup});
+            }
           }
-        }else{
-          // 아이템 영역 (Delivery Date Korea 앞)
-          let shipType="";
-          if(/Air\s+Shipment/i.test(b))shipType="Air Shipment";
-          if(/Sea\s+Shipment/i.test(b))shipType="Sea Shipment";
-          // 줄 단위 + "-" 구분으로 아이템 추출
-          const lines=b.split("\n").map(l=>l.trim()).filter(l=>l);
-          for(const line of lines){
-            if(/^Air\s+Shipment\s*:?$/i.test(line)||/^Sea\s+Shipment\s*:?$/i.test(line)){
-              if(/Air/i.test(line))shipType="Air Shipment";else shipType="Sea Shipment";
-              continue;
-            }
-            const subItems=line.split(/\s+-\s+/);
-            const lineDate=findDate(line);
-            if(/Air\s+Shipment/i.test(line))shipType="Air Shipment";
-            if(/Sea\s+Shipment/i.test(line))shipType="Sea Shipment";
-            for(const sub of subItems){
-              const qty=findQty(sub);
-              const name=cleanName(sub);
-              if((name&&name.length>1)||(qty>0)){
-                pendingItems.push({item:name||"입고건",qty,krDate:lineDate,shipType});
-              }
-            }
+        };
+        
+        for(const block of blocks){
+          extractFromText(block.itemText,block.date,"");
+        }
+        
+        // 마지막 remaining에 독립 문장이 있으면 처리
+        // "Women's Long Sleeves will be delivered on April 10 in Korea (3,000pcs)"
+        if(lastRemaining){
+          const d2=findDate(lastRemaining);
+          const q2=findQty(lastRemaining);
+          if(d2&&q2){
+            let n2=lastRemaining.replace(/([\d,]+)\s*(?:pcs|장|ea|개)/gi,"")
+              .replace(/will\s+be\s+delivered/gi,"").replace(/(?:on|in)\s+(?:Korea)?/gi,"")
+              .replace(/\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*/gi,"")
+              .replace(/(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{1,2}(?:st|nd|rd|th)?/gi,"")
+              .replace(/Approx\.?/gi,"").replace(/[().]/g," ").replace(/\s+/g," ").trim();
+            if(n2.length>1)results.push({item:translateName(n2),qty:q2,krDate:d2,shipType:"",supplier:curSup});
           }
         }
       }
-      if(pendingItems.length>0)results.push(...pendingItems);
-    }else{
-      // Delivery Date Korea 패턴 없음 - 줄 단위 파싱
-      // 한글/영문 모두 지원: 각 줄에서 날짜+수량+상품명 추출
-      const lines=normalizedText.split("\n").map(l=>l.trim()).filter(l=>l);
-      let lastDate=null;
-      for(const line of lines){
-        if(/인도/i.test(line))curSup="인도";
-        if(/코니키즈|코니/i.test(line))curSup="코니키즈";
-        if(/성은교역|성은/i.test(line))curSup="성은교역";
-        const date=findDate(line);
-        if(date)lastDate=date;
-        const qty=findQty(line);
-        const qm=line.match(/([\d,]+)\s*장/);const qty2=qm?parseInt(qm[1].replace(/,/g,"")):qty;
-        const name=cleanName(line);
-        const useDate=date||lastDate;
-        if(useDate&&(name||qty2)){results.push({item:name||"입고건",qty:qty2,krDate:useDate,shipType:""});}
-        else if(!useDate&&name&&qty2){results.push({item:name,qty:qty2,krDate:null,shipType:""});}
+      // === 방법2: 한글 카톡 형식 또는 기타 ===
+      else{
+        const lines=raw.split(/\r?\n/).map(l=>l.trim()).filter(l=>l);
+        let lastDate=null;
+        for(const line of lines){
+          if(/인도|\[인도\]/i.test(line))curSup="인도";
+          if(/코니키즈|코니|\[코니/i.test(line))curSup="코니키즈";
+          if(/성은교역|성은|\[성은/i.test(line))curSup="성은교역";
+          const date=findDate(line);
+          if(date)lastDate=date;
+          const qty=findQty(line);
+          const qm=line.match(/([\d,]+)\s*장/);
+          const qty2=qm?parseInt(qm[1].replace(/,/g,"")):qty;
+          let name=line.replace(/([\d,]+)\s*(?:pcs|장|ea)/gi,"").replace(/\d{1,2}[\/.\-]\d{1,2}/g,"")
+            .replace(/\[.*?\]/g,"").replace(/인도|코니키즈|성은교역|오전|오후|\d{1,2}:\d{2}/g,"")
+            .replace(/입고|예정|완료|선적/g,"").replace(/\s+/g," ").trim();
+          const useDate=date||lastDate;
+          if(useDate&&(name||qty2)){
+            results.push({item:translateName(name)||"입고건",qty:qty2,krDate:useDate,shipType:"",supplier:curSup});
+          }
+        }
       }
-    }
 
-    // 중복 제거 후 Supabase 저장
-    const seen=new Set();
-    for(const p of results){
-      if(!p.krDate&&!p.qty)continue;
-      const key=`${p.item}_${p.qty}_${p.krDate}`;
-      if(seen.has(key))continue;seen.add(key);
-      const krDate=p.krDate||new Date().toISOString().slice(0,10);const ozD=new Date(krDate);
-      ozD.setDate(ozD.getDate()+3);
-      const row={supplier:p.supplier||curSup,item:p.item||"입고건",qty:p.qty||0,
-        ship_date:null,kr_date:krDate,oz_date:ozD?ozD.toISOString().slice(0,10):null,
-        ship_type:p.shipType||"",note:"",status:"입고예정",
-        date:krDate||new Date().toISOString().slice(0,10),
-        lead_days:(p.supplier||curSup)==="인도"?30:(p.supplier||curSup)==="코니키즈"?21:14};
-      const r=await sb.insert("schedules",row);
-      if(r&&r[0]){setSchedules(prev=>[r[0],...prev]);addedCount++;}
+      // 중복 제거 + 빈 항목 제거 후 저장
+      const seen=new Set();
+      for(const p of results){
+        if(!p.item||p.item.length<2)continue;
+        const key=p.item+"_"+p.qty+"_"+p.krDate;
+        if(seen.has(key))continue;seen.add(key);
+        const krDate=p.krDate||new Date().toISOString().slice(0,10);
+        const ozD=new Date(krDate);ozD.setDate(ozD.getDate()+3);
+        const row={supplier:p.supplier||curSup,item:p.item,qty:p.qty||0,
+          ship_date:null,kr_date:krDate,oz_date:ozD.toISOString().slice(0,10),
+          ship_type:p.shipType||"",note:"",status:"입고예정",
+          date:krDate,lead_days:(p.supplier||curSup)==="인도"?30:(p.supplier||curSup)==="코니키즈"?21:14};
+        const r=await sb.insert("schedules",row);
+        if(r&&r[0]){setSchedules(prev=>[r[0],...prev]);addedCount++;}
+      }
+      setChatInput("");
+      if(addedCount>0)alert(addedCount+"건의 스케줄이 등록되었습니다.");
+      else alert("스케줄을 파싱할 수 없습니다.\n날짜와 상품 정보를 확인해주세요.\n\n지원 형식:\n• Delivery Date Korea: 08 April\n• 4/8 브이넥티 300장\n• [인도] 피그먼트 500장 입고 4.10");
+    }catch(e){
+      console.error("parseChat error:",e);
+      alert("파싱 오류: "+e.message);
     }
-    setChatInput("");
-    if(addedCount>0)alert(`${addedCount}건의 스케줄이 등록되었습니다.`);
-    else alert("스케줄을 파싱할 수 없습니다. 날짜와 상품 정보를 확인해주세요.");
   };
 
   const delSchedule=async(id)=>{await sb.remove("schedules",id);setSchedules(p=>p.filter(s=>s.id!==id));};
@@ -1384,9 +1420,9 @@ function ReorderTab(){
       {/* 상태 카드 */}
       <div style={{display:"flex",gap:10,marginBottom:16}}>
         {["품절","긴급발주","발주필요","발주검토","재고충분"].map(st=>{const cnt=statusCounts[st]||0;const{color,bg}=statusStyle(st);
-          return(<div key={st} onClick={()=>setFilter(filter===st?"전체":st)} style={{flex:1,padding:"12px 14px",borderRadius:10,background:bg,border:`1px solid ${color}20`,textAlign:"center",cursor:"pointer",outline:filter===st?`2px solid ${color}`:"none",transition:"all 0.15s"}}>
-            <div style={{fontSize:22,fontWeight:800,color}}>{cnt}</div>
-            <div style={{fontSize:10,fontWeight:600,color,marginTop:2}}>{st}</div>
+          return(<div key={st} onClick={()=>setFilter(filter===st?"전체":st)} style={{flex:1,padding:"16px 14px",borderRadius:10,background:bg,border:`1px solid ${color}20`,textAlign:"center",cursor:"pointer",outline:filter===st?`2px solid ${color}`:"none",transition:"all 0.15s"}}>
+            <div style={{fontSize:32,fontWeight:800,color}}>{cnt}</div>
+            <div style={{fontSize:13,fontWeight:600,color,marginTop:4}}>{st}</div>
           </div>);
         })}
       </div>
