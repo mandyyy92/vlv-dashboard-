@@ -1571,11 +1571,16 @@ function OrderTrackingTab(){
           let styleNo="",productName="",supplier="",woDate="";
           for(let i=0;i<Math.min(6,rows.length);i++){
             const r=(rows[i]||[]).map(v=>String(v||""));
-            // 작성일 찾기
-            if(r.some(v=>/작\s*성\s*일/i.test(v))){
-              for(let j=0;j<r.length;j++){
-                if(/\d{4}[.\-\/]\s*\d{1,2}[.\-\/]\s*\d{1,2}/.test(r[j])){woDate=r[j].trim();break;}
+            // 작성일/승인날짜 찾기
+            for(let j=0;j<r.length;j++){
+              if(/작\s*성\s*일|승인\s*날짜|DATE/i.test(r[j])){
+                // 같은 행에서 날짜 형식 찾기
+                for(let k=j+1;k<r.length;k++){
+                  if(/\d{4}[.\-\/]\s*\d{1,2}[.\-\/]\s*\d{1,2}/.test(r[k])){woDate=r[k].trim();break;}
+                }
               }
+              // 셀 자체가 날짜인 경우
+              if(!woDate&&/^\d{4}[.\-\/]\s*\d{1,2}[.\-\/]\s*\d{1,2}$/.test(r[j].trim()))woDate=r[j].trim();
             }
             if(r.some(v=>/STYLE/i.test(v))){
               const nr=(rows[i+1]||[]).map(v=>String(v||"").trim());
