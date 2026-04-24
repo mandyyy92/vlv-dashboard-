@@ -744,7 +744,8 @@ function ScheduleTab(){
     if(/성은교역|성은/i.test(text))curSup="성은교역";
 
     // "Delivery Date Korea" 블록 기반 파싱
-    const deliveryBlocks=text.split(/(?=Delivery\s+Date\s+Korea)/i);
+    const normalizedText=text.replace(/\\n/g,"\n").replace(/\r\n/g,"\n").replace(/\r/g,"\n");
+    const deliveryBlocks=normalizedText.split(/(?=Delivery\s+Date\s+Korea)/i);
     const results=[];
 
     if(deliveryBlocks.length>1){
@@ -795,15 +796,21 @@ function ScheduleTab(){
       if(pendingItems.length>0)results.push(...pendingItems);
     }else{
       // Delivery Date Korea 패턴 없음 - 줄 단위 파싱
-      const lines=text.split("\n").map(l=>l.trim()).filter(l=>l);
+      // 한글/영문 모두 지원: 각 줄에서 날짜+수량+상품명 추출
+      const lines=normalizedText.split("\n").map(l=>l.trim()).filter(l=>l);
+      let lastDate=null;
       for(const line of lines){
         if(/인도/i.test(line))curSup="인도";
         if(/코니키즈|코니/i.test(line))curSup="코니키즈";
         if(/성은교역|성은/i.test(line))curSup="성은교역";
-        const date=findDate(line);const qty=findQty(line);
+        const date=findDate(line);
+        if(date)lastDate=date;
+        const qty=findQty(line);
         const qm=line.match(/([\d,]+)\s*장/);const qty2=qm?parseInt(qm[1].replace(/,/g,"")):qty;
         const name=cleanName(line);
-        if(date&&(name||qty2)){results.push({item:name||"입고건",qty:qty2,krDate:date,shipType:""});}
+        const useDate=date||lastDate;
+        if(useDate&&(name||qty2)){results.push({item:name||"입고건",qty:qty2,krDate:useDate,shipType:""});}
+        else if(!useDate&&name&&qty2){results.push({item:name,qty:qty2,krDate:null,shipType:""});}
       }
     }
 
@@ -813,8 +820,8 @@ function ScheduleTab(){
       if(!p.krDate&&!p.qty)continue;
       const key=`${p.item}_${p.qty}_${p.krDate}`;
       if(seen.has(key))continue;seen.add(key);
-      const krDate=p.krDate;const ozD=krDate?new Date(krDate):null;
-      if(ozD)ozD.setDate(ozD.getDate()+3);
+      const krDate=p.krDate||new Date().toISOString().slice(0,10);const ozD=new Date(krDate);
+      ozD.setDate(ozD.getDate()+3);
       const row={supplier:p.supplier||curSup,item:p.item||"입고건",qty:p.qty||0,
         ship_date:null,kr_date:krDate,oz_date:ozD?ozD.toISOString().slice(0,10):null,
         ship_type:p.shipType||"",note:"",status:"입고예정",
@@ -1786,19 +1793,6 @@ function OrderTrackingTab(){
       📋 작업지시서를 업로드하면 상품별 총 오더 수량이 자동 정리됩니다. 이후 패킹리스트 파일을 날짜별로 업로드하면 입고 수량이 누적됩니다.
     </div>
 
-    {/* 업로드 영역 */}
-    <SectionCard title="📁 작업지시서 업로드">
-      <div onClick={()=>woRef.current?.click()} style={{height:120,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"#FFFBEB",borderRadius:12,border:"2px dashed #FDE68A",cursor:"pointer",gap:6}}
-        onDragOver={e=>{e.preventDefault();e.currentTarget.style.borderColor="#F59E0B";}}
-        onDragLeave={e=>{e.currentTarget.style.borderColor="#FDE68A";}}
-        onDrop={e=>{e.preventDefault();e.currentTarget.style.borderColor="#FDE68A";if(e.dataTransfer.files[0]){setWoFileName(e.dataTransfer.files[0].name);parseWorkOrder(e.dataTransfer.files[0]);}}}>
-        <input ref={woRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={e=>{if(e.target.files[0]){setWoFileName(e.target.files[0].name);parseWorkOrder(e.target.files[0]);}}} />
-        <span style={{fontSize:28}}>📂</span>
-        {woFileName?<span style={{fontSize:13,fontWeight:600,color:"#D97706"}}>{woFileName}</span>
-        :<><span style={{fontSize:13,fontWeight:600,color:"#D97706"}}>작업지시서 엑셀 드래그 또는 클릭</span><span style={{fontSize:11,color:"#94A3B8"}}>.xlsx / .xls</span></>}
-      </div>
-    </SectionCard>
-
     {/* 하단 버튼 영역 */}
     <div style={{display:"flex",gap:10,marginBottom:16,alignItems:"center",flexWrap:"wrap"}}>
       <div style={{display:"flex",alignItems:"center",gap:6}}>
@@ -1892,6 +1886,19 @@ function OrderTrackingTab(){
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{d.items.slice(0,10).map((item,j)=>(<span key={j} style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"#EFF6FF",color:"#1E40AF",fontWeight:600}}>{item.product_name||item.color} {item.size} {item.qty}pcs</span>))}{d.items.length>10&&<span style={{fontSize:10,color:"#94A3B8"}}>+{d.items.length-10}건</span>}</div>
       </div>))}
     </div>}
+
+    {/* 작업지시서 업로드 (하단) */}
+    <SectionCard title="📁 작업지시서 업로드" subtitle="시즌별 작업지시서 엑셀 파일을 업로드하면 오더 데이터가 자동 정리됩니다">
+      <div onClick={()=>woRef.current?.click()} style={{height:100,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"#FFFBEB",borderRadius:12,border:"2px dashed #FDE68A",cursor:"pointer",gap:6}}
+        onDragOver={e=>{e.preventDefault();e.currentTarget.style.borderColor="#F59E0B";}}
+        onDragLeave={e=>{e.currentTarget.style.borderColor="#FDE68A";}}
+        onDrop={e=>{e.preventDefault();e.currentTarget.style.borderColor="#FDE68A";if(e.dataTransfer.files[0]){setWoFileName(e.dataTransfer.files[0].name);parseWorkOrder(e.dataTransfer.files[0]);}}}>
+        <input ref={woRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={e=>{if(e.target.files[0]){setWoFileName(e.target.files[0].name);parseWorkOrder(e.target.files[0]);}}} />
+        <span style={{fontSize:24}}>📂</span>
+        {woFileName?<span style={{fontSize:13,fontWeight:600,color:"#D97706"}}>{woFileName}</span>
+        :<><span style={{fontSize:13,fontWeight:600,color:"#D97706"}}>작업지시서 엑셀 드래그 또는 클릭</span><span style={{fontSize:11,color:"#94A3B8"}}>.xlsx / .xls</span></>}
+      </div>
+    </SectionCard>
   </>);
 }
 
