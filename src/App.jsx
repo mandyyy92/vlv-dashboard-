@@ -2154,22 +2154,12 @@ export default function Dashboard(){
 
   return(
     <div style={{minHeight:"100vh",background:"#F1F5F9",fontFamily:"'Pretendard','Apple SD Gothic Neo',-apple-system,sans-serif"}}>
-      <div style={{background:"#0F172A",padding:"16px 28px",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:"1px solid #1E293B"}}>
-        <div style={{display:"flex",alignItems:"center",gap:14}}>
-          <div style={{width:36,height:36,borderRadius:8,background:"linear-gradient(135deg,#E8A87C,#D5A4CF)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:900,color:"#0F172A"}}>V</div>
-          <div>
-            <div style={{fontSize:16,fontWeight:800,color:"#F8FAFC",letterSpacing:-0.5}}>VIVA LA VIDA</div>
-            <div style={{fontSize:10,color:"#64748B",fontWeight:500,letterSpacing:2,textTransform:"uppercase"}}>Production Management</div>
-          </div>
-        </div>
-        <div style={{fontSize:12,color:"#64748B"}}>{time.toLocaleDateString("ko-KR",{year:"numeric",month:"long",day:"numeric",weekday:"long"})} · {time.toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})}</div>
-      </div>
 
       <div style={{background:"#FFFFFF",padding:"6px 20px",display:"flex",gap:4,borderBottom:"1px solid #E2E8F0",overflowX:"auto"}}>
         {tabs.map(t=>(<TabBtn key={t.id} active={activeTab===t.id} onClick={()=>setActiveTab(t.id)} icon={t.icon}>{t.label}</TabBtn>))}
       </div>
 
-      <div style={{padding:"24px 28px",maxWidth:1280,margin:"0 auto"}}>
+      <div style={{padding:"20px 16px"}}>
         {activeTab==="overview"&&renderOverview()}
         {activeTab==="products"&&<ProductMasterTab />}
         {activeTab==="packing"&&<PackingListTab />}
