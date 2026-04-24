@@ -1504,8 +1504,19 @@ function OrderTrackingTab(){
   const[woFileName,setWoFileName]=useState("");
   const[woDate,setWoDate]=useState("");
   const[plDate,setPlDate]=useState(new Date().toISOString().slice(0,10));
+  const[activeSeason,setActiveSeason]=useState("전체");
   const woRef=useRef(null);
   const plRef=useRef(null);
+
+  // 시즌 목록 추출
+  const seasons=useMemo(()=>{
+    const set=new Set();
+    orders.forEach(o=>{if(o.order_name){
+      const m=(o.order_name).match(/(\d{2})(FW|SS|AW|SU)/i);
+      if(m)set.add(m[1]+m[2].toUpperCase());
+    }});
+    return["전체",...[...set].sort().reverse()];
+  },[orders]);
 
   useEffect(()=>{(async()=>{setLoading(true);
     const o=await sb.get("orders");if(o)setOrders(o);
@@ -1708,8 +1719,13 @@ function OrderTrackingTab(){
 
   // ─── 데이터 집계 ───
   const orderSummary=useMemo(()=>{
+    // 시즌 필터 적용
+    const filteredOrders=activeSeason==="전체"?orders:orders.filter(o=>{
+      const m=(o.order_name||"").match(/(\d{2})(FW|SS|AW|SU)/i);
+      return m&&(m[1]+m[2].toUpperCase())===activeSeason;
+    });
     const map={};
-    orders.forEach(o=>{
+    filteredOrders.forEach(o=>{
       const key=`${o.product_name||""}__${o.color||""}__${o.size||""}`;
       if(!map[key])map[key]={styleNo:o.style_no,name:o.product_name,supplier:o.supplier,color:o.color,size:o.size,orderQty:0,orderName:o.order_name};
       map[key].orderQty+=(o.order_qty||0);
@@ -1730,7 +1746,7 @@ function OrderTrackingTab(){
       item.progress=item.orderQty>0?Math.round((item.inboundQty/item.orderQty)*100):0;
     });
     return Object.values(map).filter(v=>v.orderQty>0).sort((a,b)=>(a.name||"").localeCompare(b.name||"")||(a.color||"").localeCompare(b.color||"")||(a.size||"").localeCompare(b.size||""));
-  },[orders,inbounds]);
+  },[orders,inbounds,activeSeason]);
 
   const filtered=orderSummary.filter(r=>{
     if(!search)return true;const s=search.toLowerCase();
@@ -1822,10 +1838,18 @@ function OrderTrackingTab(){
       </div>
     </div>}
 
+    {/* 시즌 탭 */}
+    {seasons.length>1&&<div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
+      {seasons.map(s=>(<div key={s} onClick={()=>setActiveSeason(s)} style={{padding:"6px 16px",borderRadius:8,fontSize:12,fontWeight:activeSeason===s?700:500,
+        color:activeSeason===s?"#FFF":s==="전체"?"#334155":"#2563EB",
+        background:activeSeason===s?(s==="전체"?"#1E293B":"#2563EB"):(s==="전체"?"#F1F5F9":"#EFF6FF"),
+        border:`1px solid ${activeSeason===s?"transparent":"#E2E8F0"}`,cursor:"pointer",transition:"all 0.15s"}}>{s}</div>))}
+    </div>}
+
     {/* 검색 */}
     {orderSummary.length>0&&<div style={{marginBottom:12,display:"flex",gap:8,alignItems:"center"}}>
       <Input value={search} onChange={e=>setSearch(e.target.value)} placeholder="상품명/컬러/스타일NO 검색..." style={{maxWidth:300}} />
-      <span style={{fontSize:12,color:"#64748B"}}>{filtered.length}건</span>
+      <span style={{fontSize:12,color:"#64748B"}}>{filtered.length}건{activeSeason!=="전체"?" ("+activeSeason+")":""}</span>
     </div>}
 
     {/* 오더/입고 테이블 */}
