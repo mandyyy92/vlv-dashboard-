@@ -753,38 +753,40 @@ function ScheduleTab(){
 
       // === 방법1: "Delivery Date Korea" 패턴이 있는 경우 ===
       if(/Delivery\s+Date\s+Korea/i.test(raw)){
-        // 전체를 한 줄로 합침
         const oneLine=raw.replace(/\r?\n/g," ").replace(/\s+/g," ");
+        const splits=oneLine.split(/Delivery\s+Date\s+Korea\s*:\s*/i);
+        // splits[0]="Air Shipment: 1600pcs - Graychill..."
+        // splits[1]="08 April Sea Shipment 5300pcs..."
+        // splits[2]="20 April Unisex Ringer..."
+        // splits[3]="14th April. Women's Long Sleeves..."
         
-        // 전략: "Delivery Date Korea: [날짜]" 를 마커로 사용
-        // 각 마커 앞에 있는 아이템들을 그 날짜에 연결
-        const ddkPattern=/Delivery\s+Date\s+Korea\s*:\s*/gi;
-        const splits=oneLine.split(ddkPattern);
-        // splits[0] = 첫 DDK 앞 아이템들
-        // splits[1] = "08 April Sea Shipment..." (날짜 + 다음 아이템)
-        // splits[2] = "20 April Unisex..." (날짜 + 다음 아이템)
-        // splits[3] = "14th April. Women's..." (날짜 + 후속 문장)
+        const dateRe=/^(\d{1,2})(?:st|nd|rd|th)?\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)/i;
         
-        // 각 split에서 날짜를 추출하고, 날짜 뒤의 텍스트는 다음 블록 아이템
-        const blocks=[];
+        // 각 split에서 날짜 추출 + remaining 분리
+        const parsed=[];
         for(let i=1;i<splits.length;i++){
-          const date=findDate(splits[i]);
-          // 날짜 텍스트를 제거하고 남은 부분 = 다음 블록 아이템
-          let remaining=splits[i]
-            .replace(/^\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*/i,"")
-            .replace(/^(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{1,2}(?:st|nd|rd|th)?/i,"")
-            .replace(/^\.\s*/,"").trim();
-          // 이전 텍스트 (이 날짜에 연결될 아이템들)
-          let itemText=i===1?splits[0]:(blocks[blocks.length-1]?blocks[blocks.length-1]._remaining||"":"");
-          blocks.push({date,itemText,_remaining:remaining});
+          const seg=splits[i].trim();
+          const dm=seg.match(dateRe);
+          if(!dm)continue;
+          const mo=MON[dm[2].toUpperCase()]||MON[dm[2].toUpperCase().slice(0,3)];
+          const date="2026-"+mo+"-"+dm[1].padStart(2,"0");
+          const remaining=seg.slice(dm[0].length).replace(/^\.\s*/,"").trim();
+          
+          // 이 날짜에 연결될 아이템 텍스트
+          let itemsText="";
+          if(i===1){
+            itemsText=splits[0]; // 첫 번째 블록
+          }else{
+            // 이전 split의 remaining
+            itemsText=parsed[parsed.length-1]?parsed[parsed.length-1].remaining:"";
+          }
+          parsed.push({date,itemsText,remaining});
         }
-        // 마지막 remaining 처리 (Delivery Date Korea가 없는 후속 문장)
-        const lastRemaining=blocks.length>0?blocks[blocks.length-1]._remaining:"";
         
-        // 각 블록에서 아이템 추출
-        const extractFromText=(text,date,defaultShipType)=>{
+        // 아이템 추출 함수
+        const extract=(text,date)=>{
           if(!text||!date)return;
-          let st=defaultShipType||"";
+          let st="";
           if(/Air\s+Shipment/i.test(text))st="Air Shipment";
           if(/Sea\s+Shipment/i.test(text))st="Sea Shipment";
           const parts=text.split(/\s+-\s+/);
@@ -805,17 +807,15 @@ function ScheduleTab(){
           }
         };
         
-        for(const block of blocks){
-          extractFromText(block.itemText,block.date,"");
-        }
+        // 각 블록 처리
+        for(const p of parsed){extract(p.itemsText,p.date);}
         
-        // 마지막 remaining에 독립 문장이 있으면 처리
-        // "Women's Long Sleeves will be delivered on April 10 in Korea (3,000pcs)"
-        if(lastRemaining){
-          const d2=findDate(lastRemaining);
-          const q2=findQty(lastRemaining);
+        // 마지막 remaining 처리 (Delivery Date Korea 없는 후속 문장)
+        const lastR=parsed.length>0?parsed[parsed.length-1].remaining:"";
+        if(lastR){
+          const d2=findDate(lastR);const q2=findQty(lastR);
           if(d2&&q2){
-            let n2=lastRemaining.replace(/([\d,]+)\s*(?:pcs|장|ea|개)/gi,"")
+            let n2=lastR.replace(/([\d,]+)\s*(?:pcs|장|ea|개)/gi,"")
               .replace(/will\s+be\s+delivered/gi,"").replace(/(?:on|in)\s+(?:Korea)?/gi,"")
               .replace(/\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*/gi,"")
               .replace(/(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{1,2}(?:st|nd|rd|th)?/gi,"")
@@ -864,7 +864,11 @@ function ScheduleTab(){
       }
       setChatInput("");
       if(addedCount>0)alert(addedCount+"건의 스케줄이 등록되었습니다.");
-      else alert("스케줄을 파싱할 수 없습니다.\n날짜와 상품 정보를 확인해주세요.\n\n지원 형식:\n• Delivery Date Korea: 08 April\n• 4/8 브이넥티 300장\n• [인도] 피그먼트 500장 입고 4.10");
+      else{
+        const dbg="results="+results.length+", raw="+raw.slice(0,80)+"..., DDK="+(/Delivery/i.test(raw));
+        console.log("Parse failed:",dbg,results);
+        alert("파싱 결과: "+results.length+"건\n\n입력 내용 일부: "+raw.slice(0,60)+"...\n\nDelivery 패턴: "+(/Delivery\s+Date\s+Korea/i.test(raw))+"\n\n콘솔(F12)에서 상세 로그를 확인해주세요.");
+      }
     }catch(e){
       console.error("parseChat error:",e);
       alert("파싱 오류: "+e.message);
