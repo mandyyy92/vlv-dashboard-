@@ -849,6 +849,7 @@ function ScheduleTab(){
 
       // 중복 제거 + 빈 항목 제거 후 저장
       const seen=new Set();
+      let insertErrors=[];
       for(const p of results){
         if(!p.item||p.item.length<2)continue;
         const key=p.item+"_"+p.qty+"_"+p.krDate;
@@ -859,15 +860,19 @@ function ScheduleTab(){
           ship_date:null,kr_date:krDate,oz_date:ozD.toISOString().slice(0,10),
           ship_type:p.shipType||"",note:"",status:"입고예정",
           date:krDate,lead_days:(p.supplier||curSup)==="인도"?30:(p.supplier||curSup)==="코니키즈"?21:14};
-        const r=await sb.insert("schedules",row);
-        if(r&&r[0]){setSchedules(prev=>[r[0],...prev]);addedCount++;}
+        try{
+          const r=await sb.insert("schedules",row);
+          if(r&&r[0]){setSchedules(prev=>[r[0],...prev]);addedCount++;}
+          else{insertErrors.push("insert returned null for: "+p.item);console.log("Insert null:",row);}
+        }catch(ie){insertErrors.push(ie.message);console.error("Insert error:",ie,row);}
       }
       setChatInput("");
       if(addedCount>0)alert(addedCount+"건의 스케줄이 등록되었습니다.");
+      else if(results.length>0){
+        alert("파싱 "+results.length+"건 성공, 저장 실패!\n\n오류: "+(insertErrors[0]||"unknown")+"\n\nSupabase schedules 테이블에 qty, kr_date, oz_date, ship_type 컬럼이 있는지 확인해주세요.");
+      }
       else{
-        const dbg="results="+results.length+", raw="+raw.slice(0,80)+"..., DDK="+(/Delivery/i.test(raw));
-        console.log("Parse failed:",dbg,results);
-        alert("파싱 결과: "+results.length+"건\n\n입력 내용 일부: "+raw.slice(0,60)+"...\n\nDelivery 패턴: "+(/Delivery\s+Date\s+Korea/i.test(raw))+"\n\n콘솔(F12)에서 상세 로그를 확인해주세요.");
+        alert("스케줄을 파싱할 수 없습니다.\n날짜와 상품 정보를 확인해주세요.");
       }
     }catch(e){
       console.error("parseChat error:",e);
