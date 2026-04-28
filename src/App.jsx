@@ -716,8 +716,8 @@ function ScheduleTab(){
   const[inlineEdit,setInlineEdit]=useState(null);
   const[inlineDraft,setInlineDraft]=useState("");
 
-  const SUPPLIERS=["인도","코니키즈","성은교역"];
-  const SUP_STYLES={"인도":{color:"#16A34A",bg:"#F0FDF4",icon:"🇮🇳"},"코니키즈":{color:"#2563EB",bg:"#EFF6FF",icon:"🏭"},"성은교역":{color:"#D97706",bg:"#FFFBEB",icon:"📦"}};
+  const SUPPLIERS=["인도","코니키즈","성은교역","오중"];
+  const SUP_STYLES={"인도":{color:"#16A34A",bg:"#F0FDF4",icon:"🇮🇳"},"코니키즈":{color:"#2563EB",bg:"#EFF6FF",icon:"🏭"},"성은교역":{color:"#D97706",bg:"#FFFBEB",icon:"📦"},"오중":{color:"#0891B2",bg:"#ECFEFF",icon:"🏢"}};
 
   useEffect(()=>{(async()=>{setLoading(true);const data=await sb.get("schedules");setSchedules(data||[]);setLoading(false);})();},[]);
 
@@ -1181,7 +1181,7 @@ function ScheduleTab(){
     </div>)}
 
     {/* 업체별 뷰 */}
-    {viewMode==="supplier"&&<div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16}}>
+    {viewMode==="supplier"&&<div style={{display:"grid",gridTemplateColumns:`repeat(${SUPPLIERS.length},1fr)`,gap:16}}>
       {SUPPLIERS.map(sup=>{
         const st=SUP_STYLES[sup];
         const items=schedules.filter(s=>s.supplier===sup).sort((a,b)=>(a.kr_date||a.date||"").localeCompare(b.kr_date||b.date||""));
