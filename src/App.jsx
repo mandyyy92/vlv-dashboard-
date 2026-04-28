@@ -724,10 +724,12 @@ function ScheduleTab(){
     if(!chatInput.trim())return;
     const MON={JAN:"01",FEB:"02",MAR:"03",APR:"04",APRIL:"04",MAY:"05",JUN:"06",JUNE:"06",JUL:"07",JULY:"07",AUG:"08",SEP:"09",OCT:"10",NOV:"11",DEC:"12",JANUARY:"01",FEBRUARY:"02",MARCH:"03",AUGUST:"08",SEPTEMBER:"09",OCTOBER:"10",NOVEMBER:"11",DECEMBER:"12"};
     // 영문→한글 상품명 번역
-    const ENG_NAME={"PIGMENT TEE":"피그먼트 티셔츠","PIGMENT TEES":"피그먼트 티셔츠","GRAYCHILL":"그레이칠","RINGER T-SHIRT":"링거 티셔츠","UNISEX RINGER T-SHIRT":"유니섹스 링거 티셔츠","UNISEX RINGER":"유니섹스 링거","WOMEN'S LONG SLEEVE":"우먼 롱슬리브","WOMEN'S LONG SLEEVES":"우먼 롱슬리브","WOMEN LONG SLEEVE":"우먼 롱슬리브","LONG SLEEVE":"롱슬리브","LONG SLEEVES":"롱슬리브","HOODIE":"후디","SWEATSHIRT":"맨투맨","T-SHIRT":"티셔츠","TEES":"티셔츠","TEE":"티셔츠","CREWNECK":"크루넥","WINDBREAKER":"바람막이","JOGGER":"조거팬츠","JOGGERS":"조거팬츠","RAGLAN":"레글런","PANTS":"팬츠","SHORTS":"쇼츠","JACKET":"자켓","VEST":"베스트","CAP":"캡","HAT":"모자","BAG":"가방","SOCKS":"양말","CARDIGAN":"가디건","POLO":"폴로","SHIRT":"셔츠","SKIRT":"스커트","DRESS":"원피스","LEGGINGS":"레깅스","ZIP UP":"집업","ZIP-UP":"집업","HALF ZIP":"하프집업","OVERSIZED":"오버사이즈","CROP":"크롭","BASIC":"베이직","ESSENTIAL":"에센셜","PIGMENT":"피그먼트","SIGNATURE":"시그니처"};
+    const ENG_NAME={"PIGMENT TEE":"피그먼트 티셔츠","PIGMENT TEES":"피그먼트 티셔츠","GRAYCHILL":"그레이칠","RINGER T-SHIRT":"링거 티셔츠","UNISEX RINGER T-SHIRT":"유니섹스 링거 티셔츠","UNISEX RINGER":"유니섹스 링거","WOMEN'S LONG SLEEVE":"우먼 롱슬리브","WOMEN'S LONG SLEEVES":"우먼 롱슬리브","WOMEN\u2019S LONG SLEEVE":"우먼 롱슬리브","WOMEN\u2019S LONG SLEEVES":"우먼 롱슬리브","WOMEN LONG SLEEVE":"우먼 롱슬리브","WOMEN LONG SLEEVES":"우먼 롱슬리브","WOMENS LONG SLEEVE":"우먼 롱슬리브","WOMENS LONG SLEEVES":"우먼 롱슬리브","LONG SLEEVE":"롱슬리브","LONG SLEEVES":"롱슬리브","HOODIE":"후디","SWEATSHIRT":"맨투맨","T-SHIRT":"티셔츠","TEES":"티셔츠","TEE":"티셔츠","CREWNECK":"크루넥","WINDBREAKER":"바람막이","JOGGER":"조거팬츠","JOGGERS":"조거팬츠","RAGLAN":"레글런","PANTS":"팬츠","SHORTS":"쇼츠","JACKET":"자켓","VEST":"베스트","CAP":"캡","HAT":"모자","BAG":"가방","SOCKS":"양말","CARDIGAN":"가디건","POLO":"폴로","SHIRT":"셔츠","SKIRT":"스커트","DRESS":"원피스","LEGGINGS":"레깅스","ZIP UP":"집업","ZIP-UP":"집업","HALF ZIP":"하프집업","OVERSIZED":"오버사이즈","CROP":"크롭","BASIC":"베이직","ESSENTIAL":"에센셜","PIGMENT":"피그먼트","SIGNATURE":"시그니처"};
     const translateName=(name)=>{
       if(!name)return name;
-      const up=name.toUpperCase().trim();
+      // 아포스트로피 통일 (curly quotes → straight)
+      const normalized=name.replace(/[\u2018\u2019\u2032\u0060]/g,"'");
+      const up=normalized.toUpperCase().trim();
       // 긴 키워드부터 먼저 매칭 (정확도 향상)
       const sorted=Object.entries(ENG_NAME).sort((a,b)=>b[0].length-a[0].length);
       for(const[eng,kr] of sorted){if(up.includes(eng))return kr;}
@@ -804,6 +806,13 @@ function ScheduleTab(){
           let st="";
           if(/Air\s+Shipment/i.test(text))st="Air Shipment";
           if(/Sea\s+Shipment/i.test(text))st="Sea Shipment";
+          // 선적일 추출 (factory 날짜 또는 dispatched 날짜)
+          let shipDate=null;
+          if(st==="Sea Shipment"){
+            const sdm=text.match(/(?:factory|dispatched)\s+(\d{1,2})(?:st|nd|rd|th)?\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*/i)
+              ||text.match(/(\d{1,2})(?:st|nd|rd|th)?\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*(?=.*factory)/i);
+            if(sdm){const smo=MON[sdm[2].toUpperCase()]||MON[sdm[2].toUpperCase().slice(0,3)];if(smo)shipDate="2026-"+smo+"-"+sdm[1].padStart(2,"0");}
+          }
           const parts=text.split(/\s+-\s+/);
           for(const part of parts){
             const qty=findQty(part);
@@ -817,7 +826,7 @@ function ScheduleTab(){
               .replace(/(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{1,2}(?:st|nd|rd|th)?/gi,"")
               .replace(/[().]/g," ").replace(/\s+/g," ").trim();
             if(name.length>1&&qty>0){
-              results.push({item:translateName(name),qty,krDate:date,shipType:st,supplier:curSup});
+              results.push({item:translateName(name),qty,krDate:date,shipType:st,shipDate,supplier:curSup});
             }
           }
         };
@@ -872,7 +881,7 @@ function ScheduleTab(){
         const krDate=p.krDate||new Date().toISOString().slice(0,10);
         const ozDate=addBizDays(krDate,3);
         const row={supplier:p.supplier||curSup,item:p.item,qty:p.qty||0,
-          ship_date:null,kr_date:krDate,oz_date:ozDate,
+          ship_date:p.shipDate||null,kr_date:krDate,oz_date:ozDate,
           ship_type:p.shipType||"",note:"",status:"입고예정",
           date:krDate,lead_days:(p.supplier||curSup)==="인도"?30:(p.supplier||curSup)==="코니키즈"?21:14};
         try{
