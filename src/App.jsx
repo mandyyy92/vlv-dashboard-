@@ -31,6 +31,17 @@ const getSupColor=(s)=>{
   if(s.startsWith("자체"))return"#E8A87C";if(s.startsWith("국내"))return"#85CDCA";return"#D5A4CF";
 };
 
+// ─── Item Name Translation (English → Korean) ───
+const ENG_NAME_MAP={"PIGMENT TEE":"피그먼트 티셔츠","PIGMENT TEES":"피그먼트 티셔츠","GRAYCHILL":"그레이칠","RINGER T-SHIRT":"링거 티셔츠","UNISEX RINGER T-SHIRT":"유니섹스 링거 티셔츠","UNISEX RINGER":"유니섹스 링거","WOMEN'S LONG SLEEVE":"우먼 롱슬리브","WOMEN'S LONG SLEEVES":"우먼 롱슬리브","WOMEN’S LONG SLEEVE":"우먼 롱슬리브","WOMEN’S LONG SLEEVES":"우먼 롱슬리브","WOMEN LONG SLEEVE":"우먼 롱슬리브","WOMEN LONG SLEEVES":"우먼 롱슬리브","WOMENS LONG SLEEVE":"우먼 롱슬리브","WOMENS LONG SLEEVES":"우먼 롱슬리브","LONG SLEEVE":"롱슬리브","LONG SLEEVES":"롱슬리브","HOODIE":"후디","SWEATSHIRT":"맨투맨","T-SHIRT":"티셔츠","TEES":"티셔츠","TEE":"티셔츠","CREWNECK":"크루넥","WINDBREAKER":"바람막이","JOGGER":"조거팬츠","JOGGERS":"조거팬츠","RAGLAN":"레글런","PANTS":"팬츠","SHORTS":"쇼츠","JACKET":"자켓","VEST":"베스트","CAP":"캡","HAT":"모자","BAG":"가방","SOCKS":"양말","CARDIGAN":"가디건","POLO":"폴로","SHIRT":"셔츠","SKIRT":"스커트","DRESS":"원피스","LEGGINGS":"레깅스","ZIP UP":"집업","ZIP-UP":"집업","HALF ZIP":"하프집업","OVERSIZED":"오버사이즈","CROP":"크롭","BASIC":"베이직","ESSENTIAL":"에센셜","PIGMENT":"피그먼트","SIGNATURE":"시그니처"};
+const ENG_NAME_SORTED=Object.entries(ENG_NAME_MAP).sort((a,b)=>b[0].length-a[0].length);
+const translateItemName=(name)=>{
+  if(!name)return name;
+  const normalized=name.replace(/[‘’′`]/g,"'");
+  const up=normalized.toUpperCase().trim();
+  for(const[eng,kr] of ENG_NAME_SORTED){if(up.includes(eng))return kr;}
+  return name;
+};
+
 
 // ─── Helper Components ───
 const Badge=({children,color="#64748B",bg})=>(<span style={{display:"inline-block",padding:"2px 10px",borderRadius:4,fontSize:11,fontWeight:600,letterSpacing:0.3,color,background:bg||`${color}18`,border:`1px solid ${color}30`,whiteSpace:"nowrap"}}>{children}</span>);
@@ -696,6 +707,12 @@ function ScheduleTab(){
   const[formOzDate,setFormOzDate]=useState("");
   const[formNote,setFormNote]=useState("");
   const[formShipType,setFormShipType]=useState("Air Shipment");
+  const[dragItem,setDragItem]=useState(null);
+  const dragItemRef=useRef(null);
+  const[dragOverDay,setDragOverDay]=useState(null);
+  const[editingEvent,setEditingEvent]=useState(null);
+  const[editName,setEditName]=useState("");
+  const[editQty,setEditQty]=useState("");
 
   const SUPPLIERS=["인도","코니키즈","성은교역"];
   const SUP_STYLES={"인도":{color:"#16A34A",bg:"#F0FDF4",icon:"🇮🇳"},"코니키즈":{color:"#2563EB",bg:"#EFF6FF",icon:"🏭"},"성은교역":{color:"#D97706",bg:"#FFFBEB",icon:"📦"}};
@@ -915,6 +932,92 @@ function ScheduleTab(){
   const monthStr=`${year}-${String(month+1).padStart(2,"0")}`;
   const today=new Date().toISOString().slice(0,10);
 
+  // 드래그앤드롭: 날짜 변경 후 Supabase 업데이트
+  const moveEvent=async(eventId,eventType,newDayStr)=>{
+    const schedule=schedules.find(s=>s.id===eventId);
+    if(!schedule)return;
+    const updates={};
+    if(eventType==="kr"){
+      // 같은 날짜에 떨어진 경우 무시
+      if(schedule.kr_date===newDayStr||(!schedule.kr_date&&schedule.date===newDayStr))return;
+      updates.kr_date=newDayStr;
+      updates.date=newDayStr;
+      updates.oz_date=addBizDays(newDayStr,3);
+    }else if(eventType==="oz"){
+      if(schedule.oz_date===newDayStr)return;
+      updates.oz_date=newDayStr;
+    }else if(eventType==="ship"){
+      if(schedule.ship_date===newDayStr)return;
+      updates.ship_date=newDayStr;
+    }else return;
+    // 낙관적 업데이트
+    setSchedules(p=>p.map(s=>s.id===eventId?{...s,...updates}:s));
+    try{
+      const r=await sb.update("schedules",eventId,updates);
+      if(!r)throw new Error("update returned null");
+    }catch(e){
+      console.error("Move error:",e);
+      alert("날짜 변경 저장 실패: "+e.message);
+      // 롤백
+      setSchedules(p=>p.map(s=>s.id===eventId?schedule:s));
+    }
+  };
+
+  // 드래그 핸들러 (ref 사용으로 stale closure 방지)
+  const handleDragStart=(e,ev)=>{
+    const data={id:ev.id,eventType:ev.eventType};
+    dragItemRef.current=data;
+    setDragItem(data);
+    try{
+      e.dataTransfer.effectAllowed="move";
+      e.dataTransfer.setData("text/plain",JSON.stringify(data));
+    }catch(err){}
+  };
+  const handleDragEnd=()=>{
+    dragItemRef.current=null;
+    setDragItem(null);
+    setDragOverDay(null);
+  };
+  const handleCellDragOver=(e,dayStr)=>{
+    if(!dragItemRef.current)return;
+    e.preventDefault();
+    try{e.dataTransfer.dropEffect="move";}catch(err){}
+    setDragOverDay(prev=>prev===dayStr?prev:dayStr);
+  };
+  const handleCellDrop=(e,dayStr)=>{
+    e.preventDefault();
+    const item=dragItemRef.current;
+    dragItemRef.current=null;
+    setDragItem(null);
+    setDragOverDay(null);
+    if(item)moveEvent(item.id,item.eventType,dayStr);
+  };
+
+  // 클릭 → 인라인 편집 모달
+  const openEdit=(ev)=>{
+    if(dragItemRef.current)return; // 드래그 중에는 무시
+    setEditingEvent({id:ev.id,eventType:ev.eventType,label:ev.label,supplier:ev.supplier});
+    setEditName(ev.item||"");
+    setEditQty(String(ev.qty||0));
+  };
+  const saveEdit=async()=>{
+    if(!editingEvent)return;
+    const trimmed=editName.trim();
+    if(!trimmed){alert("상품명을 입력하세요.");return;}
+    const updates={item:trimmed,qty:parseInt(editQty)||0};
+    const prev=schedules.find(s=>s.id===editingEvent.id);
+    setSchedules(p=>p.map(s=>s.id===editingEvent.id?{...s,...updates}:s));
+    try{
+      const r=await sb.update("schedules",editingEvent.id,updates);
+      if(!r)throw new Error("update returned null");
+      setEditingEvent(null);
+    }catch(e){
+      console.error("Edit save error:",e);
+      alert("저장 실패: "+e.message);
+      if(prev)setSchedules(p=>p.map(s=>s.id===editingEvent.id?prev:s));
+    }
+  };
+
   const getEventsForDay=(day)=>{
     const dayStr=`${monthStr}-${String(day).padStart(2,"0")}`;
     const events=[];
@@ -959,29 +1062,6 @@ function ScheduleTab(){
       <SmallBtn primary={viewMode==="input"} onClick={()=>setViewMode("input")}>✏️ 등록</SmallBtn>
     </div>
 
-  // 드래그앤드롭 상태
-  const[dragItem,setDragItem]=useState(null);
-
-  // 드래그앤드롭: 날짜 변경 후 Supabase 업데이트
-  const moveEvent=async(eventId,eventType,newDayStr)=>{
-    const schedule=schedules.find(s=>s.id===eventId);
-    if(!schedule)return;
-    const updates={};
-    if(eventType==="kr"){
-      updates.kr_date=newDayStr;
-      updates.date=newDayStr;
-      updates.oz_date=addBizDays(newDayStr,3);
-    }else if(eventType==="oz"){
-      updates.oz_date=newDayStr;
-    }else if(eventType==="ship"){
-      updates.ship_date=newDayStr;
-    }
-    try{
-      await sb.update("schedules",eventId,updates);
-      setSchedules(p=>p.map(s=>s.id===eventId?{...s,...updates}:s));
-    }catch(e){console.error("Move error:",e);}
-  };
-
     {/* 캘린더 뷰 */}
     {viewMode==="calendar"&&<SectionCard title={`${year}년 ${month+1}월`} actions={
       <div style={{display:"flex",gap:6}}>
@@ -999,19 +1079,22 @@ function ScheduleTab(){
           const events=getEventsForDay(day);
           const isToday=dayStr===today;
           const dow=(firstDayOfWeek+i)%7;
-          return(<div key={day} style={{background:isToday?"#EFF6FF":dragItem?"#FAFAFA":"#FFF",minHeight:110,padding:6,position:"relative",borderTop:isToday?"2px solid #3B82F6":"none",transition:"background 0.15s"}}
-            onDragOver={e=>{e.preventDefault();e.currentTarget.style.background="#DBEAFE";}}
-            onDragLeave={e=>{e.currentTarget.style.background=isToday?"#EFF6FF":"#FFF";}}
-            onDrop={e=>{e.preventDefault();e.currentTarget.style.background=isToday?"#EFF6FF":"#FFF";
-              if(dragItem){moveEvent(dragItem.id,dragItem.eventType,dayStr);setDragItem(null);}
-            }}>
+          const isDragOver=dragOverDay===dayStr;
+          const cellBg=isDragOver?"#DBEAFE":isToday?"#EFF6FF":dragItem?"#FAFAFA":"#FFF";
+          return(<div key={day} style={{background:cellBg,minHeight:110,padding:6,position:"relative",borderTop:isToday?"2px solid #3B82F6":isDragOver?"2px dashed #3B82F6":"none",transition:"background 0.15s"}}
+            onDragOver={e=>handleCellDragOver(e,dayStr)}
+            onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget))setDragOverDay(prev=>prev===dayStr?null:prev);}}
+            onDrop={e=>handleCellDrop(e,dayStr)}>
             <div style={{fontSize:12,fontWeight:isToday?800:500,color:isToday?"#2563EB":dow===0?"#DC2626":dow===6?"#2563EB":"#334155",marginBottom:4}}>{day}</div>
-            {events.slice(0,3).map((ev,j)=>{const ec=evtColor(ev.eventType,ev.supplier);return(
-              <div key={j} draggable style={{padding:"3px 6px",borderRadius:4,marginBottom:2,background:ec.bg,fontSize:10,lineHeight:1.4,cursor:"grab",userSelect:"none",border:dragItem&&dragItem.id===ev.id&&dragItem.eventType===ev.eventType?"2px solid "+ec.color:"1px solid transparent"}}
-                onDragStart={()=>setDragItem({id:ev.id,eventType:ev.eventType})}
-                onDragEnd={()=>setDragItem(null)}>
+            {events.slice(0,3).map((ev,j)=>{const ec=evtColor(ev.eventType,ev.supplier);const isDragging=dragItem&&dragItem.id===ev.id&&dragItem.eventType===ev.eventType;return(
+              <div key={`${ev.id}-${ev.eventType}`} draggable
+                title="클릭: 수정 / 드래그: 날짜 이동"
+                style={{padding:"3px 6px",borderRadius:4,marginBottom:2,background:ec.bg,fontSize:10,lineHeight:1.4,cursor:"grab",userSelect:"none",border:isDragging?"2px solid "+ec.color:"1px solid transparent",opacity:isDragging?0.5:1}}
+                onDragStart={e=>handleDragStart(e,ev)}
+                onDragEnd={handleDragEnd}
+                onClick={()=>openEdit(ev)}>
                 <div style={{color:ec.color,fontWeight:600}}>{ec.icon} {ev.label}</div>
-                <div style={{fontWeight:700,color:"#1E293B",fontSize:11}}>{ev.item}</div>
+                <div style={{fontWeight:700,color:"#1E293B",fontSize:11}}>{translateItemName(ev.item)}</div>
                 {ev.qty>0&&<div style={{color:"#64748B"}}>{ev.qty.toLocaleString()}장</div>}
               </div>);})}
             {events.length>3&&<div style={{fontSize:9,color:"#94A3B8",textAlign:"center"}}>+{events.length-3}건</div>}
@@ -1019,6 +1102,33 @@ function ScheduleTab(){
         })}
       </div>
     </SectionCard>}
+
+    {/* 이벤트 카드 클릭 → 수정 모달 */}
+    {editingEvent&&(<div onClick={()=>setEditingEvent(null)} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:"#FFF",borderRadius:14,padding:24,width:420,maxWidth:"92vw",boxShadow:"0 20px 50px rgba(0,0,0,0.25)"}}>
+        <div style={{fontSize:16,fontWeight:700,color:"#0F172A",marginBottom:4}}>스케줄 수정</div>
+        <div style={{fontSize:12,color:"#64748B",marginBottom:18}}>{editingEvent.supplier} · {editingEvent.label}</div>
+        <div style={{marginBottom:14}}>
+          <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>상품명</div>
+          <input value={editName} onChange={e=>setEditName(e.target.value)} autoFocus
+            onKeyDown={e=>{if(e.key==="Enter")saveEdit();if(e.key==="Escape")setEditingEvent(null);}}
+            style={{width:"100%",padding:"9px 12px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:13,outline:"none",boxSizing:"border-box"}} />
+        </div>
+        <div style={{marginBottom:18}}>
+          <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>수량 (장)</div>
+          <input type="number" value={editQty} onChange={e=>setEditQty(e.target.value)}
+            onKeyDown={e=>{if(e.key==="Enter")saveEdit();if(e.key==="Escape")setEditingEvent(null);}}
+            style={{width:"100%",padding:"9px 12px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:13,outline:"none",boxSizing:"border-box"}} />
+        </div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+          <SmallBtn danger onClick={async()=>{if(window.confirm("이 스케줄을 삭제하시겠습니까?")){await delSchedule(editingEvent.id);setEditingEvent(null);}}}>🗑 삭제</SmallBtn>
+          <div style={{display:"flex",gap:8}}>
+            <SmallBtn onClick={()=>setEditingEvent(null)}>취소</SmallBtn>
+            <SmallBtn primary onClick={saveEdit}>저장</SmallBtn>
+          </div>
+        </div>
+      </div>
+    </div>)}
 
     {/* 업체별 뷰 */}
     {viewMode==="supplier"&&<div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16}}>
@@ -1038,7 +1148,7 @@ function ScheduleTab(){
                 📦 <span style={{fontWeight:600}}>오즈센터: {s.oz_date}</span>
                 <span style={{padding:"1px 6px",borderRadius:3,fontSize:10,fontWeight:700,color:ddayColor(s.oz_date),background:`${ddayColor(s.oz_date)}15`}}>{dday(s.oz_date)}</span>
               </div>}
-              <div style={{fontSize:15,fontWeight:800,color:"#1E293B",marginTop:6}}>{s.item}</div>
+              <div style={{fontSize:15,fontWeight:800,color:"#1E293B",marginTop:6}}>{translateItemName(s.item)}</div>
               <div style={{fontSize:13,color:"#334155",marginTop:2}}>{s.qty?s.qty.toLocaleString():""} {s.qty?"장":""}</div>
               {s.ship_type&&<div style={{fontSize:11,color:"#94A3B8"}}>{s.ship_type}</div>}
             </div>)):(
