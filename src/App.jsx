@@ -874,6 +874,7 @@ function ScheduleTab(){
       // 중복 제거 + 빈 항목 제거 후 저장
       const seen=new Set();
       let insertErrors=[];
+      console.log("Results to save:",results);
       for(const p of results){
         if(!p.item||p.item.length<2)continue;
         const key=p.item+"_"+p.qty+"_"+p.krDate;
@@ -884,6 +885,7 @@ function ScheduleTab(){
           ship_date:p.shipDate||null,kr_date:krDate,oz_date:ozDate,
           ship_type:p.shipType||"",note:"",status:"입고예정",
           date:krDate,lead_days:(p.supplier||curSup)==="인도"?30:(p.supplier||curSup)==="코니키즈"?21:14};
+        console.log("Inserting:",row);
         try{
           const r=await sb.insert("schedules",row);
           if(r&&r[0]){setSchedules(prev=>[r[0],...prev]);addedCount++;}
@@ -957,6 +959,29 @@ function ScheduleTab(){
       <SmallBtn primary={viewMode==="input"} onClick={()=>setViewMode("input")}>✏️ 등록</SmallBtn>
     </div>
 
+  // 드래그앤드롭 상태
+  const[dragItem,setDragItem]=useState(null);
+
+  // 드래그앤드롭: 날짜 변경 후 Supabase 업데이트
+  const moveEvent=async(eventId,eventType,newDayStr)=>{
+    const schedule=schedules.find(s=>s.id===eventId);
+    if(!schedule)return;
+    const updates={};
+    if(eventType==="kr"){
+      updates.kr_date=newDayStr;
+      updates.date=newDayStr;
+      updates.oz_date=addBizDays(newDayStr,3);
+    }else if(eventType==="oz"){
+      updates.oz_date=newDayStr;
+    }else if(eventType==="ship"){
+      updates.ship_date=newDayStr;
+    }
+    try{
+      await sb.update("schedules",eventId,updates);
+      setSchedules(p=>p.map(s=>s.id===eventId?{...s,...updates}:s));
+    }catch(e){console.error("Move error:",e);}
+  };
+
     {/* 캘린더 뷰 */}
     {viewMode==="calendar"&&<SectionCard title={`${year}년 ${month+1}월`} actions={
       <div style={{display:"flex",gap:6}}>
@@ -967,16 +992,24 @@ function ScheduleTab(){
     }>
       <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:1,background:"#E2E8F0",borderRadius:10,overflow:"hidden"}}>
         {["일","월","화","수","목","금","토"].map((d,i)=>(<div key={d} style={{textAlign:"center",padding:"8px 4px",fontSize:12,fontWeight:700,color:i===0?"#DC2626":i===6?"#2563EB":"#64748B",background:"#F8FAFC"}}>{d}</div>))}
-        {Array.from({length:firstDayOfWeek},(_,i)=>(<div key={`e${i}`} style={{background:"#FAFAFA",minHeight:100}} />))}
+        {Array.from({length:firstDayOfWeek},(_,i)=>(<div key={`e${i}`} style={{background:"#FAFAFA",minHeight:110}}
+          onDragOver={e=>e.preventDefault()} />))}
         {Array.from({length:daysInMonth},(_,i)=>{
           const day=i+1;const dayStr=`${monthStr}-${String(day).padStart(2,"0")}`;
           const events=getEventsForDay(day);
           const isToday=dayStr===today;
           const dow=(firstDayOfWeek+i)%7;
-          return(<div key={day} style={{background:isToday?"#EFF6FF":"#FFF",minHeight:100,padding:6,position:"relative",borderTop:isToday?"2px solid #3B82F6":"none"}}>
+          return(<div key={day} style={{background:isToday?"#EFF6FF":dragItem?"#FAFAFA":"#FFF",minHeight:110,padding:6,position:"relative",borderTop:isToday?"2px solid #3B82F6":"none",transition:"background 0.15s"}}
+            onDragOver={e=>{e.preventDefault();e.currentTarget.style.background="#DBEAFE";}}
+            onDragLeave={e=>{e.currentTarget.style.background=isToday?"#EFF6FF":"#FFF";}}
+            onDrop={e=>{e.preventDefault();e.currentTarget.style.background=isToday?"#EFF6FF":"#FFF";
+              if(dragItem){moveEvent(dragItem.id,dragItem.eventType,dayStr);setDragItem(null);}
+            }}>
             <div style={{fontSize:12,fontWeight:isToday?800:500,color:isToday?"#2563EB":dow===0?"#DC2626":dow===6?"#2563EB":"#334155",marginBottom:4}}>{day}</div>
             {events.slice(0,3).map((ev,j)=>{const ec=evtColor(ev.eventType,ev.supplier);return(
-              <div key={j} style={{padding:"3px 6px",borderRadius:4,marginBottom:2,background:ec.bg,fontSize:10,lineHeight:1.4}}>
+              <div key={j} draggable style={{padding:"3px 6px",borderRadius:4,marginBottom:2,background:ec.bg,fontSize:10,lineHeight:1.4,cursor:"grab",userSelect:"none",border:dragItem&&dragItem.id===ev.id&&dragItem.eventType===ev.eventType?"2px solid "+ec.color:"1px solid transparent"}}
+                onDragStart={()=>setDragItem({id:ev.id,eventType:ev.eventType})}
+                onDragEnd={()=>setDragItem(null)}>
                 <div style={{color:ec.color,fontWeight:600}}>{ec.icon} {ev.label}</div>
                 <div style={{fontWeight:700,color:"#1E293B",fontSize:11}}>{ev.item}</div>
                 {ev.qty>0&&<div style={{color:"#64748B"}}>{ev.qty.toLocaleString()}장</div>}
