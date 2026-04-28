@@ -733,7 +733,7 @@ function ScheduleTab(){
     const row={supplier:formSupplier,item:formName,qty:parseInt(formQty)||0,
       ship_date:formShipDate||null,kr_date:formKrDate||null,oz_date:formOzDate||null,
       ship_type:formShipType,note:formNote,status:"입고예정",
-      date:formKrDate||formShipDate||new Date().toISOString().slice(0,10),lead_days:formSupplier==="인도"?30:formSupplier==="코니키즈"?21:14};
+      date:formKrDate||formShipDate||formOzDate||new Date().toISOString().slice(0,10),lead_days:formSupplier==="인도"?30:formSupplier==="코니키즈"?21:14};
     const r=await sb.insert("schedules",row);
     if(r&&r[0]){setSchedules(p=>[r[0],...p]);setFormName("");setFormQty("");setFormShipDate("");setFormKrDate("");setFormOzDate("");setFormNote("");}
   };
@@ -1073,7 +1073,7 @@ function ScheduleTab(){
     const events=[];
     schedules.forEach(s=>{
       if(s.ship_date===dayStr)events.push({...s,eventType:"ship",label:"선적일"});
-      if(s.kr_date===dayStr||(!s.kr_date&&!s.ship_date&&s.date===dayStr))events.push({...s,eventType:"kr",label:"KR 한국 도착"});
+      if(s.kr_date===dayStr||(!s.kr_date&&!s.ship_date&&!s.oz_date&&s.date===dayStr))events.push({...s,eventType:"kr",label:"KR 한국 도착"});
       if(s.oz_date===dayStr)events.push({...s,eventType:"oz",label:"오즈센터 도착"});
     });
     return events;
