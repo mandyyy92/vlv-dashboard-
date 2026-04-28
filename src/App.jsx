@@ -1074,7 +1074,7 @@ function ScheduleTab(){
     schedules.forEach(s=>{
       if(s.ship_date===dayStr)events.push({...s,eventType:"ship",label:"선적일"});
       if(s.kr_date===dayStr||(!s.kr_date&&!s.ship_date&&!s.oz_date&&s.date===dayStr))events.push({...s,eventType:"kr",label:"KR 한국 도착"});
-      if(s.oz_date===dayStr)events.push({...s,eventType:"oz",label:"오즈센터 도착"});
+      if(s.oz_date===dayStr)events.push({...s,eventType:"oz",label:`${s.supplier||""} 오즈센터 도착`.trim()});
     });
     return events;
   };
