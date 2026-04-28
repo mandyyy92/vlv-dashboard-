@@ -1181,10 +1181,20 @@ function ScheduleTab(){
     </div>)}
 
     {/* 업체별 뷰 */}
-    {viewMode==="supplier"&&<div style={{display:"grid",gridTemplateColumns:`repeat(${SUPPLIERS.length},1fr)`,gap:16}}>
-      {SUPPLIERS.map(sup=>{
+    {viewMode==="supplier"&&<>
+    <div style={{padding:"8px 14px",borderRadius:8,background:"#EFF6FF",border:"1px solid #DBEAFE",marginBottom:12,fontSize:12,color:"#1E40AF",fontWeight:600}}>
+      📅 {(()=>{const n=new Date();const nx=new Date(n.getFullYear(),n.getMonth()+1,1);return `${n.getFullYear()}년 ${n.getMonth()+1}월 + ${nx.getFullYear()}년 ${nx.getMonth()+1}월 일정만 표시`;})()}
+    </div>
+    <div style={{display:"grid",gridTemplateColumns:`repeat(${SUPPLIERS.length},1fr)`,gap:16}}>
+      {(()=>{
+        const now=new Date();
+        const thisYM=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+        const next=new Date(now.getFullYear(),now.getMonth()+1,1);
+        const nextYM=`${next.getFullYear()}-${String(next.getMonth()+1).padStart(2,"0")}`;
+        const inRange=(s)=>[s.ship_date,s.kr_date,s.oz_date,s.date].some(d=>d&&(d.startsWith(thisYM)||d.startsWith(nextYM)));
+        return SUPPLIERS.map(sup=>{
         const st=SUP_STYLES[sup];
-        const items=schedules.filter(s=>s.supplier===sup).sort((a,b)=>(a.kr_date||a.date||"").localeCompare(b.kr_date||b.date||""));
+        const items=schedules.filter(s=>s.supplier===sup&&inRange(s)).sort((a,b)=>(a.kr_date||a.date||"").localeCompare(b.kr_date||b.date||""));
         return(<div key={sup} style={{background:st.bg,borderRadius:14,border:`1px solid ${st.color}20`,overflow:"hidden"}}>
           <div style={{padding:"12px 18px",background:`${st.color}15`,borderBottom:`1px solid ${st.color}20`}}>
             <span style={{fontSize:14,fontWeight:700,color:st.color}}>{st.icon} {sup}</span>
@@ -1229,13 +1239,14 @@ function ScheduleTab(){
             </div>);}):(
               <div style={{textAlign:"center",padding:30,color:"#94A3B8"}}>
                 <div style={{fontSize:30,marginBottom:8}}>📭</div>
-                <div style={{fontSize:13}}>스케줄 없음</div>
+                <div style={{fontSize:13}}>이번달/다음달 일정 없음</div>
               </div>
             )}
           </div>
         </div>);
-      })}
-    </div>}
+      });})()}
+    </div>
+    </>}
 
     {/* 등록 뷰 */}
     {viewMode==="input"&&<>
@@ -1251,11 +1262,18 @@ function ScheduleTab(){
 
       {/* 직접 등록 */}
       <SectionCard title="✏️ 직접 등록">
-        <div style={{display:"grid",gridTemplateColumns:"120px 1fr 100px 140px 140px 140px 1fr 100px",gap:10,alignItems:"end"}}>
+        <div style={{display:"grid",gridTemplateColumns:"110px 110px 1fr 90px 130px 130px 130px 1fr 90px",gap:10,alignItems:"end"}}>
           <div>
             <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>업체</div>
             <select value={formSupplier} onChange={e=>setFormSupplier(e.target.value)} style={{width:"100%",padding:"8px 10px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:12,outline:"none"}}>
               {SUPPLIERS.map(s=><option key={s}>{s}</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>운송</div>
+            <select value={formShipType} onChange={e=>setFormShipType(e.target.value)} style={{width:"100%",padding:"8px 10px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:12,outline:"none"}}>
+              <option value="Air Shipment">✈️ Air</option>
+              <option value="Sea Shipment">🚢 Ship</option>
             </select>
           </div>
           <div>
