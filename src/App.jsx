@@ -675,6 +675,18 @@ function ScheduleTab(){
   const[chatInput,setChatInput]=useState("");
   const[currentMonth,setCurrentMonth]=useState(()=>{const d=new Date();return{year:d.getFullYear(),month:d.getMonth()};});
 
+  // 영업일 +N일 계산 (주말 제외)
+  const addBizDays=(dateStr,days)=>{
+    const d=new Date(dateStr);
+    let added=0;
+    while(added<days){
+      d.setDate(d.getDate()+1);
+      const dow=d.getDay();
+      if(dow!==0&&dow!==6)added++; // 일=0, 토=6 제외
+    }
+    return d.toISOString().slice(0,10);
+  };
+
   // 직접 등록 폼
   const[formSupplier,setFormSupplier]=useState("인도");
   const[formName,setFormName]=useState("");
@@ -693,7 +705,7 @@ function ScheduleTab(){
   // 한국도착일 입력 시 오즈센터 도착일 자동계산 (+3일)
   const handleKrDate=(v)=>{
     setFormKrDate(v);
-    if(v){const d=new Date(v);d.setDate(d.getDate()+3);setFormOzDate(d.toISOString().slice(0,10));}
+    if(v){setFormOzDate(addBizDays(v,3));}
   };
 
   // 직접 등록
@@ -712,10 +724,13 @@ function ScheduleTab(){
     if(!chatInput.trim())return;
     const MON={JAN:"01",FEB:"02",MAR:"03",APR:"04",APRIL:"04",MAY:"05",JUN:"06",JUNE:"06",JUL:"07",JULY:"07",AUG:"08",SEP:"09",OCT:"10",NOV:"11",DEC:"12",JANUARY:"01",FEBRUARY:"02",MARCH:"03",AUGUST:"08",SEPTEMBER:"09",OCTOBER:"10",NOVEMBER:"11",DECEMBER:"12"};
     // 영문→한글 상품명 번역
-    const ENG_NAME={"PIGMENT TEE":"피그먼트 티셔츠","PIGMENT TEES":"피그먼트 티셔츠","GRAYCHILL":"그레이칠","RINGER T-SHIRT":"링거 티셔츠","UNISEX RINGER T-SHIRT":"유니섹스 링거 티셔츠","WOMEN'S LONG SLEEVE":"여성용 긴팔","WOMEN'S LONG SLEEVES":"여성용 긴팔","LONG SLEEVE":"긴팔","HOODIE":"후디","SWEATSHIRT":"맨투맨","T-SHIRT":"티셔츠","CREWNECK":"크루넥","WINDBREAKER":"바람막이","JOGGER":"조거팬츠","RAGLAN":"레글런"};
+    const ENG_NAME={"PIGMENT TEE":"피그먼트 티셔츠","PIGMENT TEES":"피그먼트 티셔츠","GRAYCHILL":"그레이칠","RINGER T-SHIRT":"링거 티셔츠","UNISEX RINGER T-SHIRT":"유니섹스 링거 티셔츠","UNISEX RINGER":"유니섹스 링거","WOMEN'S LONG SLEEVE":"우먼 롱슬리브","WOMEN'S LONG SLEEVES":"우먼 롱슬리브","WOMEN LONG SLEEVE":"우먼 롱슬리브","LONG SLEEVE":"롱슬리브","LONG SLEEVES":"롱슬리브","HOODIE":"후디","SWEATSHIRT":"맨투맨","T-SHIRT":"티셔츠","TEES":"티셔츠","TEE":"티셔츠","CREWNECK":"크루넥","WINDBREAKER":"바람막이","JOGGER":"조거팬츠","JOGGERS":"조거팬츠","RAGLAN":"레글런","PANTS":"팬츠","SHORTS":"쇼츠","JACKET":"자켓","VEST":"베스트","CAP":"캡","HAT":"모자","BAG":"가방","SOCKS":"양말","CARDIGAN":"가디건","POLO":"폴로","SHIRT":"셔츠","SKIRT":"스커트","DRESS":"원피스","LEGGINGS":"레깅스","ZIP UP":"집업","ZIP-UP":"집업","HALF ZIP":"하프집업","OVERSIZED":"오버사이즈","CROP":"크롭","BASIC":"베이직","ESSENTIAL":"에센셜","PIGMENT":"피그먼트","SIGNATURE":"시그니처"};
     const translateName=(name)=>{
-      const up=(name||"").toUpperCase().trim();
-      for(const[eng,kr] of Object.entries(ENG_NAME)){if(up.includes(eng))return kr;}
+      if(!name)return name;
+      const up=name.toUpperCase().trim();
+      // 긴 키워드부터 먼저 매칭 (정확도 향상)
+      const sorted=Object.entries(ENG_NAME).sort((a,b)=>b[0].length-a[0].length);
+      for(const[eng,kr] of sorted){if(up.includes(eng))return kr;}
       return name;
     };
 
@@ -855,9 +870,9 @@ function ScheduleTab(){
         const key=p.item+"_"+p.qty+"_"+p.krDate;
         if(seen.has(key))continue;seen.add(key);
         const krDate=p.krDate||new Date().toISOString().slice(0,10);
-        const ozD=new Date(krDate);ozD.setDate(ozD.getDate()+3);
+        const ozDate=addBizDays(krDate,3);
         const row={supplier:p.supplier||curSup,item:p.item,qty:p.qty||0,
-          ship_date:null,kr_date:krDate,oz_date:ozD.toISOString().slice(0,10),
+          ship_date:null,kr_date:krDate,oz_date:ozDate,
           ship_type:p.shipType||"",note:"",status:"입고예정",
           date:krDate,lead_days:(p.supplier||curSup)==="인도"?30:(p.supplier||curSup)==="코니키즈"?21:14};
         try{
@@ -1033,7 +1048,7 @@ function ScheduleTab(){
             <Input type="date" value={formKrDate} onChange={e=>handleKrDate(e.target.value)} />
           </div>
           <div>
-            <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>📦 오즈센터 도착일 (+3일)</div>
+            <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>📦 오즈센터 도착일 (+3영업일)</div>
             <Input type="date" value={formOzDate} onChange={e=>setFormOzDate(e.target.value)} />
           </div>
           <div>
