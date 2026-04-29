@@ -26,6 +26,7 @@ const UNIQUE_PRODUCTS=[...new Set(SKUS.map(s=>s[F.REP]))].length;
 
 const SUPPLIERS=["자체제작","국내-베키(동대문)","수입-(복건)GL","수입-(광동)BJ","수입-(복건)SY"];
 const SUPPLIER_COLORS={"자체제작":"#E8A87C","국내-베키(동대문)":"#85CDCA","수입-(복건)GL":"#D5A4CF","수입-(광동)BJ":"#8B5CF6","수입-(복건)SY":"#3B82F6"};
+const SCHEDULE_SUP_STYLES={"인도":{color:"#16A34A",bg:"#F0FDF4",icon:"🇮🇳"},"코니키즈":{color:"#2563EB",bg:"#EFF6FF",icon:"🏭"},"성은교역":{color:"#D97706",bg:"#FFFBEB",icon:"📦"},"오중":{color:"#0891B2",bg:"#ECFEFF",icon:"🏢"}};
 const getSupColor=(s)=>{
   if(SUPPLIER_COLORS[s])return SUPPLIER_COLORS[s];
   if(s.startsWith("자체"))return"#E8A87C";if(s.startsWith("국내"))return"#85CDCA";return"#D5A4CF";
@@ -718,7 +719,7 @@ function ScheduleTab(){
   const[statusFilter,setStatusFilter]=useState("all"); // all | confirming | confirmed
 
   const SUPPLIERS=["인도","코니키즈","성은교역","오중"];
-  const SUP_STYLES={"인도":{color:"#16A34A",bg:"#F0FDF4",icon:"🇮🇳"},"코니키즈":{color:"#2563EB",bg:"#EFF6FF",icon:"🏭"},"성은교역":{color:"#D97706",bg:"#FFFBEB",icon:"📦"},"오중":{color:"#0891B2",bg:"#ECFEFF",icon:"🏢"}};
+  const SUP_STYLES=SCHEDULE_SUP_STYLES;
 
   useEffect(()=>{(async()=>{setLoading(true);const data=await sb.get("schedules");setSchedules(data||[]);setLoading(false);})();},[]);
 
@@ -2544,16 +2545,20 @@ export default function Dashboard(){
             ):(<div style={{maxHeight:340,overflowY:"auto",paddingRight:2}}>
               {pendingSchedules.map((s,i)=>{
                 const confirmed=s.status==="입고확정";
-                return(<div key={s.id||i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",borderRadius:8,marginBottom:6,background:confirmed?"#F0FDF4":"#FFFBEB",border:"1px solid "+(confirmed?"#BBF7D0":"#FDE68A")}}>
+                const sup=SCHEDULE_SUP_STYLES[s.supplier]||{color:"#64748B",bg:"#F8FAFC",icon:"📦"};
+                return(<div key={s.id||i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",borderRadius:8,marginBottom:6,background:sup.bg,border:`1px solid ${sup.color}33`,borderLeft:`4px solid ${sup.color}`}}>
                   <div style={{minWidth:0,flex:1}}>
                     <div style={{fontSize:13,fontWeight:600,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                       <span style={{marginRight:4}}>{confirmed?"🟢":"🟡"}</span>{translateItemName(s.item)||"(상품명)"}
                     </div>
-                    <div style={{fontSize:11,color:"#64748B",marginTop:2}}>{s.kr_date||s.date||"-"} · {s.supplier||"-"}</div>
+                    <div style={{fontSize:11,color:"#64748B",marginTop:2,display:"flex",alignItems:"center",gap:4}}>
+                      <span>{s.kr_date||s.date||"-"}</span>
+                      <span style={{color:sup.color,fontWeight:700}}>· {sup.icon} {s.supplier||"-"}</span>
+                    </div>
                   </div>
                   <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>
-                    <div style={{fontSize:15,fontWeight:700,color:confirmed?"#15803D":"#B45309"}}>{(s.qty||0).toLocaleString()}장</div>
-                    <div style={{fontSize:10,color:confirmed?"#15803D":"#92400E",fontWeight:600}}>{confirmed?"입고 확정":"입고 일정 확인중"}</div>
+                    <div style={{fontSize:15,fontWeight:700,color:sup.color}}>{(s.qty||0).toLocaleString()}장</div>
+                    <div style={{fontSize:10,color:confirmed?"#15803D":"#B45309",fontWeight:600}}>{confirmed?"입고 확정":"입고 일정 확인중"}</div>
                   </div>
                 </div>);
               })}
