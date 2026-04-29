@@ -1134,10 +1134,20 @@ function ScheduleTab(){
 
     {/* 캘린더 뷰 */}
     {viewMode==="calendar"&&<SectionCard title={`${year}년 ${month+1}월`} actions={
-      <div style={{display:"flex",gap:6}}>
-        <SmallBtn onClick={()=>setCurrentMonth(p=>{let m=p.month-1,y=p.year;if(m<0){m=11;y--;}return{year:y,month:m};})}>◀ 이전</SmallBtn>
-        <SmallBtn primary onClick={()=>{const d=new Date();setCurrentMonth({year:d.getFullYear(),month:d.getMonth()});}}>오늘</SmallBtn>
-        <SmallBtn onClick={()=>setCurrentMonth(p=>{let m=p.month+1,y=p.year;if(m>11){m=0;y++;}return{year:y,month:m};})}>다음 ▶</SmallBtn>
+      <div style={{display:"flex",alignItems:"center",gap:14}}>
+        <div style={{display:"flex",alignItems:"center",gap:12,fontSize:11,fontWeight:600,color:"#475569"}}>
+          <span style={{display:"inline-flex",alignItems:"center",gap:4}}>
+            <span style={{display:"inline-block",width:8,height:8,borderRadius:"50%",background:"#F59E0B"}} />입고 일정 확인중
+          </span>
+          <span style={{display:"inline-flex",alignItems:"center",gap:4}}>
+            <span style={{display:"inline-block",width:8,height:8,borderRadius:"50%",background:"#10B981"}} />입고 확정
+          </span>
+        </div>
+        <div style={{display:"flex",gap:6}}>
+          <SmallBtn onClick={()=>setCurrentMonth(p=>{let m=p.month-1,y=p.year;if(m<0){m=11;y--;}return{year:y,month:m};})}>◀ 이전</SmallBtn>
+          <SmallBtn primary onClick={()=>{const d=new Date();setCurrentMonth({year:d.getFullYear(),month:d.getMonth()});}}>오늘</SmallBtn>
+          <SmallBtn onClick={()=>setCurrentMonth(p=>{let m=p.month+1,y=p.year;if(m>11){m=0;y++;}return{year:y,month:m};})}>다음 ▶</SmallBtn>
+        </div>
       </div>
     }>
       <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:1,background:"#E2E8F0",borderRadius:10,overflow:"hidden"}}>
