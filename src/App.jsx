@@ -2415,15 +2415,14 @@ export default function Dashboard(){
   const[dashSchedules,setDashSchedules]=useState([]);
   useEffect(()=>{(async()=>{const data=await sb.get("schedules");setDashSchedules(data||[]);})();},[]);
 
-  // 이번주(월~일) kr_date에 잡힌 스케줄
+  // 이번주(오늘~이번주 일요일) kr_date에 잡힌 스케줄 (지난 날짜 제외)
   const thisWeekSchedules=useMemo(()=>{
     const now=new Date();
     const dow=now.getDay(); // 0=Sun..6=Sat
-    const monOffset=dow===0?-6:1-dow;
-    const monday=new Date(now.getFullYear(),now.getMonth(),now.getDate()+monOffset);
-    const sunday=new Date(monday.getFullYear(),monday.getMonth(),monday.getDate()+6);
+    const sunOffset=dow===0?0:7-dow;
+    const sunday=new Date(now.getFullYear(),now.getMonth(),now.getDate()+sunOffset);
     const ymd=(d)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-    const lo=ymd(monday),hi=ymd(sunday);
+    const lo=ymd(now),hi=ymd(sunday);
     return dashSchedules.filter(s=>{const d=s.kr_date||s.date;return d&&d>=lo&&d<=hi;}).sort((a,b)=>(a.kr_date||a.date||"").localeCompare(b.kr_date||b.date||""));
   },[dashSchedules]);
   const thisWeekTotalQty=useMemo(()=>thisWeekSchedules.reduce((sum,s)=>sum+(s.qty||0),0),[thisWeekSchedules]);
