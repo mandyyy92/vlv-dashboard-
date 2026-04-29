@@ -1183,7 +1183,7 @@ function ScheduleTab(){
                 </div>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:4,marginTop:12,fontSize:15,lineHeight:1.2}}>
                   <span style={{fontWeight:700,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{translateItemName(ev.item)}</span>
-                  {ev.qty>0&&<span style={{color:"#64748B",flexShrink:0}}>{ev.qty.toLocaleString()}장</span>}
+                  {ev.qty>0&&<span style={{color:"#0F172A",fontWeight:700,flexShrink:0}}>{ev.qty.toLocaleString()}장</span>}
                 </div>
               </div>);})}
           </div>);
