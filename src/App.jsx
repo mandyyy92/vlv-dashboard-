@@ -1268,6 +1268,7 @@ function ScheduleTab(){
               const confirmed=isConfirmed(s);
               return(<div key={s.id||i} style={{background:"#FFF",borderRadius:10,padding:"12px 14px",marginBottom:8,border:"1px solid #E2E8F0",position:"relative"}}>
               <button onClick={()=>delSchedule(s.id)} style={{position:"absolute",top:8,right:8,background:"none",border:"none",cursor:"pointer",fontSize:16,color:"#94A3B8"}}>×</button>
+              {s.oz_date&&<span style={{position:"absolute",top:10,right:28,padding:"1px 6px",borderRadius:3,fontSize:10,fontWeight:700,color:ddayColor(s.oz_date),background:`${ddayColor(s.oz_date)}15`}}>{dday(s.oz_date)}</span>}
               <div onClick={()=>toggleStatus(s)} title="클릭하여 상태 변경" style={{
                 display:"inline-flex",alignItems:"center",gap:4,padding:"3px 9px",borderRadius:12,
                 fontSize:10.5,fontWeight:700,cursor:"pointer",userSelect:"none",marginBottom:6,
@@ -1290,22 +1291,19 @@ function ScheduleTab(){
                 </div>
                 <div style={{flex:1,display:"flex",flexDirection:"column",gap:2,paddingLeft:6,minWidth:0}}>
                   <div style={{fontSize:10,color:"#94A3B8"}}>📦 오즈센터</div>
-                  <div style={{fontSize:12,fontWeight:700,color:"#1E293B",display:"flex",alignItems:"center",gap:3,flexWrap:"wrap"}}>
-                    {isEdit("oz_date")?dateInput("oz_date"):
-                      <span onClick={()=>startInline(s,"oz_date")} title="클릭하여 수정" style={editableHover}>{s.oz_date||"-"}</span>}
-                    {s.oz_date&&<span style={{padding:"1px 5px",borderRadius:3,fontSize:9,fontWeight:700,color:ddayColor(s.oz_date),background:`${ddayColor(s.oz_date)}15`}}>{dday(s.oz_date)}</span>}
-                  </div>
+                  <div style={{fontSize:12,fontWeight:700,color:"#1E293B"}}>{isEdit("oz_date")?dateInput("oz_date"):
+                    <span onClick={()=>startInline(s,"oz_date")} title="클릭하여 수정" style={editableHover}>{s.oz_date||"-"}</span>}</div>
                 </div>
               </div>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8,marginTop:6}}>
-                <div style={{fontSize:15,fontWeight:800,color:"#1E293B",flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+              <div style={{display:"flex",alignItems:"baseline",gap:8,marginTop:6,flexWrap:"wrap"}}>
+                <div style={{fontSize:15,fontWeight:800,color:"#1E293B"}}>
                   {isEdit("item")?(<input autoFocus value={inlineDraft} onChange={e=>setInlineDraft(e.target.value)}
                     onBlur={()=>commitInline(s)}
                     onKeyDown={e=>{if(e.key==="Enter")commitInline(s);else if(e.key==="Escape")cancelInline();}}
-                    style={{...inlineInputStyle,fontSize:15,fontWeight:800,width:"100%"}} />):
+                    style={{...inlineInputStyle,fontSize:15,fontWeight:800,minWidth:120}} />):
                     <span onClick={()=>startInline(s,"item")} title="클릭하여 수정" style={editableHover}>{translateItemName(s.item)||"(상품명)"}</span>}
                 </div>
-                <div style={{fontSize:13,color:"#334155",flexShrink:0}}>
+                <div style={{fontSize:13,color:"#334155"}}>
                   {isEdit("qty")?(<><input type="number" autoFocus value={inlineDraft} onChange={e=>setInlineDraft(e.target.value)}
                     onBlur={()=>commitInline(s)}
                     onKeyDown={e=>{if(e.key==="Enter")commitInline(s);else if(e.key==="Escape")cancelInline();}}
