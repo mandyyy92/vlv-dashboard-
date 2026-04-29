@@ -1261,7 +1261,7 @@ function ScheduleTab(){
                 onKeyDown={e=>{if(e.key==="Enter")commitInline(s);else if(e.key==="Escape")cancelInline();}}
                 style={{...inlineInputStyle,fontSize:13,width:130}} />);
               const confirmed=isConfirmed(s);
-              return(<div key={s.id||i} style={{background:"#FFF",borderRadius:10,padding:"14px 16px",marginBottom:14,border:"1px solid #E2E8F0",position:"relative"}}>
+              return(<div key={s.id||i} style={{background:"#FFF",borderRadius:10,padding:"16px 16px",marginBottom:14,border:"1px solid #E2E8F0",position:"relative"}}>
               <button onClick={()=>delSchedule(s.id)} style={{position:"absolute",top:8,right:8,background:"none",border:"none",cursor:"pointer",fontSize:18,color:"#94A3B8"}}>×</button>
               {s.oz_date&&<span style={{position:"absolute",top:10,right:28,padding:"1px 6px",borderRadius:3,fontSize:12,fontWeight:700,color:ddayColor(s.oz_date),background:`${ddayColor(s.oz_date)}15`}}>{dday(s.oz_date)}</span>}
               <div onClick={()=>toggleStatus(s)} title="클릭하여 상태 변경" style={{
