@@ -2410,6 +2410,30 @@ export default function Dashboard(){
     setReorderLoading(false);
   })();},[]);
 
+  // Supabase schedules 데이터 (입고 스케줄 탭과 동일 소스)
+  const[dashSchedules,setDashSchedules]=useState([]);
+  useEffect(()=>{(async()=>{const data=await sb.get("schedules");setDashSchedules(data||[]);})();},[]);
+
+  // 이번주(월~일) kr_date에 잡힌 스케줄
+  const thisWeekSchedules=useMemo(()=>{
+    const now=new Date();
+    const dow=now.getDay(); // 0=Sun..6=Sat
+    const monOffset=dow===0?-6:1-dow;
+    const monday=new Date(now.getFullYear(),now.getMonth(),now.getDate()+monOffset);
+    const sunday=new Date(monday.getFullYear(),monday.getMonth(),monday.getDate()+6);
+    const ymd=(d)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+    const lo=ymd(monday),hi=ymd(sunday);
+    return dashSchedules.filter(s=>{const d=s.kr_date||s.date;return d&&d>=lo&&d<=hi;}).sort((a,b)=>(a.kr_date||a.date||"").localeCompare(b.kr_date||b.date||""));
+  },[dashSchedules]);
+  const thisWeekTotalQty=useMemo(()=>thisWeekSchedules.reduce((sum,s)=>sum+(s.qty||0),0),[thisWeekSchedules]);
+
+  // 오늘 이후의 모든 스케줄 (입고대기 현황)
+  const pendingSchedules=useMemo(()=>{
+    const today=new Date().toISOString().slice(0,10);
+    return dashSchedules.filter(s=>{const d=s.kr_date||s.date;return d&&d>=today;}).sort((a,b)=>(a.kr_date||a.date||"").localeCompare(b.kr_date||b.date||""));
+  },[dashSchedules]);
+  const pendingTotalQty=useMemo(()=>pendingSchedules.reduce((sum,s)=>sum+(s.qty||0),0),[pendingSchedules]);
+
   const reorderUrgent=useMemo(()=>reorderData.filter(r=>{const d=Math.round(r.exhaustDays||0);const s=Math.round(r.stock||0);return d>0&&s>0&&d<=60;}).sort((a,b)=>(a.exhaustDays||0)-(b.exhaustDays||0)),[reorderData]);
   const reorderWarning=useMemo(()=>reorderData.filter(r=>{const d=Math.round(r.exhaustDays||0);const s=Math.round(r.stock||0);return d>0&&s>0&&d>60&&d<=75;}),[reorderData]);
   const reorderReview=useMemo(()=>reorderData.filter(r=>{const d=Math.round(r.exhaustDays||0);const s=Math.round(r.stock||0);return d>0&&s>0&&d>75&&d<=90;}),[reorderData]);
@@ -2436,14 +2460,15 @@ export default function Dashboard(){
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
             <div>
               <div style={{fontSize:11,fontWeight:600,color:"#6366F1",letterSpacing:0.5,textTransform:"uppercase",marginBottom:6}}>📦 이번주 입고건</div>
-              <div style={{fontSize:36,fontWeight:800,color:"#3B82F6",letterSpacing:-1.5}}>{PENDING_SKUS.length}<span style={{fontSize:14,fontWeight:500,color:"#93C5FD",marginLeft:4}}>건</span></div>
-              <div style={{fontSize:12,color:"#6B7280",marginTop:6}}>총 {TOTAL_PENDING.toLocaleString()}pcs 입고 예정</div>
+              <div style={{fontSize:36,fontWeight:800,color:"#3B82F6",letterSpacing:-1.5}}>{thisWeekSchedules.length}<span style={{fontSize:14,fontWeight:500,color:"#93C5FD",marginLeft:4}}>건</span></div>
+              <div style={{fontSize:12,color:"#6B7280",marginTop:6}}>총 {thisWeekTotalQty.toLocaleString()}장 입고 예정</div>
             </div>
             <div style={{width:48,height:48,borderRadius:12,background:"#3B82F620",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>📅</div>
           </div>
           <div style={{marginTop:14,display:"flex",gap:6,flexWrap:"wrap"}}>
-            {PENDING_SKUS.slice(0,3).map((s,i)=>(<div key={i} style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"#DBEAFE",color:"#1E40AF",fontWeight:600}}>{s[F.NAME].slice(0,8)}… {s[F.PENDING]}pcs</div>))}
-            {PENDING_SKUS.length>3&&<div style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"#E0E7FF",color:"#4338CA",fontWeight:600}}>+{PENDING_SKUS.length-3}건</div>}
+            {thisWeekSchedules.slice(0,3).map((s,i)=>(<div key={s.id||i} style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"#DBEAFE",color:"#1E40AF",fontWeight:600}}>{(s.item||"").slice(0,8)}… {(s.qty||0).toLocaleString()}장</div>))}
+            {thisWeekSchedules.length>3&&<div style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"#E0E7FF",color:"#4338CA",fontWeight:600}}>+{thisWeekSchedules.length-3}건</div>}
+            {thisWeekSchedules.length===0&&<div style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"#F1F5F9",color:"#94A3B8",fontWeight:600}}>이번주 입고건 없음</div>}
           </div>
         </div>
 
@@ -2513,19 +2538,26 @@ export default function Dashboard(){
 
         {/* 오른쪽: 입고대기 현황 + 샘플 진행 현황 */}
         <div>
-          <SectionCard title="📦 입고대기 현황" subtitle={`${PENDING_SKUS.length}개 SKU · 총 ${TOTAL_PENDING.toLocaleString()}pcs`}>
-            {PENDING_SKUS.slice(0,4).map((s,i)=>(
-              <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",borderRadius:8,marginBottom:6,background:"#EFF6FF",border:"1px solid #BFDBFE"}}>
-                <div>
-                  <div style={{fontSize:13,fontWeight:600,color:"#1E293B"}}>{s[F.NAME]} {s[F.OPT]}</div>
-                  <div style={{fontSize:11,color:"#64748B",marginTop:2}}>{s[F.CODE]}</div>
-                </div>
-                <div style={{textAlign:"right"}}>
-                  <div style={{fontSize:15,fontWeight:700,color:"#3B82F6"}}>{s[F.PENDING]}pcs</div>
-                  <div style={{fontSize:10,color:"#94A3B8"}}>현재고 {s[F.STOCK]}</div>
-                </div>
-              </div>
-            ))}
+          <SectionCard title="📦 입고대기 현황" subtitle={`${pendingSchedules.length}건 · 총 ${pendingTotalQty.toLocaleString()}장`}>
+            {pendingSchedules.length===0?(
+              <div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:13}}>입고 대기 일정이 없습니다</div>
+            ):(<div style={{maxHeight:340,overflowY:"auto",paddingRight:2}}>
+              {pendingSchedules.map((s,i)=>{
+                const confirmed=s.status==="입고확정";
+                return(<div key={s.id||i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",borderRadius:8,marginBottom:6,background:confirmed?"#F0FDF4":"#FFFBEB",border:"1px solid "+(confirmed?"#BBF7D0":"#FDE68A")}}>
+                  <div style={{minWidth:0,flex:1}}>
+                    <div style={{fontSize:13,fontWeight:600,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                      <span style={{marginRight:4}}>{confirmed?"🟢":"🟡"}</span>{translateItemName(s.item)||"(상품명)"}
+                    </div>
+                    <div style={{fontSize:11,color:"#64748B",marginTop:2}}>{s.kr_date||s.date||"-"} · {s.supplier||"-"}</div>
+                  </div>
+                  <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>
+                    <div style={{fontSize:15,fontWeight:700,color:confirmed?"#15803D":"#B45309"}}>{(s.qty||0).toLocaleString()}장</div>
+                    <div style={{fontSize:10,color:confirmed?"#15803D":"#92400E",fontWeight:600}}>{confirmed?"입고 확정":"입고 일정 확인중"}</div>
+                  </div>
+                </div>);
+              })}
+            </div>)}
           </SectionCard>
 
           <SectionCard title="🧪 샘플 진행 현황">
