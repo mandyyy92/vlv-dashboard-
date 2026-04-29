@@ -1121,11 +1121,6 @@ function ScheduleTab(){
       <div style={{fontSize:15,fontWeight:600,color:"#3B82F6"}}>{year}년 {month+1}월 {new Date().getDate()}일</div>
     </div>
 
-    {/* 안내 */}
-    <div style={{padding:"12px 20px",borderRadius:10,background:"#FFFBEB",border:"1px solid #FDE68A",marginBottom:16,fontSize:14,color:"#92400E"}}>
-      💡 카카오톡 대화 내용을 붙여넣으면 AI가 자동으로 스케줄을 분석하거나, 직접 입력할 수 있습니다.
-    </div>
-
     {/* 뷰 전환 */}
     <div style={{display:"flex",gap:8,marginBottom:16}}>
       <SmallBtn primary={viewMode==="calendar"} onClick={()=>setViewMode("calendar")}>📅 캘린더</SmallBtn>
@@ -1266,7 +1261,7 @@ function ScheduleTab(){
                 onKeyDown={e=>{if(e.key==="Enter")commitInline(s);else if(e.key==="Escape")cancelInline();}}
                 style={{...inlineInputStyle,fontSize:13,width:130}} />);
               const confirmed=isConfirmed(s);
-              return(<div key={s.id||i} style={{background:"#FFF",borderRadius:10,padding:"12px 14px",marginBottom:8,border:"1px solid #E2E8F0",position:"relative"}}>
+              return(<div key={s.id||i} style={{background:"#FFF",borderRadius:10,padding:"14px 16px",marginBottom:14,border:"1px solid #E2E8F0",position:"relative"}}>
               <button onClick={()=>delSchedule(s.id)} style={{position:"absolute",top:8,right:8,background:"none",border:"none",cursor:"pointer",fontSize:18,color:"#94A3B8"}}>×</button>
               {s.oz_date&&<span style={{position:"absolute",top:10,right:28,padding:"1px 6px",borderRadius:3,fontSize:12,fontWeight:700,color:ddayColor(s.oz_date),background:`${ddayColor(s.oz_date)}15`}}>{dday(s.oz_date)}</span>}
               <div onClick={()=>toggleStatus(s)} title="클릭하여 상태 변경" style={{
