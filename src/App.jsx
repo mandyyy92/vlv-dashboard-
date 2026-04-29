@@ -2318,6 +2318,12 @@ function PlanningTab(){
   const[fColors,setFColors]=useState("");
   const[fNote,setFNote]=useState("");
 
+  const[trendLoading,setTrendLoading]=useState(false);
+  const[trendData,setTrendData]=useState(null);
+  const[trendError,setTrendError]=useState("");
+  const[trendSeason,setTrendSeason]=useState("");
+  const[trendAdded,setTrendAdded]=useState({}); // 어떤 카드를 추가했는지 추적 (중복 추가 방지 UI용)
+
   useEffect(()=>{(async()=>{
     setLoading(true);
     const data=await sb.get("planning");
@@ -2389,6 +2395,110 @@ function PlanningTab(){
     if(!seasons.includes(v))setSeasons(p=>[...p,v].sort());
     setActiveSeason(v);
     setNewSeason("");
+  };
+
+  // AI 트렌드 분석 (Anthropic API + web_search) — 아이템 단위 결과
+  const runTrendAnalysis=async()=>{
+    let key=localStorage.getItem("vlv_api_key");
+    if(!key){
+      const k=window.prompt("Anthropic API 키를 입력하세요 (sk-ant-...).\n입력값은 브라우저 localStorage(vlv_api_key)에 저장됩니다.");
+      if(!k||!k.trim())return;
+      localStorage.setItem("vlv_api_key",k.trim());
+      key=k.trim();
+    }
+    setTrendLoading(true);setTrendError("");setTrendData(null);setTrendAdded({});
+    const yearMatch=activeSeason.match(/^(\d{2})/);
+    const year=yearMatch?`20${yearMatch[1]}`:"2026";
+    const prompt=`${year}년 ${activeSeason} 한국 캐주얼 브랜드 트렌드를 분석해줘. 무신사, 29CM 인기 아이템 기준으로 비바라비다(vlvd.kr) 같은 캐주얼 브랜드에 맞는 카테고리별(상의/하의/아우터/모자/가방) 추천 아이템 3-5개씩을 JSON으로 정리해줘.
+
+각 아이템마다 다음 정보를 포함해:
+- name: 구체적인 아이템명 (예: "오버사이즈 후드 티셔츠")
+- est_price: 예상 판매가 범위, 원 단위 숫자만 (예: "39000~59000")
+- material: 추천 소재 한 줄 (예: "면 100%")
+- colors: 추천 컬러 콤마 구분 (예: "블랙, 차콜, 크림")
+- ref_url: 무신사/29CM 등 실제 참고 상품 페이지 URL (반드시 검색해서 실제 URL을 넣어줘)
+- image_url: 대표 상품 이미지 URL (참고 페이지의 메인 이미지)
+- reason: 추천 이유 1-2문장
+
+응답은 반드시 아래 JSON 형식으로만 답변해. 다른 설명/마크다운 없이 JSON만 출력.
+{
+  "상의": [
+    {"name":"오버사이즈 피그먼트 티셔츠","est_price":"29000~49000","material":"면 100%","colors":"블랙, 크림, 그레이","ref_url":"https://www.musinsa.com/products/...","image_url":"https://image.msscdn.net/...","reason":"빈티지 워싱 감성으로 캐주얼 브랜드의 시그니처 아이템으로 인기"}
+  ],
+  "하의": [...],
+  "아우터": [...],
+  "모자": [...],
+  "가방": [...]
+}`;
+    try{
+      const res=await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",
+        headers:{
+          "content-type":"application/json",
+          "x-api-key":key,
+          "anthropic-version":"2023-06-01",
+          "anthropic-dangerous-direct-browser-access":"true"
+        },
+        body:JSON.stringify({
+          model:"claude-sonnet-4-20250514",
+          max_tokens:16000,
+          tools:[{type:"web_search_20250305",name:"web_search",max_uses:8}],
+          messages:[{role:"user",content:prompt}]
+        })
+      });
+      if(!res.ok){
+        const t=await res.text();
+        throw new Error(`API ${res.status}: ${t.slice(0,300)}`);
+      }
+      const data=await res.json();
+      const text=(data.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("\n").trim();
+      const m=text.match(/\{[\s\S]*\}/);
+      if(!m)throw new Error("응답에서 JSON을 찾을 수 없습니다.\n원문: "+text.slice(0,200));
+      const json=JSON.parse(m[0]);
+      setTrendData(json);
+      setTrendSeason(activeSeason);
+    }catch(e){
+      console.error("Trend analysis error:",e);
+      setTrendError(e.message||"분석 실패");
+    }finally{
+      setTrendLoading(false);
+    }
+  };
+
+  const resetApiKey=()=>{
+    if(window.confirm("저장된 API 키를 삭제하시겠습니까?")){
+      localStorage.removeItem("vlv_api_key");
+      alert("삭제되었습니다.");
+    }
+  };
+
+  // 트렌드 카드 → 기획 테이블에 즉시 등록
+  const parsePriceRange=(s)=>{
+    if(!s)return 0;
+    const m=String(s).match(/(\d[\d,]*)/);
+    return m?parseInt(m[1].replace(/,/g,"")):0;
+  };
+  const addFromTrend=async(item,category,key)=>{
+    const row={
+      season:activeSeason,
+      name:(item.name||"").trim()||"(이름없음)",
+      category:category||"기타",
+      ref_url:(item.ref_url||"").trim()||null,
+      image_url:(item.image_url||"").trim()||null,
+      est_price:parsePriceRange(item.est_price),
+      est_cost:0,
+      material:(item.material||"").trim(),
+      colors:(item.colors||"").trim(),
+      status:"아이디어",
+      note:(item.reason||"").trim()
+    };
+    const r=await sb.insert("planning",row);
+    if(r&&r[0]){
+      setItems(p=>[r[0],...p]);
+      setTrendAdded(prev=>({...prev,[key]:true}));
+    }else{
+      alert("저장 실패. Supabase planning 테이블 컬럼을 확인하세요.");
+    }
   };
 
   if(loading)return <SectionCard title="💡 아이템 기획"><div style={{textAlign:"center",padding:40,color:"#94A3B8"}}>⏳ 데이터 불러오는 중...</div></SectionCard>;
@@ -2478,6 +2588,57 @@ function PlanningTab(){
           </div>
         </div>
       </div>
+    </SectionCard>
+
+    {/* AI 트렌드 분석 */}
+    <SectionCard title="🤖 AI 트렌드 분석" subtitle={`${activeSeason} 시즌 무신사·29CM 인기 아이템을 웹 검색으로 분석 (이미지 + 참고링크 포함)`} actions={
+      <div style={{display:"flex",gap:6}}>
+        <SmallBtn primary onClick={runTrendAnalysis}>{trendLoading?"⏳ 분석중...":"🤖 트렌드 분석"}</SmallBtn>
+        <SmallBtn onClick={resetApiKey}>🔑 API 키 재설정</SmallBtn>
+      </div>
+    }>
+      {trendLoading&&<div style={{padding:20,textAlign:"center",color:"#64748B",fontSize:15}}>웹 검색 + 분석 중입니다. 1~2분 소요될 수 있어요...</div>}
+      {trendError&&<div style={{padding:14,background:"#FEF2F2",border:"1px solid #FCA5A5",borderRadius:8,color:"#B91C1C",fontSize:14,whiteSpace:"pre-wrap"}}>❌ {trendError}</div>}
+      {!trendLoading&&!trendError&&!trendData&&<div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:15}}>버튼을 눌러 {activeSeason} 트렌드 분석을 시작하세요. 카테고리별 추천 아이템 (이미지·가격·소재·컬러·참고링크)이 카드로 표시되고 "기획 추가" 버튼으로 바로 등록할 수 있습니다.</div>}
+      {trendData&&<>
+        <div style={{padding:"6px 12px",background:"#EFF6FF",border:"1px solid #DBEAFE",borderRadius:6,marginBottom:12,fontSize:13,color:"#1E40AF",fontWeight:600}}>📊 {trendSeason} 트렌드 분석 결과 — 카드 위 "+ 기획 추가" 버튼으로 바로 등록</div>
+        {["상의","하의","아우터","모자","가방"].map(cat=>{
+          const arr=Array.isArray(trendData[cat])?trendData[cat]:[];
+          if(arr.length===0)return null;
+          return(<div key={cat} style={{marginBottom:18}}>
+            <div style={{fontSize:15,fontWeight:800,color:"#0F172A",marginBottom:8,paddingLeft:4}}>{cat} <span style={{fontSize:12,color:"#94A3B8",fontWeight:600,marginLeft:4}}>{arr.length}건</span></div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:12}}>
+              {arr.map((it,i)=>{
+                const key=`${cat}-${i}-${it.name||""}`;
+                const added=trendAdded[key];
+                return(<div key={key} style={{background:"#FFF",borderRadius:10,border:"1px solid #E2E8F0",overflow:"hidden",display:"flex",flexDirection:"column"}}>
+                  <div style={{height:160,background:"#F8FAFC",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
+                    {it.image_url?
+                      <img src={it.image_url} alt={it.name} style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{e.currentTarget.style.display="none";}} />
+                      :<div style={{fontSize:30,color:"#CBD5E1"}}>🖼️</div>}
+                  </div>
+                  <div style={{padding:"10px 12px",display:"flex",flexDirection:"column",gap:4,flex:1}}>
+                    <div style={{fontSize:14,fontWeight:700,color:"#0F172A",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={it.name}>{it.name||"-"}</div>
+                    {it.est_price&&<div style={{fontSize:12,color:"#3B82F6",fontWeight:700}}>💰 {it.est_price}원</div>}
+                    {it.material&&<div style={{fontSize:11,color:"#64748B"}}>🧵 {it.material}</div>}
+                    {it.colors&&<div style={{fontSize:11,color:"#64748B"}}>🎨 {it.colors}</div>}
+                    {it.reason&&<div style={{fontSize:11,color:"#94A3B8",fontStyle:"italic",lineHeight:1.4,marginTop:2}}>{it.reason}</div>}
+                    <div style={{display:"flex",gap:6,marginTop:"auto",paddingTop:8}}>
+                      {it.ref_url&&<a href={it.ref_url} target="_blank" rel="noreferrer" style={{flex:1,padding:"5px 10px",borderRadius:6,background:"#F1F5F9",color:"#1E293B",fontSize:11,fontWeight:600,textDecoration:"none",textAlign:"center",border:"1px solid #E2E8F0"}}>🔗 참고</a>}
+                      <button onClick={()=>addFromTrend(it,cat,key)} disabled={added} style={{
+                        flex:1,padding:"5px 10px",borderRadius:6,fontSize:11,fontWeight:700,cursor:added?"default":"pointer",
+                        border:"1px solid "+(added?"#86EFAC":"#1E293B"),
+                        background:added?"#DCFCE7":"#1E293B",
+                        color:added?"#15803D":"#FFF"
+                      }}>{added?"✓ 추가됨":"+ 기획 추가"}</button>
+                    </div>
+                  </div>
+                </div>);
+              })}
+            </div>
+          </div>);
+        })}
+      </>}
     </SectionCard>
 
     {/* 카테고리별 평균가 요약 */}
