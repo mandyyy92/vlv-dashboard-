@@ -724,7 +724,7 @@ function ScheduleTab(){
   // 한국도착일 입력 시 오즈센터 도착일 자동계산 (+3일)
   const handleKrDate=(v)=>{
     setFormKrDate(v);
-    if(v){setFormOzDate(addBizDays(v,3));}
+    if(v){setFormOzDate(addBizDays(v,2));}
   };
 
   // 직접 등록
@@ -899,7 +899,7 @@ function ScheduleTab(){
         const key=p.item+"_"+p.qty+"_"+p.krDate;
         if(seen.has(key))continue;seen.add(key);
         const krDate=p.krDate||new Date().toISOString().slice(0,10);
-        const ozDate=addBizDays(krDate,3);
+        const ozDate=addBizDays(krDate,2);
         const row={supplier:p.supplier||curSup,item:p.item,qty:p.qty||0,
           ship_date:p.shipDate||null,kr_date:krDate,oz_date:ozDate,
           ship_type:p.shipType||"",note:"",status:"입고예정",
@@ -944,7 +944,7 @@ function ScheduleTab(){
       if(schedule.kr_date===newDayStr||(!schedule.kr_date&&schedule.date===newDayStr))return;
       updates.kr_date=newDayStr;
       updates.date=newDayStr;
-      updates.oz_date=addBizDays(newDayStr,3);
+      updates.oz_date=addBizDays(newDayStr,2);
     }else if(eventType==="oz"){
       if(schedule.oz_date===newDayStr)return;
       updates.oz_date=newDayStr;
@@ -1045,7 +1045,7 @@ function ScheduleTab(){
       if(!inlineDraft||inlineDraft===s.kr_date){cancelInline();return;}
       updates.kr_date=inlineDraft;
       updates.date=inlineDraft;
-      updates.oz_date=addBizDays(inlineDraft,3);
+      updates.oz_date=addBizDays(inlineDraft,2);
     }else if(field==="oz_date"){
       if(!inlineDraft||inlineDraft===s.oz_date){cancelInline();return;}
       updates.oz_date=inlineDraft;
@@ -1222,7 +1222,7 @@ function ScheduleTab(){
               </div>
               <div style={{fontSize:11,color:"#64748B"}}>
                 🇰🇷 한국 도착: {isEdit("kr_date")?dateInput("kr_date"):
-                  <span onClick={()=>startInline(s,"kr_date")} title="클릭하여 수정 (오즈센터 +3영업일 자동계산)" style={editableHover}>{s.kr_date||s.date||"-"}</span>}
+                  <span onClick={()=>startInline(s,"kr_date")} title="클릭하여 수정 (오즈센터 +2영업일 자동계산)" style={editableHover}>{s.kr_date||s.date||"-"}</span>}
               </div>
               <div style={{fontSize:11,display:"flex",alignItems:"center",gap:4}}>
                 📦 <span style={{fontWeight:600}}>오즈센터: {isEdit("oz_date")?dateInput("oz_date"):
@@ -1313,7 +1313,7 @@ function ScheduleTab(){
             <Input type="date" value={formKrDate} onChange={e=>handleKrDate(e.target.value)} />
           </div>
           <div>
-            <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>📦 오즈센터 도착일 (+3영업일)</div>
+            <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>📦 오즈센터 도착일 (+2영업일)</div>
             <Input type="date" value={formOzDate} onChange={e=>setFormOzDate(e.target.value)} />
           </div>
           <div>
