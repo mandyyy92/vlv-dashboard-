@@ -1166,7 +1166,7 @@ function ScheduleTab(){
             onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget))setDragOverDay(prev=>prev===dayStr?null:prev);}}
             onDrop={e=>handleCellDrop(e,dayStr)}>
             <div style={{fontSize:12,fontWeight:isToday?800:500,color:isToday?"#2563EB":dow===0?"#DC2626":dow===6?"#2563EB":"#334155",marginBottom:4}}>{day}</div>
-            {events.slice(0,3).map((ev,j)=>{const ec=evtColor(ev.eventType,ev.supplier);const isDragging=dragItem&&dragItem.id===ev.id&&dragItem.eventType===ev.eventType;return(
+            {events.map((ev,j)=>{const ec=evtColor(ev.eventType,ev.supplier);const isDragging=dragItem&&dragItem.id===ev.id&&dragItem.eventType===ev.eventType;return(
               <div key={`${ev.id}-${ev.eventType}`} draggable
                 title="클릭: 수정 / 드래그: 날짜 이동"
                 style={{padding:"3px 6px",borderRadius:4,marginBottom:2,background:ec.bg,fontSize:10,lineHeight:1.4,cursor:"grab",userSelect:"none",border:isDragging?"2px solid "+ec.color:"1px solid transparent",opacity:isDragging?0.5:1}}
@@ -1185,7 +1185,6 @@ function ScheduleTab(){
                   {ev.qty>0&&<span style={{color:"#64748B",flexShrink:0}}>{ev.qty.toLocaleString()}장</span>}
                 </div>
               </div>);})}
-            {events.length>3&&<div style={{fontSize:9,color:"#94A3B8",textAlign:"center"}}>+{events.length-3}건</div>}
           </div>);
         })}
       </div>
