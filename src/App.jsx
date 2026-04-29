@@ -1073,8 +1073,8 @@ function ScheduleTab(){
     const events=[];
     schedules.forEach(s=>{
       if(s.ship_date===dayStr)events.push({...s,eventType:"ship",label:"선적일"});
-      if(s.kr_date===dayStr||(!s.kr_date&&!s.ship_date&&!s.oz_date&&s.date===dayStr))events.push({...s,eventType:"kr",label:"KR 한국 도착"});
-      if(s.oz_date===dayStr)events.push({...s,eventType:"oz",label:`${s.supplier||""} 오즈센터 도착`.trim()});
+      if(s.kr_date===dayStr||(!s.kr_date&&!s.ship_date&&!s.oz_date&&s.date===dayStr))events.push({...s,eventType:"kr",label:"한국 도착"});
+      if(s.oz_date===dayStr)events.push({...s,eventType:"oz",label:"오즈센터 도착"});
     });
     return events;
   };
@@ -1143,9 +1143,14 @@ function ScheduleTab(){
                 onDragStart={e=>handleDragStart(e,ev)}
                 onDragEnd={handleDragEnd}
                 onClick={()=>openEdit(ev)}>
-                <div style={{color:ec.color,fontWeight:600}}>{ec.icon} {ev.label}</div>
-                <div style={{fontWeight:700,color:"#1E293B",fontSize:11}}>{translateItemName(ev.item)}</div>
-                {ev.qty>0&&<div style={{color:"#64748B"}}>{ev.qty.toLocaleString()}장</div>}
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:4,color:ec.color,fontWeight:600}}>
+                  <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ec.icon} {ev.label}</span>
+                  {ev.supplier&&<span style={{color:ec.color,opacity:0.85,fontWeight:500,flexShrink:0}}>· {ev.supplier}</span>}
+                </div>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:4,marginTop:1,fontSize:11}}>
+                  <span style={{fontWeight:700,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{translateItemName(ev.item)}</span>
+                  {ev.qty>0&&<span style={{color:"#64748B",flexShrink:0}}>{ev.qty.toLocaleString()}장</span>}
+                </div>
               </div>);})}
             {events.length>3&&<div style={{fontSize:9,color:"#94A3B8",textAlign:"center"}}>+{events.length-3}건</div>}
           </div>);
