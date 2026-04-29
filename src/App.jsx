@@ -2505,6 +2505,57 @@ function PlanningTab(){
   if(loading)return <SectionCard title="💡 아이템 기획"><div style={{textAlign:"center",padding:40,color:"#94A3B8"}}>⏳ 데이터 불러오는 중...</div></SectionCard>;
 
   return(<>
+    {/* AI 트렌드 분석 (제일 상단) */}
+    <SectionCard title="🤖 AI 트렌드 분석" subtitle={`${activeSeason} 시즌 무신사·29CM 인기 아이템을 웹 검색으로 분석`} actions={
+      <div style={{display:"flex",gap:6}}>
+        <SmallBtn primary onClick={runTrendAnalysis}>{trendLoading?"⏳ 분석중...":"🤖 트렌드 분석"}</SmallBtn>
+        <SmallBtn onClick={resetApiKey}>🔑 API 키 재설정</SmallBtn>
+      </div>
+    }>
+      {trendLoading&&<div style={{padding:20,textAlign:"center",color:"#64748B",fontSize:15}}>웹 검색 + 분석 중입니다. 1~2분 소요될 수 있어요...</div>}
+      {trendError&&<div style={{padding:14,background:"#FEF2F2",border:"1px solid #FCA5A5",borderRadius:8,color:"#B91C1C",fontSize:14,whiteSpace:"pre-wrap"}}>❌ {trendError}</div>}
+      {!trendLoading&&!trendError&&!trendData&&<div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:15}}>버튼을 눌러 {activeSeason} 트렌드 분석을 시작하세요. 카테고리별 추천 아이템(이미지·가격·소재·컬러·참고링크)이 카드로 표시되고 "기획 추가" 버튼으로 바로 등록할 수 있습니다.</div>}
+      {trendData&&<>
+        {["상의","하의","아우터","모자","가방"].map(cat=>{
+          const arr=Array.isArray(trendData[cat])?trendData[cat]:[];
+          if(arr.length===0)return null;
+          return(<div key={cat} style={{marginBottom:18}}>
+            <div style={{fontSize:15,fontWeight:800,color:"#0F172A",marginBottom:8,paddingLeft:4}}>{cat} <span style={{fontSize:12,color:"#94A3B8",fontWeight:600,marginLeft:4}}>{arr.length}건</span></div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:12}}>
+              {arr.map((it,i)=>{
+                const key=`${cat}-${i}-${it.name||""}`;
+                const added=trendAdded[key];
+                const fallbackIcon=PLANNING_CATEGORY_ICONS[cat]||"🛍️";
+                return(<div key={key} style={{background:"#FFF",borderRadius:10,border:"1px solid #E2E8F0",overflow:"hidden",display:"flex",flexDirection:"column"}}>
+                  <div style={{height:160,background:"#F8FAFC",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
+                    {it.image_url?
+                      <img src={it.image_url} alt={it.name} style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{e.currentTarget.style.display="none";}} />
+                      :<div style={{fontSize:64,lineHeight:1}}>{fallbackIcon}</div>}
+                  </div>
+                  <div style={{padding:"10px 12px",display:"flex",flexDirection:"column",gap:4,flex:1}}>
+                    <div style={{fontSize:14,fontWeight:700,color:"#0F172A",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={it.name}>{it.name||"-"}</div>
+                    {it.est_price&&<div style={{fontSize:12,color:"#3B82F6",fontWeight:700}}>💰 {String(it.est_price).replace(/(\d+)/g,m=>parseInt(m).toLocaleString())}원</div>}
+                    {it.material&&<div style={{fontSize:11,color:"#64748B"}}>🧵 {it.material}</div>}
+                    {it.colors&&<div style={{fontSize:11,color:"#64748B"}}>🎨 {it.colors}</div>}
+                    {it.reason&&<div style={{fontSize:11,color:"#94A3B8",fontStyle:"normal",lineHeight:1.4,marginTop:2}}>{it.reason}</div>}
+                    <div style={{display:"flex",gap:6,marginTop:"auto",paddingTop:8}}>
+                      {it.ref_url&&<a href={it.ref_url} target="_blank" rel="noreferrer" style={{flex:1,padding:"5px 10px",borderRadius:6,background:"#F1F5F9",color:"#1E293B",fontSize:11,fontWeight:600,textDecoration:"none",textAlign:"center",border:"1px solid #E2E8F0"}}>🔗 참고</a>}
+                      <button onClick={()=>addFromTrend(it,cat,key)} disabled={added} style={{
+                        flex:1,padding:"5px 10px",borderRadius:6,fontSize:11,fontWeight:700,cursor:added?"default":"pointer",
+                        border:"1px solid "+(added?"#86EFAC":"#1E293B"),
+                        background:added?"#DCFCE7":"#1E293B",
+                        color:added?"#15803D":"#FFF"
+                      }}>{added?"✓ 추가됨":"+ 기획 추가"}</button>
+                    </div>
+                  </div>
+                </div>);
+              })}
+            </div>
+          </div>);
+        })}
+      </>}
+    </SectionCard>
+
     {/* 헤더 + 시즌 탭 */}
     <div style={{background:"#FFF",borderRadius:14,padding:"20px 28px",border:"1px solid #E2E8F0",marginBottom:16}}>
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
@@ -2528,7 +2579,19 @@ function PlanningTab(){
       </div>
     </div>
 
-    {/* 등록 폼 (상단) */}
+    {/* 카테고리별 평균가 요약 */}
+    <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:10,marginBottom:16}}>
+      {categorySummary.map(c=>(
+        <div key={c.category} style={{padding:"12px 14px",borderRadius:12,background:"#FFF",border:"1px solid #E2E8F0"}}>
+          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>{c.category}</div>
+          <div style={{fontSize:20,fontWeight:800,color:"#1E293B"}}>{c.count}<span style={{fontSize:13,fontWeight:500,color:"#94A3B8",marginLeft:3}}>건</span></div>
+          <div style={{fontSize:13,color:"#3B82F6",fontWeight:600,marginTop:4}}>평균가 {c.avgPrice.toLocaleString()}원</div>
+          <div style={{fontSize:12,color:"#94A3B8"}}>원가 {c.avgCost.toLocaleString()}원</div>
+        </div>
+      ))}
+    </div>
+
+    {/* 등록 폼 */}
     <SectionCard title="✏️ 레퍼런스 등록" subtitle="무신사 / 29CM 등 참고 링크와 이미지 URL을 넣으면 카드에 함께 표시됩니다">
       <div style={{display:"flex",gap:14,alignItems:"flex-start"}}>
         {/* 이미지 미리보기 */}
@@ -2591,18 +2654,6 @@ function PlanningTab(){
       </div>
     </SectionCard>
 
-    {/* 카테고리별 평균가 요약 */}
-    <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:10,marginBottom:16}}>
-      {categorySummary.map(c=>(
-        <div key={c.category} style={{padding:"12px 14px",borderRadius:12,background:"#FFF",border:"1px solid #E2E8F0"}}>
-          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>{c.category}</div>
-          <div style={{fontSize:20,fontWeight:800,color:"#1E293B"}}>{c.count}<span style={{fontSize:13,fontWeight:500,color:"#94A3B8",marginLeft:3}}>건</span></div>
-          <div style={{fontSize:13,color:"#3B82F6",fontWeight:600,marginTop:4}}>평균가 {c.avgPrice.toLocaleString()}원</div>
-          <div style={{fontSize:12,color:"#94A3B8"}}>원가 {c.avgCost.toLocaleString()}원</div>
-        </div>
-      ))}
-    </div>
-
     {/* 카테고리 필터 */}
     <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
       <span style={{fontSize:14,fontWeight:600,color:"#64748B",marginRight:4}}>카테고리:</span>
@@ -2658,59 +2709,6 @@ function PlanningTab(){
         </div>);
       })}
     </div>)}
-
-    {/* AI 트렌드 분석 (갤러리 아래) */}
-    <div style={{marginTop:20}}>
-    <SectionCard title="🤖 AI 트렌드 분석" subtitle={`${activeSeason} 시즌 무신사·29CM 인기 아이템을 웹 검색으로 분석`} actions={
-      <div style={{display:"flex",gap:6}}>
-        <SmallBtn primary onClick={runTrendAnalysis}>{trendLoading?"⏳ 분석중...":"🤖 트렌드 분석"}</SmallBtn>
-        <SmallBtn onClick={resetApiKey}>🔑 API 키 재설정</SmallBtn>
-      </div>
-    }>
-      {trendLoading&&<div style={{padding:20,textAlign:"center",color:"#64748B",fontSize:15}}>웹 검색 + 분석 중입니다. 1~2분 소요될 수 있어요...</div>}
-      {trendError&&<div style={{padding:14,background:"#FEF2F2",border:"1px solid #FCA5A5",borderRadius:8,color:"#B91C1C",fontSize:14,whiteSpace:"pre-wrap"}}>❌ {trendError}</div>}
-      {!trendLoading&&!trendError&&!trendData&&<div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:15}}>버튼을 눌러 {activeSeason} 트렌드 분석을 시작하세요. 카테고리별 추천 아이템(이미지·가격·소재·컬러·참고링크)이 카드로 표시되고 "기획 추가" 버튼으로 바로 등록할 수 있습니다.</div>}
-      {trendData&&<>
-        {["상의","하의","아우터","모자","가방"].map(cat=>{
-          const arr=Array.isArray(trendData[cat])?trendData[cat]:[];
-          if(arr.length===0)return null;
-          return(<div key={cat} style={{marginBottom:18}}>
-            <div style={{fontSize:15,fontWeight:800,color:"#0F172A",marginBottom:8,paddingLeft:4}}>{cat} <span style={{fontSize:12,color:"#94A3B8",fontWeight:600,marginLeft:4}}>{arr.length}건</span></div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:12}}>
-              {arr.map((it,i)=>{
-                const key=`${cat}-${i}-${it.name||""}`;
-                const added=trendAdded[key];
-                const fallbackIcon=PLANNING_CATEGORY_ICONS[cat]||"🛍️";
-                return(<div key={key} style={{background:"#FFF",borderRadius:10,border:"1px solid #E2E8F0",overflow:"hidden",display:"flex",flexDirection:"column"}}>
-                  <div style={{height:160,background:"#F8FAFC",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
-                    {it.image_url?
-                      <img src={it.image_url} alt={it.name} style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{e.currentTarget.style.display="none";}} />
-                      :<div style={{fontSize:64,lineHeight:1}}>{fallbackIcon}</div>}
-                  </div>
-                  <div style={{padding:"10px 12px",display:"flex",flexDirection:"column",gap:4,flex:1}}>
-                    <div style={{fontSize:14,fontWeight:700,color:"#0F172A",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={it.name}>{it.name||"-"}</div>
-                    {it.est_price&&<div style={{fontSize:12,color:"#3B82F6",fontWeight:700}}>💰 {it.est_price}원</div>}
-                    {it.material&&<div style={{fontSize:11,color:"#64748B"}}>🧵 {it.material}</div>}
-                    {it.colors&&<div style={{fontSize:11,color:"#64748B"}}>🎨 {it.colors}</div>}
-                    {it.reason&&<div style={{fontSize:11,color:"#94A3B8",fontStyle:"normal",lineHeight:1.4,marginTop:2}}>{it.reason}</div>}
-                    <div style={{display:"flex",gap:6,marginTop:"auto",paddingTop:8}}>
-                      {it.ref_url&&<a href={it.ref_url} target="_blank" rel="noreferrer" style={{flex:1,padding:"5px 10px",borderRadius:6,background:"#F1F5F9",color:"#1E293B",fontSize:11,fontWeight:600,textDecoration:"none",textAlign:"center",border:"1px solid #E2E8F0"}}>🔗 참고</a>}
-                      <button onClick={()=>addFromTrend(it,cat,key)} disabled={added} style={{
-                        flex:1,padding:"5px 10px",borderRadius:6,fontSize:11,fontWeight:700,cursor:added?"default":"pointer",
-                        border:"1px solid "+(added?"#86EFAC":"#1E293B"),
-                        background:added?"#DCFCE7":"#1E293B",
-                        color:added?"#15803D":"#FFF"
-                      }}>{added?"✓ 추가됨":"+ 기획 추가"}</button>
-                    </div>
-                  </div>
-                </div>);
-              })}
-            </div>
-          </div>);
-        })}
-      </>}
-    </SectionCard>
-    </div>
   </>);
 }
 
