@@ -2496,25 +2496,58 @@ function PlanningTab(){
     return trendData.filter(it=>t_category(it)===trendCatFilter);
   },[trendData,trendCatFilter]);
 
-  // 트렌드 카드 → 기획 테이블에 즉시 등록
-  const addFromTrend=async(item,key)=>{
-    const row={
-      season:activeSeason,
-      name:t_name(item).trim()||"(이름없음)",
-      category:t_category(item)||"기타",
-      ref_url:t_link(item)||null,
-      image_url:t_image(item)||null,
-      est_price:t_priceMin(item)||0,
-      est_cost:0,
+  // 무신사 카테고리 → planning 카테고리 자동 매핑
+  const mapTrendCategory=(c)=>{
+    if(!c)return"기타";
+    const s=String(c).toLowerCase();
+    if(/맨투맨|스웨트|후디|hood|티셔츠|t-?shirt|tee\b|니트|knit|셔츠|shirt|블라우스|blouse|폴로|polo|탑\b|상의/.test(s))return"상의";
+    if(/팬츠|pants|청바지|denim|jean|바지|trouser|쇼츠|shorts|스커트|skirt|레깅스|legging|하의/.test(s))return"하의";
+    if(/자켓|jacket|패딩|padding|코트|coat|점퍼|jumper|아우터|outer|가디건|cardigan|블레이저|blazer|베스트|vest|코치/.test(s))return"아우터";
+    if(/모자|hat\b|cap\b|비니|beanie|버킷|bucket|야구모자/.test(s))return"모자";
+    if(/백\b|bag|가방|backpack|토트|tote|크로스|cross|숄더|shoulder/.test(s))return"가방";
+    return"기타";
+  };
+
+  // 트렌드 카드 "➕ 기획추가" 클릭 → 모달 오픈 (즉시 insert 하지 않음)
+  const[trendModal,setTrendModal]=useState(null);
+  const openTrendModal=(it,key)=>{
+    if(trendAdded[key])return;
+    setTrendModal({
+      key,
+      name:t_name(it)||"",
+      category:mapTrendCategory(t_category(it)),
+      ref_url:t_link(it)||"",
+      image_url:t_image(it)||"",
+      est_price:String(t_priceMin(it)||""),
+      est_cost:"",
       material:"",
       colors:"",
+      note:t_brand(it)?`무신사 트렌드 · ${t_brand(it)}`:"무신사 트렌드"
+    });
+  };
+  const updateTrendModal=(field,val)=>setTrendModal(m=>m?{...m,[field]:val}:m);
+  const confirmTrendAdd=async()=>{
+    if(!trendModal)return;
+    const m=trendModal;
+    if(!m.name.trim()){alert("상품명을 입력하세요");return;}
+    const row={
+      season:activeSeason,
+      name:m.name.trim(),
+      category:m.category||"기타",
+      ref_url:m.ref_url.trim()||null,
+      image_url:m.image_url.trim()||null,
+      est_price:parseInt(m.est_price)||0,
+      est_cost:parseInt(m.est_cost)||0,
+      material:m.material.trim(),
+      colors:m.colors.trim(),
       status:"아이디어",
-      note:[t_mall(item),t_brand(item)].filter(Boolean).join(" · ")
+      note:m.note.trim()
     };
     const r=await sb.insert("planning",row);
     if(r&&r[0]){
       setItems(p=>[r[0],...p]);
-      setTrendAdded(prev=>({...prev,[key]:true}));
+      setTrendAdded(prev=>({...prev,[m.key]:true}));
+      setTrendModal(null);
     }else{
       alert("저장 실패. Supabase planning 테이블 컬럼을 확인하세요.");
     }
@@ -2575,7 +2608,7 @@ function PlanningTab(){
                 {cat&&<div style={{fontSize:11,color:"#94A3B8",fontWeight:600}}>📂 {cat}</div>}
                 <div style={{display:"flex",gap:6,marginTop:"auto",paddingTop:8}}>
                   {link&&<a href={link} target="_blank" rel="noreferrer" style={{flex:1,padding:"5px 10px",borderRadius:6,background:"#F1F5F9",color:"#1E293B",fontSize:11,fontWeight:600,textDecoration:"none",textAlign:"center",border:"1px solid #E2E8F0"}}>🔗 상품보기</a>}
-                  <button onClick={()=>addFromTrend(it,key)} disabled={added} style={{
+                  <button onClick={()=>openTrendModal(it,key)} disabled={added} style={{
                     flex:1,padding:"5px 10px",borderRadius:6,fontSize:11,fontWeight:700,cursor:added?"default":"pointer",
                     border:"1px solid "+(added?"#86EFAC":"#1E293B"),
                     background:added?"#DCFCE7":"#1E293B",
@@ -2801,6 +2834,92 @@ function PlanningTab(){
         </div>
       )}
     </section>
+
+    {/* 무신사 트렌드 → 기획 추가 모달 */}
+    {trendModal&&(()=>{
+      const priceN=parseInt(trendModal.est_price)||0;
+      const costN=parseInt(trendModal.est_cost)||0;
+      const margin=priceN>0?Math.round(((priceN-costN)/priceN)*100):0;
+      const marginColor=margin>=50?"#059669":margin>=30?"#F59E0B":"#94A3B8";
+      const inputStyle={width:"100%",padding:"8px 12px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:13,outline:"none",background:"#F8FAFC",boxSizing:"border-box",fontFamily:"inherit"};
+      const labelStyle={fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4};
+      return(<div onClick={()=>setTrendModal(null)} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:20}}>
+        <div onClick={e=>e.stopPropagation()} style={{background:"#FFF",borderRadius:14,padding:24,width:560,maxWidth:"100%",maxHeight:"90vh",overflowY:"auto",boxShadow:"0 20px 50px rgba(0,0,0,0.25)"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <div style={{fontSize:16,fontWeight:700,color:"#0F172A"}}>🛍 무신사 트렌드 → 기획 추가</div>
+            <button onClick={()=>setTrendModal(null)} style={{background:"none",border:"none",fontSize:18,color:"#94A3B8",cursor:"pointer"}}>×</button>
+          </div>
+
+          {/* 이미지 + 상품명/카테고리 */}
+          <div style={{display:"flex",gap:12,marginBottom:12,alignItems:"flex-start"}}>
+            <div style={{flexShrink:0,width:96,height:96,borderRadius:8,background:"#F8FAFC",border:"1px solid #E2E8F0",overflow:"hidden",display:"flex",alignItems:"center",justifyContent:"center"}}>
+              {trendModal.image_url?
+                <img src={trendModal.image_url} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{e.currentTarget.style.display="none";}} />
+                :<span style={{fontSize:28,color:"#CBD5E1"}}>🖼️</span>}
+            </div>
+            <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:8}}>
+              <div>
+                <div style={labelStyle}>상품명</div>
+                <input value={trendModal.name} onChange={e=>updateTrendModal("name",e.target.value)} style={inputStyle} />
+              </div>
+              <div>
+                <div style={labelStyle}>카테고리</div>
+                <select value={trendModal.category} onChange={e=>updateTrendModal("category",e.target.value)} style={inputStyle}>
+                  {PLANNING_CATEGORIES.map(c=><option key={c}>{c}</option>)}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div style={{marginBottom:10}}>
+            <div style={labelStyle}>참고 URL</div>
+            <input value={trendModal.ref_url} onChange={e=>updateTrendModal("ref_url",e.target.value)} placeholder="https://www.musinsa.com/..." style={inputStyle} />
+          </div>
+          <div style={{marginBottom:10}}>
+            <div style={labelStyle}>이미지 URL</div>
+            <input value={trendModal.image_url} onChange={e=>updateTrendModal("image_url",e.target.value)} placeholder="https://image.url/..." style={inputStyle} />
+          </div>
+
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:10}}>
+            <div>
+              <div style={labelStyle}>예상 판매가</div>
+              <input type="number" value={trendModal.est_price} onChange={e=>updateTrendModal("est_price",e.target.value)} placeholder="원" style={inputStyle} />
+            </div>
+            <div>
+              <div style={labelStyle}>예상 원가</div>
+              <input type="number" value={trendModal.est_cost} onChange={e=>updateTrendModal("est_cost",e.target.value)} placeholder="원" style={inputStyle} />
+            </div>
+            <div>
+              <div style={labelStyle}>마진율</div>
+              <div style={{padding:"8px 12px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:13,background:"#F8FAFC",fontWeight:700,color:costN>0?marginColor:"#94A3B8"}}>
+                {costN>0?`${margin}%`:"원가 입력 시 자동 계산"}
+              </div>
+            </div>
+          </div>
+
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+            <div>
+              <div style={labelStyle}>소재</div>
+              <input value={trendModal.material} onChange={e=>updateTrendModal("material",e.target.value)} placeholder="코튼 100%, 헤비웨이트" style={inputStyle} />
+            </div>
+            <div>
+              <div style={labelStyle}>컬러</div>
+              <input value={trendModal.colors} onChange={e=>updateTrendModal("colors",e.target.value)} placeholder="멜란지, 블랙, 네이비" style={inputStyle} />
+            </div>
+          </div>
+
+          <div style={{marginBottom:14}}>
+            <div style={labelStyle}>메모</div>
+            <textarea value={trendModal.note} onChange={e=>updateTrendModal("note",e.target.value)} placeholder="무신사 상위 랭킹, 피그먼트 워싱 트렌드" rows={3} style={{...inputStyle,resize:"vertical"}} />
+          </div>
+
+          <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+            <SmallBtn onClick={()=>setTrendModal(null)}>취소</SmallBtn>
+            <SmallBtn primary onClick={confirmTrendAdd}>저장</SmallBtn>
+          </div>
+        </div>
+      </div>);
+    })()}
   </>);
 }
 
