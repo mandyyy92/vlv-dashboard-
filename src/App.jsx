@@ -2323,11 +2323,6 @@ function PlanningTab(){
   const[fColors,setFColors]=useState("");
   const[fNote,setFNote]=useState("");
 
-  const[trendLoading,setTrendLoading]=useState(false);
-  const[trendData,setTrendData]=useState(null);
-  const[trendError,setTrendError]=useState("");
-  const[trendSeason,setTrendSeason]=useState("");
-
   useEffect(()=>{(async()=>{
     setLoading(true);
     const data=await sb.get("planning");
@@ -2401,70 +2396,6 @@ function PlanningTab(){
     setNewSeason("");
   };
 
-  // AI 트렌드 분석 (Anthropic API + web_search)
-  const runTrendAnalysis=async()=>{
-    let key=localStorage.getItem("vlv_api_key");
-    if(!key){
-      const k=window.prompt("Anthropic API 키를 입력하세요 (sk-ant-...).\n입력값은 브라우저 localStorage(vlv_api_key)에 저장되어 다음부터는 자동 사용됩니다.");
-      if(!k||!k.trim())return;
-      localStorage.setItem("vlv_api_key",k.trim());
-      key=k.trim();
-    }
-    setTrendLoading(true);setTrendError("");setTrendData(null);
-    const yearMatch=activeSeason.match(/^(\d{2})/);
-    const year=yearMatch?`20${yearMatch[1]}`:"2026";
-    const prompt=`${year}년 ${activeSeason} 한국 캐주얼 브랜드 트렌드를 분석해줘. 무신사, 29CM 인기 아이템 기준으로 카테고리별(상의/하의/아우터/모자/가방) 추천 아이템, 예상 판매가격대, 인기 소재, 인기 컬러를 JSON으로 정리해줘. 비바라비다(vlvd.kr) 같은 캐주얼 브랜드에 맞게 추천해줘.
-
-응답은 반드시 아래 JSON 형식으로만 답변해. 다른 설명/마크다운 없이 JSON만 출력.
-{
-  "상의": {"items": ["아이템명1","아이템명2","아이템명3"], "priceRange": "39,000~89,000원", "materials": ["면","폴리에스터"], "colors": ["블랙","화이트"]},
-  "하의": {...},
-  "아우터": {...},
-  "모자": {...},
-  "가방": {...}
-}`;
-    try{
-      const res=await fetch("https://api.anthropic.com/v1/messages",{
-        method:"POST",
-        headers:{
-          "content-type":"application/json",
-          "x-api-key":key,
-          "anthropic-version":"2023-06-01",
-          "anthropic-dangerous-direct-browser-access":"true"
-        },
-        body:JSON.stringify({
-          model:"claude-sonnet-4-20250514",
-          max_tokens:8000,
-          tools:[{type:"web_search_20250305",name:"web_search",max_uses:5}],
-          messages:[{role:"user",content:prompt}]
-        })
-      });
-      if(!res.ok){
-        const t=await res.text();
-        throw new Error(`API ${res.status}: ${t.slice(0,300)}`);
-      }
-      const data=await res.json();
-      const text=(data.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("\n").trim();
-      const m=text.match(/\{[\s\S]*\}/);
-      if(!m)throw new Error("응답에서 JSON을 찾을 수 없습니다.\n원문: "+text.slice(0,200));
-      const json=JSON.parse(m[0]);
-      setTrendData(json);
-      setTrendSeason(activeSeason);
-    }catch(e){
-      console.error("Trend analysis error:",e);
-      setTrendError(e.message||"분석 실패");
-    }finally{
-      setTrendLoading(false);
-    }
-  };
-
-  const resetApiKey=()=>{
-    if(window.confirm("저장된 API 키를 삭제하시겠습니까?")){
-      localStorage.removeItem("vlv_api_key");
-      alert("삭제되었습니다.");
-    }
-  };
-
   if(loading)return <SectionCard title="💡 아이템 기획"><div style={{textAlign:"center",padding:40,color:"#94A3B8"}}>⏳ 데이터 불러오는 중...</div></SectionCard>;
 
   return(<>
@@ -2491,53 +2422,71 @@ function PlanningTab(){
       </div>
     </div>
 
-    {/* AI 트렌드 분석 */}
-    <SectionCard title="🤖 AI 트렌드 분석" subtitle={`${activeSeason} 시즌 무신사·29CM 기준 트렌드를 웹 검색으로 분석`} actions={
-      <div style={{display:"flex",gap:6}}>
-        <SmallBtn primary onClick={runTrendAnalysis}>{trendLoading?"⏳ 분석중...":"🤖 트렌드 분석"}</SmallBtn>
-        <SmallBtn onClick={resetApiKey}>🔑 API 키 재설정</SmallBtn>
-      </div>
-    }>
-      {trendLoading&&<div style={{padding:20,textAlign:"center",color:"#64748B",fontSize:15}}>웹 검색 + 분석 중입니다. 30~60초 소요될 수 있어요...</div>}
-      {trendError&&<div style={{padding:14,background:"#FEF2F2",border:"1px solid #FCA5A5",borderRadius:8,color:"#B91C1C",fontSize:14,whiteSpace:"pre-wrap"}}>❌ {trendError}</div>}
-      {!trendLoading&&!trendError&&!trendData&&<div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:15}}>버튼을 눌러 {activeSeason} 트렌드 분석을 시작하세요. 카테고리별 추천 아이템 / 예상 가격대 / 인기 소재 / 인기 컬러가 표시됩니다.</div>}
-      {trendData&&<>
-        <div style={{padding:"6px 12px",background:"#EFF6FF",border:"1px solid #DBEAFE",borderRadius:6,marginBottom:10,fontSize:13,color:"#1E40AF",fontWeight:600}}>📊 {trendSeason} 트렌드 분석 결과 (Claude + 웹 검색)</div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:12}}>
-          {["상의","하의","아우터","모자","가방"].map(cat=>{
-            const d=trendData[cat];if(!d)return null;
-            return(<div key={cat} style={{padding:"14px 16px",borderRadius:10,background:"#F8FAFC",border:"1px solid #E2E8F0"}}>
-              <div style={{fontSize:15,fontWeight:800,color:"#0F172A",marginBottom:8}}>{cat}</div>
-              {d.priceRange&&<div style={{fontSize:13,marginBottom:6}}>
-                <span style={{color:"#64748B"}}>💰 가격대 </span>
-                <span style={{color:"#1E293B",fontWeight:700}}>{d.priceRange}</span>
-              </div>}
-              {Array.isArray(d.items)&&d.items.length>0&&<div style={{marginBottom:8}}>
-                <div style={{fontSize:12,color:"#94A3B8",fontWeight:600,marginBottom:3}}>추천 아이템</div>
-                <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
-                  {d.items.map((it,i)=>(<span key={i} style={{padding:"2px 8px",borderRadius:4,background:"#DBEAFE",color:"#1E40AF",fontSize:13,fontWeight:600}}>{it}</span>))}
-                </div>
-              </div>}
-              {Array.isArray(d.materials)&&d.materials.length>0&&<div style={{marginBottom:6}}>
-                <div style={{fontSize:12,color:"#94A3B8",fontWeight:600,marginBottom:3}}>인기 소재</div>
-                <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
-                  {d.materials.map((m,i)=>(<span key={i} style={{padding:"2px 7px",borderRadius:4,background:"#FEF3C7",color:"#92400E",fontSize:12,fontWeight:600}}>🧵 {m}</span>))}
-                </div>
-              </div>}
-              {Array.isArray(d.colors)&&d.colors.length>0&&<div>
-                <div style={{fontSize:12,color:"#94A3B8",fontWeight:600,marginBottom:3}}>인기 컬러</div>
-                <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
-                  {d.colors.map((c,i)=>(<span key={i} style={{padding:"2px 7px",borderRadius:4,background:"#F0FDF4",color:"#15803D",fontSize:12,fontWeight:600}}>🎨 {c}</span>))}
-                </div>
-              </div>}
-            </div>);
-          })}
+    {/* 등록 폼 (상단) */}
+    <SectionCard title="✏️ 레퍼런스 등록" subtitle="무신사 / 29CM 등 참고 링크와 이미지 URL을 넣으면 카드에 함께 표시됩니다">
+      <div style={{display:"flex",gap:14,alignItems:"flex-start"}}>
+        {/* 이미지 미리보기 */}
+        <div style={{flexShrink:0,width:160,height:160,borderRadius:10,background:"#F8FAFC",border:"1px solid #E2E8F0",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",position:"relative"}}>
+          {fImageUrl?
+            <img src={fImageUrl} alt="미리보기" style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{e.currentTarget.style.display="none";}} />
+            :<div style={{textAlign:"center",color:"#CBD5E1"}}>
+              <div style={{fontSize:30,marginBottom:4}}>🖼️</div>
+              <div style={{fontSize:12,color:"#94A3B8"}}>이미지 미리보기</div>
+            </div>}
         </div>
-      </>}
+        {/* 입력 필드 */}
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{display:"grid",gridTemplateColumns:"1.5fr 110px 110px 110px",gap:10,alignItems:"end",marginBottom:10}}>
+            <div>
+              <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>상품명</div>
+              <Input value={fName} onChange={e=>setFName(e.target.value)} placeholder="상품명" />
+            </div>
+            <div>
+              <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>카테고리</div>
+              <select value={fCategory} onChange={e=>setFCategory(e.target.value)} style={{width:"100%",padding:"7px 10px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:15,outline:"none",background:"#F8FAFC"}}>
+                {PLANNING_CATEGORIES.map(c=><option key={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>예상 판매가</div>
+              <Input type="number" value={fPrice} onChange={e=>setFPrice(e.target.value)} placeholder="원" />
+            </div>
+            <div>
+              <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>예상 원가</div>
+              <Input type="number" value={fCost} onChange={e=>setFCost(e.target.value)} placeholder="원" />
+            </div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,alignItems:"end",marginBottom:10}}>
+            <div>
+              <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>참고 URL (무신사 / 29CM 등)</div>
+              <Input value={fRefUrl} onChange={e=>setFRefUrl(e.target.value)} placeholder="https://www.musinsa.com/..." />
+            </div>
+            <div>
+              <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>이미지 URL</div>
+              <Input value={fImageUrl} onChange={e=>setFImageUrl(e.target.value)} placeholder="https://image.url/..." />
+            </div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 2fr 100px",gap:10,alignItems:"end"}}>
+            <div>
+              <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>소재</div>
+              <Input value={fMaterial} onChange={e=>setFMaterial(e.target.value)} placeholder="예: 면 100%" />
+            </div>
+            <div>
+              <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>컬러</div>
+              <Input value={fColors} onChange={e=>setFColors(e.target.value)} placeholder="예: 블랙, 화이트" />
+            </div>
+            <div>
+              <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>추천 이유 / 메모</div>
+              <Input value={fNote} onChange={e=>setFNote(e.target.value)} placeholder="이 아이템을 기획에 넣은 이유 또는 추가 메모" />
+            </div>
+            <SmallBtn primary onClick={addPlanning}>✅ 등록</SmallBtn>
+          </div>
+        </div>
+      </div>
     </SectionCard>
 
     {/* 카테고리별 평균가 요약 */}
-    <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:10,marginBottom:16,marginTop:16}}>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:10,marginBottom:16}}>
       {categorySummary.map(c=>(
         <div key={c.category} style={{padding:"12px 14px",borderRadius:12,background:"#FFF",border:"1px solid #E2E8F0"}}>
           <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>{c.category}</div>
@@ -2547,53 +2496,6 @@ function PlanningTab(){
         </div>
       ))}
     </div>
-
-    {/* 등록 폼 */}
-    <SectionCard title="✏️ 레퍼런스 등록">
-      <div style={{display:"grid",gridTemplateColumns:"1.5fr 110px 1.5fr 1.5fr 110px 110px",gap:10,alignItems:"end",marginBottom:10}}>
-        <div>
-          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>상품명</div>
-          <Input value={fName} onChange={e=>setFName(e.target.value)} placeholder="상품명" />
-        </div>
-        <div>
-          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>카테고리</div>
-          <select value={fCategory} onChange={e=>setFCategory(e.target.value)} style={{width:"100%",padding:"7px 10px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:15,outline:"none",background:"#F8FAFC"}}>
-            {PLANNING_CATEGORIES.map(c=><option key={c}>{c}</option>)}
-          </select>
-        </div>
-        <div>
-          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>레퍼런스 URL</div>
-          <Input value={fRefUrl} onChange={e=>setFRefUrl(e.target.value)} placeholder="https://..." />
-        </div>
-        <div>
-          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>이미지 URL</div>
-          <Input value={fImageUrl} onChange={e=>setFImageUrl(e.target.value)} placeholder="https://..." />
-        </div>
-        <div>
-          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>예상 판매가</div>
-          <Input type="number" value={fPrice} onChange={e=>setFPrice(e.target.value)} placeholder="원" />
-        </div>
-        <div>
-          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>예상 원가</div>
-          <Input type="number" value={fCost} onChange={e=>setFCost(e.target.value)} placeholder="원" />
-        </div>
-      </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 2fr 100px",gap:10,alignItems:"end"}}>
-        <div>
-          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>소재</div>
-          <Input value={fMaterial} onChange={e=>setFMaterial(e.target.value)} placeholder="예: 면 100%" />
-        </div>
-        <div>
-          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>컬러</div>
-          <Input value={fColors} onChange={e=>setFColors(e.target.value)} placeholder="예: 블랙, 화이트" />
-        </div>
-        <div>
-          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>메모</div>
-          <Input value={fNote} onChange={e=>setFNote(e.target.value)} placeholder="추가 메모" />
-        </div>
-        <SmallBtn primary onClick={addPlanning}>✅ 등록</SmallBtn>
-      </div>
-    </SectionCard>
 
     {/* 카테고리 필터 */}
     <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
@@ -2644,7 +2546,7 @@ function PlanningTab(){
               {p.material&&<div>🧵 {p.material}</div>}
               {p.colors&&<div>🎨 {p.colors}</div>}
             </div>}
-            {p.ref_url&&<a href={p.ref_url} target="_blank" rel="noreferrer" style={{display:"block",marginTop:6,fontSize:12,color:"#3B82F6",textDecoration:"none"}}>🔗 레퍼런스 링크</a>}
+            {p.ref_url&&<a href={p.ref_url} target="_blank" rel="noreferrer" style={{display:"block",marginTop:6,fontSize:12,color:"#3B82F6",textDecoration:"none",fontWeight:600}}>🔗 참고</a>}
             {p.note&&<div style={{fontSize:12,color:"#94A3B8",marginTop:6,fontStyle:"italic",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={p.note}>{p.note}</div>}
           </div>
         </div>);
