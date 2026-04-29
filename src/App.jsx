@@ -1150,7 +1150,7 @@ function ScheduleTab(){
                   <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ec.icon} {ev.label}</span>
                   {ev.supplier&&<span style={{color:ec.color,opacity:0.85,fontWeight:500,flexShrink:0}}>· {ev.supplier}</span>}
                 </div>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:4,marginTop:2,fontSize:15}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:4,marginTop:2.6,fontSize:15}}>
                   <span style={{fontWeight:700,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{translateItemName(ev.item)}</span>
                   {ev.qty>0&&<span style={{color:"#64748B",flexShrink:0}}>{ev.qty.toLocaleString()}장</span>}
                 </div>
