@@ -1251,8 +1251,9 @@ function ScheduleTab(){
                   <option value="">(미지정)</option>
                   <option value="Air Shipment">✈️ Air Shipment</option>
                   <option value="Sea Shipment">🚢 Sea Shipment</option>
+                  <option value="국내">🚚 국내</option>
                 </select>):
-                  <span onClick={()=>startInline(s,"ship_type")} title="클릭하여 수정" style={editableHover}>{s.ship_type==="Air Shipment"?"✈️ Air Shipment":s.ship_type==="Sea Shipment"?"🚢 Sea Shipment":s.ship_type||"(운송 미지정)"}</span>}
+                  <span onClick={()=>startInline(s,"ship_type")} title="클릭하여 수정" style={editableHover}>{s.ship_type==="Air Shipment"?"✈️ Air Shipment":s.ship_type==="Sea Shipment"?"🚢 Sea Shipment":s.ship_type==="국내"?"🚚 국내":s.ship_type||"(운송 미지정)"}</span>}
               </div>
             </div>);}):(
               <div style={{textAlign:"center",padding:30,color:"#94A3B8"}}>
@@ -1292,6 +1293,7 @@ function ScheduleTab(){
             <select value={formShipType} onChange={e=>setFormShipType(e.target.value)} style={{width:"100%",padding:"8px 10px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:12,outline:"none"}}>
               <option value="Air Shipment">✈️ Air</option>
               <option value="Sea Shipment">🚢 Ship</option>
+              <option value="국내">🚚 국내</option>
             </select>
           </div>
           <div>
