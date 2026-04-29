@@ -2685,9 +2685,9 @@ export default function Dashboard(){
     {id:"schedule",label:"입고 스케줄",icon:"📅"},
     {id:"reorder",label:"리오더",icon:"🔄"},
     {id:"ordertrack",label:"오더 입고현황",icon:"📊"},
+    {id:"planning",label:"아이템 기획",icon:"💡"},
     {id:"sample",label:"샘플 진행",icon:"🧪"},
     {id:"measure",label:"실측 사이즈",icon:"📐"},
-    {id:"planning",label:"아이템 기획",icon:"💡"},
     {id:"products",label:"상품 마스터",icon:"📋"},
   ];
 
