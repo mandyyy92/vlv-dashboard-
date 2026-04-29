@@ -1175,7 +1175,7 @@ function ScheduleTab(){
                 onClick={()=>openEdit(ev)}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:4,color:ec.color,fontWeight:600}}>
                   <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:3}}>
-                    <span title={isConfirmed(ev)?"입고 확정":"입고 일정 확인중"} style={{display:"inline-block",width:8,height:8,borderRadius:"50%",background:isConfirmed(ev)?"#10B981":"#F59E0B",flexShrink:0}} />
+                    {ev.eventType==="oz"&&<span title={isConfirmed(ev)?"입고 확정":"입고 일정 확인중"} style={{display:"inline-block",width:8,height:8,borderRadius:"50%",background:isConfirmed(ev)?"#10B981":"#F59E0B",flexShrink:0}} />}
                     {ec.icon} {ev.label}
                   </span>
                   {ev.supplier&&<span style={{color:ec.color,opacity:0.85,fontWeight:500,flexShrink:0}}>· {ev.supplier}</span>}
