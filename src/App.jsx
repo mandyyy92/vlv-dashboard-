@@ -715,6 +715,7 @@ function ScheduleTab(){
   const[editQty,setEditQty]=useState("");
   const[inlineEdit,setInlineEdit]=useState(null);
   const[inlineDraft,setInlineDraft]=useState("");
+  const[statusFilter,setStatusFilter]=useState("all"); // all | confirming | confirmed
 
   const SUPPLIERS=["인도","코니키즈","성은교역","오중"];
   const SUP_STYLES={"인도":{color:"#16A34A",bg:"#F0FDF4",icon:"🇮🇳"},"코니키즈":{color:"#2563EB",bg:"#EFF6FF",icon:"🏭"},"성은교역":{color:"#D97706",bg:"#FFFBEB",icon:"📦"},"오중":{color:"#0891B2",bg:"#ECFEFF",icon:"🏢"}};
@@ -732,7 +733,7 @@ function ScheduleTab(){
     if(!formName){alert("상품명을 입력하세요.");return;}
     const row={supplier:formSupplier,item:formName,qty:parseInt(formQty)||0,
       ship_date:formShipDate||null,kr_date:formKrDate||null,oz_date:formOzDate||null,
-      ship_type:formShipType,note:formNote,status:"입고예정",
+      ship_type:formShipType,note:formNote,status:"입고일정확인",
       date:formKrDate||formShipDate||formOzDate||new Date().toISOString().slice(0,10),lead_days:formSupplier==="인도"?30:formSupplier==="코니키즈"?21:14};
     const r=await sb.insert("schedules",row);
     if(r&&r[0]){setSchedules(p=>[r[0],...p]);setFormName("");setFormQty("");setFormShipDate("");setFormKrDate("");setFormOzDate("");setFormNote("");}
@@ -902,7 +903,7 @@ function ScheduleTab(){
         const ozDate=addBizDays(krDate,2);
         const row={supplier:p.supplier||curSup,item:p.item,qty:p.qty||0,
           ship_date:p.shipDate||null,kr_date:krDate,oz_date:ozDate,
-          ship_type:p.shipType||"",note:"",status:"입고예정",
+          ship_type:p.shipType||"",note:"",status:"입고일정확인",
           date:krDate,lead_days:(p.supplier||curSup)==="인도"?30:(p.supplier||curSup)==="코니키즈"?21:14};
         console.log("Inserting:",row);
         try{
@@ -1071,6 +1072,22 @@ function ScheduleTab(){
   const inlineInputStyle={padding:"2px 6px",border:"1px solid #3B82F6",borderRadius:4,outline:"none",background:"#FFF",fontFamily:"inherit",boxSizing:"border-box"};
   const editableHover={cursor:"pointer",borderRadius:3,padding:"0 3px",margin:"0 -3px",transition:"background 0.1s"};
 
+  // 상태: "입고확정"이면 확정, 그 외(입고일정확인/null/구버전 등)는 확인중
+  const isConfirmed=(s)=>s&&s.status==="입고확정";
+  const toggleStatus=async(s)=>{
+    const newStatus=isConfirmed(s)?"입고일정확인":"입고확정";
+    const prev=s;
+    setSchedules(p=>p.map(x=>x.id===s.id?{...x,status:newStatus}:x));
+    try{
+      const r=await sb.update("schedules",s.id,{status:newStatus});
+      if(!r)throw new Error("update returned null");
+    }catch(e){
+      console.error("Toggle status error:",e);
+      alert("상태 변경 실패: "+e.message);
+      setSchedules(p=>p.map(x=>x.id===s.id?prev:x));
+    }
+  };
+
   const getEventsForDay=(day)=>{
     const dayStr=`${monthStr}-${String(day).padStart(2,"0")}`;
     const events=[];
@@ -1147,7 +1164,10 @@ function ScheduleTab(){
                 onDragEnd={handleDragEnd}
                 onClick={()=>openEdit(ev)}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:4,color:ec.color,fontWeight:600}}>
-                  <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ec.icon} {ev.label}</span>
+                  <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:3}}>
+                    <span title={isConfirmed(ev)?"입고 확정":"입고 일정 확인중"} style={{display:"inline-block",width:8,height:8,borderRadius:"50%",background:isConfirmed(ev)?"#10B981":"#F59E0B",flexShrink:0}} />
+                    {ec.icon} {ev.label}
+                  </span>
                   {ev.supplier&&<span style={{color:ec.color,opacity:0.85,fontWeight:500,flexShrink:0}}>· {ev.supplier}</span>}
                 </div>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:4,marginTop:12,fontSize:15,lineHeight:1.2}}>
@@ -1193,6 +1213,20 @@ function ScheduleTab(){
     <div style={{padding:"8px 14px",borderRadius:8,background:"#EFF6FF",border:"1px solid #DBEAFE",marginBottom:12,fontSize:12,color:"#1E40AF",fontWeight:600}}>
       📅 {(()=>{const n=new Date();const nx=new Date(n.getFullYear(),n.getMonth()+1,1);return `${n.getFullYear()}년 ${n.getMonth()+1}월 + ${nx.getFullYear()}년 ${nx.getMonth()+1}월 일정만 표시`;})()}
     </div>
+    <div style={{display:"flex",gap:8,marginBottom:12}}>
+      {[
+        {key:"all",label:"전체",icon:"📋"},
+        {key:"confirming",label:"입고 일정 확인중",icon:"🟡"},
+        {key:"confirmed",label:"입고 확정",icon:"🟢"},
+      ].map(f=>{
+        const active=statusFilter===f.key;
+        return(<button key={f.key} onClick={()=>setStatusFilter(f.key)} style={{
+          padding:"6px 14px",borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer",
+          border:active?"1px solid #1E293B":"1px solid #E2E8F0",
+          background:active?"#1E293B":"#FFF",color:active?"#FFF":"#475569",transition:"all 0.15s"
+        }}>{f.icon} {f.label}</button>);
+      })}
+    </div>
     <div style={{display:"grid",gridTemplateColumns:`repeat(${SUPPLIERS.length},1fr)`,gap:16}}>
       {(()=>{
         const now=new Date();
@@ -1204,7 +1238,8 @@ function ScheduleTab(){
         const primaryDate=(s)=>s.oz_date||s.kr_date||s.date||"";
         return SUPPLIERS.map(sup=>{
         const st=SUP_STYLES[sup];
-        const items=schedules.filter(s=>s.supplier===sup&&inRange(s)).sort((a,b)=>{
+        const matchStatus=(s)=>statusFilter==="all"||(statusFilter==="confirmed"?isConfirmed(s):!isConfirmed(s));
+        const items=schedules.filter(s=>s.supplier===sup&&inRange(s)&&matchStatus(s)).sort((a,b)=>{
           const aD=primaryDate(a),bD=primaryDate(b);
           const aPast=!!aD&&aD<todayStr,bPast=!!bD&&bD<todayStr;
           if(aPast!==bPast)return aPast?1:-1;
@@ -1222,8 +1257,18 @@ function ScheduleTab(){
                 onBlur={()=>commitInline(s)}
                 onKeyDown={e=>{if(e.key==="Enter")commitInline(s);else if(e.key==="Escape")cancelInline();}}
                 style={{...inlineInputStyle,fontSize:11,width:130}} />);
+              const confirmed=isConfirmed(s);
               return(<div key={s.id||i} style={{background:"#FFF",borderRadius:10,padding:"12px 14px",marginBottom:8,border:"1px solid #E2E8F0",position:"relative"}}>
               <button onClick={()=>delSchedule(s.id)} style={{position:"absolute",top:8,right:8,background:"none",border:"none",cursor:"pointer",fontSize:16,color:"#94A3B8"}}>×</button>
+              <div onClick={()=>toggleStatus(s)} title="클릭하여 상태 변경" style={{
+                display:"inline-flex",alignItems:"center",gap:4,padding:"3px 9px",borderRadius:12,
+                fontSize:10.5,fontWeight:700,cursor:"pointer",userSelect:"none",marginBottom:6,
+                background:confirmed?"#DCFCE7":"#FEF3C7",
+                color:confirmed?"#15803D":"#92400E",
+                border:"1px solid "+(confirmed?"#86EFAC":"#FCD34D")
+              }}>
+                {confirmed?"🟢 입고 확정":"🟡 입고 일정 확인중"}
+              </div>
               <div style={{fontSize:11,color:"#16A34A",fontWeight:600,minHeight:16}}>
                 🚢 선적일: {isEdit("ship_date")?dateInput("ship_date"):
                   <span onClick={()=>startInline(s,"ship_date")} title="클릭하여 수정" style={editableHover}>{s.ship_date||"-"}</span>}
