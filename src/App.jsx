@@ -2300,6 +2300,245 @@ function OrderTrackingTab(){
   </>);
 }
 
+// ─── Tab: 아이템 기획 (Supabase planning) ───
+const PLANNING_CATEGORIES=["상의","하의","아우터","모자","가방","기타"];
+const PLANNING_STATUSES=["아이디어","샘플의뢰","샘플확인","생산확정"];
+const PLANNING_STATUS_COLORS={"아이디어":"#94A3B8","샘플의뢰":"#F59E0B","샘플확인":"#3B82F6","생산확정":"#10B981"};
+
+function PlanningTab(){
+  const[items,setItems]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[seasons,setSeasons]=useState(["26FW","27SS"]);
+  const[activeSeason,setActiveSeason]=useState("26FW");
+  const[newSeason,setNewSeason]=useState("");
+  const[catFilter,setCatFilter]=useState("all");
+
+  const[fName,setFName]=useState("");
+  const[fCategory,setFCategory]=useState("상의");
+  const[fRefUrl,setFRefUrl]=useState("");
+  const[fImageUrl,setFImageUrl]=useState("");
+  const[fPrice,setFPrice]=useState("");
+  const[fCost,setFCost]=useState("");
+  const[fMaterial,setFMaterial]=useState("");
+  const[fColors,setFColors]=useState("");
+  const[fNote,setFNote]=useState("");
+
+  useEffect(()=>{(async()=>{
+    setLoading(true);
+    const data=await sb.get("planning");
+    const list=data||[];
+    setItems(list);
+    const fromData=[...new Set(list.map(p=>p.season).filter(Boolean))];
+    if(fromData.length){
+      setSeasons(prev=>[...new Set([...prev,...fromData])].sort());
+      if(!fromData.includes("26FW"))setActiveSeason(fromData[0]);
+    }
+    setLoading(false);
+  })();},[]);
+
+  const filtered=useMemo(()=>items.filter(p=>p.season===activeSeason&&(catFilter==="all"||p.category===catFilter)),[items,activeSeason,catFilter]);
+
+  const seasonItems=useMemo(()=>items.filter(p=>p.season===activeSeason),[items,activeSeason]);
+
+  const categorySummary=useMemo(()=>PLANNING_CATEGORIES.map(cat=>{
+    const arr=seasonItems.filter(p=>p.category===cat);
+    const avgPrice=arr.length?Math.round(arr.reduce((s,p)=>s+(p.est_price||0),0)/arr.length):0;
+    const avgCost=arr.length?Math.round(arr.reduce((s,p)=>s+(p.est_cost||0),0)/arr.length):0;
+    return{category:cat,count:arr.length,avgPrice,avgCost};
+  }),[seasonItems]);
+
+  const addPlanning=async()=>{
+    if(!fName.trim()){alert("상품명을 입력하세요.");return;}
+    const row={
+      season:activeSeason,name:fName.trim(),category:fCategory,
+      ref_url:fRefUrl.trim()||null,image_url:fImageUrl.trim()||null,
+      est_price:parseInt(fPrice)||0,est_cost:parseInt(fCost)||0,
+      material:fMaterial.trim()||"",colors:fColors.trim()||"",
+      status:"아이디어",note:fNote.trim()||""
+    };
+    const r=await sb.insert("planning",row);
+    if(r&&r[0]){
+      setItems(p=>[r[0],...p]);
+      setFName("");setFRefUrl("");setFImageUrl("");setFPrice("");setFCost("");
+      setFMaterial("");setFColors("");setFNote("");
+    }else{
+      alert("저장 실패. Supabase planning 테이블 컬럼을 확인하세요.");
+    }
+  };
+
+  const advanceStatus=async(p)=>{
+    const cur=p.status||"아이디어";
+    const idx=PLANNING_STATUSES.indexOf(cur);
+    const next=PLANNING_STATUSES[(idx+1)%PLANNING_STATUSES.length];
+    const prev=p;
+    setItems(arr=>arr.map(x=>x.id===p.id?{...x,status:next}:x));
+    try{
+      const r=await sb.update("planning",p.id,{status:next});
+      if(!r)throw new Error("update returned null");
+    }catch(e){
+      console.error("Status update error:",e);
+      alert("상태 변경 실패: "+e.message);
+      setItems(arr=>arr.map(x=>x.id===p.id?prev:x));
+    }
+  };
+
+  const delPlanning=async(id)=>{
+    if(!window.confirm("이 아이템을 삭제하시겠습니까?"))return;
+    await sb.remove("planning",id);
+    setItems(p=>p.filter(x=>x.id!==id));
+  };
+
+  const addSeason=()=>{
+    const v=newSeason.trim().toUpperCase();
+    if(!v)return;
+    if(!seasons.includes(v))setSeasons(p=>[...p,v].sort());
+    setActiveSeason(v);
+    setNewSeason("");
+  };
+
+  if(loading)return <SectionCard title="💡 아이템 기획"><div style={{textAlign:"center",padding:40,color:"#94A3B8"}}>⏳ 데이터 불러오는 중...</div></SectionCard>;
+
+  return(<>
+    {/* 헤더 + 시즌 탭 */}
+    <div style={{background:"#FFF",borderRadius:14,padding:"20px 28px",border:"1px solid #E2E8F0",marginBottom:16}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+        <span style={{fontSize:20}}>💡</span>
+        <span style={{fontSize:17,fontWeight:700,color:"#0F172A"}}>아이템 기획</span>
+        <span style={{fontSize:12,color:"#64748B",marginLeft:6}}>{seasonItems.length}개 아이템 · {activeSeason}</span>
+      </div>
+      <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+        {seasons.map(s=>(
+          <button key={s} onClick={()=>setActiveSeason(s)} style={{
+            padding:"6px 16px",borderRadius:8,fontSize:12,fontWeight:700,cursor:"pointer",
+            border:activeSeason===s?"1px solid #1E293B":"1px solid #E2E8F0",
+            background:activeSeason===s?"#1E293B":"#FFF",
+            color:activeSeason===s?"#FFF":"#475569",letterSpacing:0.3
+          }}>{s}</button>
+        ))}
+        <input value={newSeason} onChange={e=>setNewSeason(e.target.value)} placeholder="예: 27SS"
+          onKeyDown={e=>{if(e.key==="Enter")addSeason();}}
+          style={{padding:"7px 10px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:12,width:120,outline:"none",marginLeft:6}} />
+        <SmallBtn onClick={addSeason}>+ 시즌 추가</SmallBtn>
+      </div>
+    </div>
+
+    {/* 카테고리별 평균가 요약 */}
+    <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:10,marginBottom:16}}>
+      {categorySummary.map(c=>(
+        <div key={c.category} style={{padding:"12px 14px",borderRadius:12,background:"#FFF",border:"1px solid #E2E8F0"}}>
+          <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>{c.category}</div>
+          <div style={{fontSize:18,fontWeight:800,color:"#1E293B"}}>{c.count}<span style={{fontSize:11,fontWeight:500,color:"#94A3B8",marginLeft:3}}>건</span></div>
+          <div style={{fontSize:11,color:"#3B82F6",fontWeight:600,marginTop:4}}>평균가 {c.avgPrice.toLocaleString()}원</div>
+          <div style={{fontSize:10,color:"#94A3B8"}}>원가 {c.avgCost.toLocaleString()}원</div>
+        </div>
+      ))}
+    </div>
+
+    {/* 등록 폼 */}
+    <SectionCard title="✏️ 레퍼런스 등록">
+      <div style={{display:"grid",gridTemplateColumns:"1.5fr 110px 1.5fr 1.5fr 110px 110px",gap:10,alignItems:"end",marginBottom:10}}>
+        <div>
+          <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>상품명</div>
+          <Input value={fName} onChange={e=>setFName(e.target.value)} placeholder="상품명" />
+        </div>
+        <div>
+          <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>카테고리</div>
+          <select value={fCategory} onChange={e=>setFCategory(e.target.value)} style={{width:"100%",padding:"7px 10px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:13,outline:"none",background:"#F8FAFC"}}>
+            {PLANNING_CATEGORIES.map(c=><option key={c}>{c}</option>)}
+          </select>
+        </div>
+        <div>
+          <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>레퍼런스 URL</div>
+          <Input value={fRefUrl} onChange={e=>setFRefUrl(e.target.value)} placeholder="https://..." />
+        </div>
+        <div>
+          <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>이미지 URL</div>
+          <Input value={fImageUrl} onChange={e=>setFImageUrl(e.target.value)} placeholder="https://..." />
+        </div>
+        <div>
+          <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>예상 판매가</div>
+          <Input type="number" value={fPrice} onChange={e=>setFPrice(e.target.value)} placeholder="원" />
+        </div>
+        <div>
+          <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>예상 원가</div>
+          <Input type="number" value={fCost} onChange={e=>setFCost(e.target.value)} placeholder="원" />
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 2fr 100px",gap:10,alignItems:"end"}}>
+        <div>
+          <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>소재</div>
+          <Input value={fMaterial} onChange={e=>setFMaterial(e.target.value)} placeholder="예: 면 100%" />
+        </div>
+        <div>
+          <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>컬러</div>
+          <Input value={fColors} onChange={e=>setFColors(e.target.value)} placeholder="예: 블랙, 화이트" />
+        </div>
+        <div>
+          <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>메모</div>
+          <Input value={fNote} onChange={e=>setFNote(e.target.value)} placeholder="추가 메모" />
+        </div>
+        <SmallBtn primary onClick={addPlanning}>✅ 등록</SmallBtn>
+      </div>
+    </SectionCard>
+
+    {/* 카테고리 필터 */}
+    <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
+      <span style={{fontSize:12,fontWeight:600,color:"#64748B",marginRight:4}}>카테고리:</span>
+      <button onClick={()=>setCatFilter("all")} style={{
+        padding:"6px 12px",borderRadius:6,fontSize:12,fontWeight:600,cursor:"pointer",
+        border:catFilter==="all"?"1px solid #1E293B":"1px solid #E2E8F0",
+        background:catFilter==="all"?"#1E293B":"#FFF",color:catFilter==="all"?"#FFF":"#475569"
+      }}>전체 ({seasonItems.length})</button>
+      {PLANNING_CATEGORIES.map(c=>{
+        const cnt=seasonItems.filter(p=>p.category===c).length;
+        if(cnt===0)return null;
+        const active=catFilter===c;
+        return(<button key={c} onClick={()=>setCatFilter(c)} style={{
+          padding:"6px 12px",borderRadius:6,fontSize:12,fontWeight:600,cursor:"pointer",
+          border:active?"1px solid #1E293B":"1px solid #E2E8F0",
+          background:active?"#1E293B":"#FFF",color:active?"#FFF":"#475569"
+        }}>{c} ({cnt})</button>);
+      })}
+    </div>
+
+    {/* 갤러리 */}
+    {filtered.length===0?(
+      <SectionCard><div style={{padding:40,textAlign:"center",color:"#94A3B8",fontSize:13}}>등록된 아이템이 없습니다. 위에서 레퍼런스를 등록해보세요.</div></SectionCard>
+    ):(<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:14}}>
+      {filtered.map(p=>{
+        const sc=PLANNING_STATUS_COLORS[p.status||"아이디어"];
+        return(<div key={p.id} style={{background:"#FFF",borderRadius:12,border:"1px solid #E2E8F0",overflow:"hidden",position:"relative",transition:"transform 0.15s"}}>
+          <button onClick={()=>delPlanning(p.id)} style={{position:"absolute",top:6,right:6,width:24,height:24,background:"rgba(255,255,255,0.92)",border:"1px solid #E2E8F0",borderRadius:"50%",cursor:"pointer",fontSize:14,color:"#94A3B8",zIndex:2,lineHeight:1}}>×</button>
+          <div style={{height:200,background:"#F8FAFC",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
+            {p.image_url?
+              <img src={p.image_url} alt={p.name} style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{e.currentTarget.style.display="none";}} />
+              :<div style={{fontSize:36,color:"#CBD5E1"}}>🖼️</div>}
+          </div>
+          <div style={{padding:"10px 12px"}}>
+            <div style={{fontSize:10,color:"#94A3B8",fontWeight:600,marginBottom:2,textTransform:"uppercase",letterSpacing:0.3}}>{p.category||"-"}</div>
+            <div style={{fontSize:13,fontWeight:700,color:"#0F172A",marginBottom:4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={p.name}>{p.name}</div>
+            <div style={{fontSize:11,color:"#475569",marginBottom:6}}>
+              {p.est_price?<><span style={{fontWeight:700,color:"#1E293B"}}>{p.est_price.toLocaleString()}원</span></>:"-"}
+              {p.est_cost?<span style={{color:"#94A3B8",marginLeft:4}}>· 원가 {p.est_cost.toLocaleString()}</span>:""}
+            </div>
+            <div onClick={()=>advanceStatus(p)} title="클릭: 다음 단계로 (아이디어→샘플의뢰→샘플확인→생산확정)" style={{
+              display:"inline-flex",alignItems:"center",gap:5,padding:"3px 10px",borderRadius:12,
+              fontSize:10.5,fontWeight:700,cursor:"pointer",userSelect:"none",
+              background:`${sc}15`,color:sc,border:`1px solid ${sc}33`
+            }}>● {p.status||"아이디어"}</div>
+            {(p.material||p.colors)&&<div style={{fontSize:10,color:"#64748B",marginTop:6,lineHeight:1.4}}>
+              {p.material&&<div>🧵 {p.material}</div>}
+              {p.colors&&<div>🎨 {p.colors}</div>}
+            </div>}
+            {p.ref_url&&<a href={p.ref_url} target="_blank" rel="noreferrer" style={{display:"block",marginTop:6,fontSize:10,color:"#3B82F6",textDecoration:"none"}}>🔗 레퍼런스 링크</a>}
+            {p.note&&<div style={{fontSize:10,color:"#94A3B8",marginTop:6,fontStyle:"italic",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={p.note}>{p.note}</div>}
+          </div>
+        </div>);
+      })}
+    </div>)}
+  </>);
+}
+
 // ─── Tab: 상품 마스터 ───
 function ProductMasterTab(){
   const[search,setSearch]=useState("");
@@ -2448,6 +2687,7 @@ export default function Dashboard(){
     {id:"ordertrack",label:"오더 입고현황",icon:"📊"},
     {id:"sample",label:"샘플 진행",icon:"🧪"},
     {id:"measure",label:"실측 사이즈",icon:"📐"},
+    {id:"planning",label:"아이템 기획",icon:"💡"},
     {id:"products",label:"상품 마스터",icon:"📋"},
   ];
 
@@ -2589,6 +2829,7 @@ export default function Dashboard(){
 
       <div style={{padding:"20px 16px"}}>
         {activeTab==="overview"&&renderOverview()}
+        {activeTab==="planning"&&<PlanningTab />}
         {activeTab==="products"&&<ProductMasterTab />}
         {activeTab==="packing"&&<PackingListTab />}
         {activeTab==="schedule"&&<ScheduleTab />}
