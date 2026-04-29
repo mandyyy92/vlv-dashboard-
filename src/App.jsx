@@ -45,17 +45,17 @@ const translateItemName=(name)=>{
 
 
 // ─── Helper Components ───
-const Badge=({children,color="#64748B",bg})=>(<span style={{display:"inline-block",padding:"2px 10px",borderRadius:4,fontSize:11,fontWeight:600,letterSpacing:0.3,color,background:bg||`${color}18`,border:`1px solid ${color}30`,whiteSpace:"nowrap"}}>{children}</span>);
+const Badge=({children,color="#64748B",bg})=>(<span style={{display:"inline-block",padding:"2px 10px",borderRadius:4,fontSize:13,fontWeight:600,letterSpacing:0.3,color,background:bg||`${color}18`,border:`1px solid ${color}30`,whiteSpace:"nowrap"}}>{children}</span>);
 
-const TabBtn=({active,children,onClick,icon})=>(<button onClick={onClick} style={{display:"flex",alignItems:"center",gap:8,padding:"10px 18px",border:"none",borderRadius:8,cursor:"pointer",fontSize:13,fontWeight:active?700:500,letterSpacing:-0.2,background:active?"#1E293B":"transparent",color:active?"#F8FAFC":"#64748B",transition:"all 0.2s"}}><span style={{fontSize:16}}>{icon}</span>{children}</button>);
+const TabBtn=({active,children,onClick,icon})=>(<button onClick={onClick} style={{display:"flex",alignItems:"center",gap:8,padding:"10px 18px",border:"none",borderRadius:8,cursor:"pointer",fontSize:15,fontWeight:active?700:500,letterSpacing:-0.2,background:active?"#1E293B":"transparent",color:active?"#F8FAFC":"#64748B",transition:"all 0.2s"}}><span style={{fontSize:18}}>{icon}</span>{children}</button>);
 
-const SectionCard=({title,subtitle,children,actions})=>(<div style={{background:"#FFFFFF",borderRadius:14,padding:28,border:"1px solid #E2E8F0",marginBottom:20,boxShadow:"0 1px 3px rgba(0,0,0,0.04)"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,flexWrap:"wrap",gap:8}}><div><h3 style={{margin:0,fontSize:17,fontWeight:700,color:"#0F172A",letterSpacing:-0.3}}>{title}</h3>{subtitle&&<p style={{margin:"4px 0 0",fontSize:12,color:"#94A3B8"}}>{subtitle}</p>}</div>{actions&&<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{actions}</div>}</div>{children}</div>);
+const SectionCard=({title,subtitle,children,actions})=>(<div style={{background:"#FFFFFF",borderRadius:14,padding:28,border:"1px solid #E2E8F0",marginBottom:20,boxShadow:"0 1px 3px rgba(0,0,0,0.04)"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,flexWrap:"wrap",gap:8}}><div><h3 style={{margin:0,fontSize:19,fontWeight:700,color:"#0F172A",letterSpacing:-0.3}}>{title}</h3>{subtitle&&<p style={{margin:"4px 0 0",fontSize:14,color:"#94A3B8"}}>{subtitle}</p>}</div>{actions&&<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{actions}</div>}</div>{children}</div>);
 
-const SmallBtn=({children,onClick,primary,danger})=>(<button onClick={onClick} style={{padding:"6px 14px",borderRadius:6,border:danger?"1px solid #FCA5A5":primary?"none":"1px solid #CBD5E1",background:danger?"#FEF2F2":primary?"#1E293B":"#F8FAFC",color:danger?"#DC2626":primary?"#FFF":"#475569",fontSize:12,fontWeight:600,cursor:"pointer",letterSpacing:-0.1,transition:"all 0.15s",whiteSpace:"nowrap"}}>{children}</button>);
+const SmallBtn=({children,onClick,primary,danger})=>(<button onClick={onClick} style={{padding:"6px 14px",borderRadius:6,border:danger?"1px solid #FCA5A5":primary?"none":"1px solid #CBD5E1",background:danger?"#FEF2F2":primary?"#1E293B":"#F8FAFC",color:danger?"#DC2626":primary?"#FFF":"#475569",fontSize:14,fontWeight:600,cursor:"pointer",letterSpacing:-0.1,transition:"all 0.15s",whiteSpace:"nowrap"}}>{children}</button>);
 
-const Input=({value,onChange,placeholder,style:s,...rest})=>(<input value={value} onChange={onChange} placeholder={placeholder} {...rest} style={{padding:"7px 12px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:13,color:"#1E293B",outline:"none",background:"#F8FAFC",width:"100%",boxSizing:"border-box",...s}} onFocus={e=>e.target.style.borderColor="#94A3B8"} onBlur={e=>e.target.style.borderColor="#E2E8F0"} />);
+const Input=({value,onChange,placeholder,style:s,...rest})=>(<input value={value} onChange={onChange} placeholder={placeholder} {...rest} style={{padding:"7px 12px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:15,color:"#1E293B",outline:"none",background:"#F8FAFC",width:"100%",boxSizing:"border-box",...s}} onFocus={e=>e.target.style.borderColor="#94A3B8"} onBlur={e=>e.target.style.borderColor="#E2E8F0"} />);
 
-const Table=({headers,children,maxH})=>(<div style={{overflowX:"auto",overflowY:maxH?"auto":"visible",maxHeight:maxH,borderRadius:10,border:"1px solid #E2E8F0"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}><thead style={{position:maxH?"sticky":"static",top:0,zIndex:1}}><tr style={{background:"#F8FAFC"}}>{headers.map((h,i)=>(<th key={i} style={{padding:"10px 14px",textAlign:"left",fontWeight:600,color:"#64748B",fontSize:11,letterSpacing:0.4,borderBottom:"1px solid #E2E8F0",whiteSpace:"nowrap",textTransform:"uppercase"}}>{h}</th>))}</tr></thead><tbody>{children}</tbody></table></div>);
+const Table=({headers,children,maxH})=>(<div style={{overflowX:"auto",overflowY:maxH?"auto":"visible",maxHeight:maxH,borderRadius:10,border:"1px solid #E2E8F0"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:15}}><thead style={{position:maxH?"sticky":"static",top:0,zIndex:1}}><tr style={{background:"#F8FAFC"}}>{headers.map((h,i)=>(<th key={i} style={{padding:"10px 14px",textAlign:"left",fontWeight:600,color:"#64748B",fontSize:13,letterSpacing:0.4,borderBottom:"1px solid #E2E8F0",whiteSpace:"nowrap",textTransform:"uppercase"}}>{h}</th>))}</tr></thead><tbody>{children}</tbody></table></div>);
 
 const Td=({children,style:s})=>(<td style={{padding:"10px 14px",borderBottom:"1px solid #F1F5F9",color:"#334155",...s}}>{children}</td>);
 
@@ -90,7 +90,7 @@ function PackingResultTable({results}){
   const unmatched=results.length-matched;
   return(<>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-      <span style={{fontSize:12,fontWeight:600,color:"#64748B"}}>변환 결과 ({results.length}건)</span>
+      <span style={{fontSize:14,fontWeight:600,color:"#64748B"}}>변환 결과 ({results.length}건)</span>
       <div style={{display:"flex",gap:8}}>
         <Badge color="#059669">매칭 {matched}</Badge>
         {unmatched>0&&<Badge color="#DC2626">미매칭 {unmatched}</Badge>}
@@ -99,15 +99,15 @@ function PackingResultTable({results}){
     <Table headers={["품번코드","상품코드","상품명","옵션","수량"]} maxH={300}>
       {results.map((item,i)=>(
         <tr key={i} style={{background:item.code==="-"?"#FEF2F2":"transparent"}}>
-          <Td style={{fontFamily:"monospace",fontSize:11}}>{item.repCode||"-"}</Td>
-          <Td><span style={{fontWeight:600,fontSize:11}}>{item.code}</span></Td>
+          <Td style={{fontFamily:"monospace",fontSize:13}}>{item.repCode||"-"}</Td>
+          <Td><span style={{fontWeight:600,fontSize:13}}>{item.code}</span></Td>
           <Td style={{maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.name}</Td>
           <Td>{item.option}</Td>
           <Td style={{fontWeight:700}}>{item.qty}</Td>
         </tr>
       ))}
     </Table>
-    <div style={{marginTop:10,padding:10,background:"#F0FDF4",borderRadius:8,fontSize:12,color:"#166534",display:"flex",justifyContent:"space-between"}}>
+    <div style={{marginTop:10,padding:10,background:"#F0FDF4",borderRadius:8,fontSize:14,color:"#166534",display:"flex",justifyContent:"space-between"}}>
       <span>총 {results.reduce((a,b)=>a+b.qty,0).toLocaleString()}pcs · {results.length}건</span>
       <span>매칭율 {results.length?Math.round(matched/results.length*100):0}%</span>
     </div>
@@ -115,8 +115,8 @@ function PackingResultTable({results}){
 }
 
 function PackingEmpty({text}){
-  return(<div style={{height:220,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"#F8FAFC",borderRadius:10,border:"2px dashed #E2E8F0",color:"#94A3B8",fontSize:13,gap:8}}>
-    <span style={{fontSize:28}}>📄</span>{text}
+  return(<div style={{height:220,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"#F8FAFC",borderRadius:10,border:"2px dashed #E2E8F0",color:"#94A3B8",fontSize:15,gap:8}}>
+    <span style={{fontSize:30}}>📄</span>{text}
   </div>);
 }
 
@@ -318,20 +318,20 @@ function PackingIndo(){
             onDragLeave={e=>{e.currentTarget.style.borderColor="#FDBA74";e.currentTarget.style.background="#FFF7ED";}}
             onDrop={e=>{e.preventDefault();e.currentTarget.style.borderColor="#FDBA74";e.currentTarget.style.background="#FFF7ED";if(e.dataTransfer.files[0]){const dt=new DataTransfer();dt.items.add(e.dataTransfer.files[0]);fileRef.current.files=dt.files;handleFile({target:{files:e.dataTransfer.files}});}}}>
             <input ref={fileRef} type="file" accept=".pdf,.txt,.csv" style={{display:"none"}} onChange={handleFile} />
-            <span style={{fontSize:36}}>📑</span>
-            {fileName?(<><span style={{fontSize:13,fontWeight:600,color:"#EA580C"}}>{fileName}</span><span style={{fontSize:11,color:"#94A3B8"}}>클릭하여 다른 파일 선택</span></>)
-            :(<><span style={{fontSize:13,fontWeight:600,color:"#EA580C"}}>인도 패킹리스트 PDF 업로드</span><span style={{fontSize:11,color:"#94A3B8"}}>클릭 또는 드래그&드롭</span></>)}
+            <span style={{fontSize:38}}>📑</span>
+            {fileName?(<><span style={{fontSize:15,fontWeight:600,color:"#EA580C"}}>{fileName}</span><span style={{fontSize:13,color:"#94A3B8"}}>클릭하여 다른 파일 선택</span></>)
+            :(<><span style={{fontSize:15,fontWeight:600,color:"#EA580C"}}>인도 패킹리스트 PDF 업로드</span><span style={{fontSize:13,color:"#94A3B8"}}>클릭 또는 드래그&드롭</span></>)}
           </div>
         ):(
           <div>
-            <textarea value={text} onChange={e=>setText(e.target.value)} placeholder={"인도 패킹리스트 내용을 붙여넣기\\n\\n형식1 (사이즈별):\\n스타일NO\\t컬러\\t사이즈\\t수량\\nV26PT02WB600\\tWHITE\\tS\\t140\\nV26PT02WB600\\tWHITE\\tM\\t140\\n\\n형식2 (총수량):\\nV26PT02WB600\\tWHITE\\t1420\\nV26PT02WB600\\tBLACK\\t1540"} style={{width:"100%",height:170,padding:14,borderRadius:10,border:"1px solid #E2E8F0",fontSize:12,fontFamily:"monospace",background:"#FFF7ED",resize:"vertical",outline:"none",boxSizing:"border-box",lineHeight:1.6}} />
+            <textarea value={text} onChange={e=>setText(e.target.value)} placeholder={"인도 패킹리스트 내용을 붙여넣기\\n\\n형식1 (사이즈별):\\n스타일NO\\t컬러\\t사이즈\\t수량\\nV26PT02WB600\\tWHITE\\tS\\t140\\nV26PT02WB600\\tWHITE\\tM\\t140\\n\\n형식2 (총수량):\\nV26PT02WB600\\tWHITE\\t1420\\nV26PT02WB600\\tBLACK\\t1540"} style={{width:"100%",height:170,padding:14,borderRadius:10,border:"1px solid #E2E8F0",fontSize:14,fontFamily:"monospace",background:"#FFF7ED",resize:"vertical",outline:"none",boxSizing:"border-box",lineHeight:1.6}} />
             <SmallBtn primary onClick={parseText}>변환하기</SmallBtn>
           </div>
         )}
 
         <div style={{marginTop:14,padding:12,background:"#FFF7ED",borderRadius:8,border:"1px solid #FED7AA"}}>
-          <div style={{fontSize:11,fontWeight:700,color:"#EA580C",marginBottom:6}}>📌 인도 패킹리스트 → DB 매칭</div>
-          <div style={{fontSize:11,color:"#78716C",lineHeight:1.7}}>
+          <div style={{fontSize:13,fontWeight:700,color:"#EA580C",marginBottom:6}}>📌 인도 패킹리스트 → DB 매칭</div>
+          <div style={{fontSize:13,color:"#78716C",lineHeight:1.7}}>
             • PDF의 STYLE NO + COLOUR → 상품 DB 바코드 매칭<br/>
             • 영문 컬러(WHITE/BLACK 등) → 한글 옵션 자동 변환<br/>
             • 출력: <b>품번코드, 상품코드, 상품명, 옵션, 수량</b><br/>
@@ -457,32 +457,32 @@ function PackingKoni(){
           onDragLeave={e=>{e.currentTarget.style.borderColor="#86EFAC";}}
           onDrop={e=>{e.preventDefault();e.currentTarget.style.borderColor="#86EFAC";if(e.dataTransfer.files[0]){fileRef.current.files=e.dataTransfer.files;handleFile({target:{files:e.dataTransfer.files}});}}}>
           <input ref={fileRef} type="file" accept=".xls,.xlsx,.csv,.tsv,.txt,.html" style={{display:"none"}} onChange={handleFile} />
-          <span style={{fontSize:36}}>📊</span>
-          {fileName?(<><span style={{fontSize:13,fontWeight:600,color:"#16A34A"}}>{fileName}</span><span style={{fontSize:11,color:"#94A3B8"}}>클릭하여 다른 파일 선택</span></>)
-          :(<><span style={{fontSize:13,fontWeight:600,color:"#16A34A"}}>코니키즈 패킹리스트 엑셀 업로드</span><span style={{fontSize:11,color:"#94A3B8"}}>.xls / .xlsx / .csv 파일</span></>)}
+          <span style={{fontSize:38}}>📊</span>
+          {fileName?(<><span style={{fontSize:15,fontWeight:600,color:"#16A34A"}}>{fileName}</span><span style={{fontSize:13,color:"#94A3B8"}}>클릭하여 다른 파일 선택</span></>)
+          :(<><span style={{fontSize:15,fontWeight:600,color:"#16A34A"}}>코니키즈 패킹리스트 엑셀 업로드</span><span style={{fontSize:13,color:"#94A3B8"}}>.xls / .xlsx / .csv 파일</span></>)}
         </div>
 
         {showMapping&&rawPreview.length>0&&(
           <div style={{marginTop:14,padding:14,background:"#F8FAFC",borderRadius:10,border:"1px solid #E2E8F0"}}>
-            <div style={{fontSize:11,fontWeight:700,color:"#334155",marginBottom:8}}>📋 컬럼 매핑 (자동감지)</div>
+            <div style={{fontSize:13,fontWeight:700,color:"#334155",marginBottom:8}}>📋 컬럼 매핑 (자동감지)</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
               {[["barcode","바코드/품번"],["qty","수량"],["color","컬러"],["size","사이즈"],["name","상품명"]].map(([key,label])=>(
                 <div key={key} style={{display:"flex",alignItems:"center",gap:6}}>
-                  <span style={{fontSize:11,color:"#64748B",width:60}}>{label}:</span>
-                  <select value={colMap[key]} onChange={e=>{const m={...colMap,[key]:+e.target.value};setColMap(m);if(rawPreview.length>1)autoConvert(rawPreview,m);}} style={{flex:1,padding:"3px 6px",borderRadius:4,border:"1px solid #E2E8F0",fontSize:11,outline:"none"}}>
+                  <span style={{fontSize:13,color:"#64748B",width:60}}>{label}:</span>
+                  <select value={colMap[key]} onChange={e=>{const m={...colMap,[key]:+e.target.value};setColMap(m);if(rawPreview.length>1)autoConvert(rawPreview,m);}} style={{flex:1,padding:"3px 6px",borderRadius:4,border:"1px solid #E2E8F0",fontSize:13,outline:"none"}}>
                     <option value={-1}>미지정</option>
                     {rawPreview[0]&&rawPreview[0].map((h,i)=><option key={i} value={i}>{i+1}열: {h||`(열${i+1})`}</option>)}
                   </select>
                 </div>
               ))}
             </div>
-            <div style={{marginTop:8,fontSize:10,color:"#94A3B8"}}>컬럼이 잘못 매핑되면 위에서 직접 변경해주세요</div>
+            <div style={{marginTop:8,fontSize:12,color:"#94A3B8"}}>컬럼이 잘못 매핑되면 위에서 직접 변경해주세요</div>
           </div>
         )}
 
         <div style={{marginTop:14,padding:12,background:"#F0FDF4",borderRadius:8,border:"1px solid #BBF7D0"}}>
-          <div style={{fontSize:11,fontWeight:700,color:"#16A34A",marginBottom:6}}>📌 코니키즈 패킹리스트 형식</div>
-          <div style={{fontSize:11,color:"#78716C",lineHeight:1.7}}>
+          <div style={{fontSize:13,fontWeight:700,color:"#16A34A",marginBottom:6}}>📌 코니키즈 패킹리스트 형식</div>
+          <div style={{fontSize:13,color:"#78716C",lineHeight:1.7}}>
             • 입력: <b>엑셀 파일</b> (.xls / .xlsx / .csv)<br/>
             • 출력: 바코드 매칭된 엑셀(CSV) 파일<br/>
             • 헤더 자동 감지 (바코드/수량/컬러/사이즈)<br/>
@@ -599,32 +599,32 @@ function PackingSungeun(){
           onDragLeave={e=>{e.currentTarget.style.borderColor="#C4B5FD";}}
           onDrop={e=>{e.preventDefault();e.currentTarget.style.borderColor="#C4B5FD";if(e.dataTransfer.files[0]){fileRef.current.files=e.dataTransfer.files;handleFile({target:{files:e.dataTransfer.files}});}}}>
           <input ref={fileRef} type="file" accept=".xls,.xlsx,.csv,.tsv,.txt,.html" style={{display:"none"}} onChange={handleFile} />
-          <span style={{fontSize:36}}>📊</span>
-          {fileName?(<><span style={{fontSize:13,fontWeight:600,color:"#7C3AED"}}>{fileName}</span><span style={{fontSize:11,color:"#94A3B8"}}>클릭하여 다른 파일 선택</span></>)
-          :(<><span style={{fontSize:13,fontWeight:600,color:"#7C3AED"}}>성은교역 패킹리스트 엑셀 업로드</span><span style={{fontSize:11,color:"#94A3B8"}}>.xls / .xlsx / .csv 파일</span></>)}
+          <span style={{fontSize:38}}>📊</span>
+          {fileName?(<><span style={{fontSize:15,fontWeight:600,color:"#7C3AED"}}>{fileName}</span><span style={{fontSize:13,color:"#94A3B8"}}>클릭하여 다른 파일 선택</span></>)
+          :(<><span style={{fontSize:15,fontWeight:600,color:"#7C3AED"}}>성은교역 패킹리스트 엑셀 업로드</span><span style={{fontSize:13,color:"#94A3B8"}}>.xls / .xlsx / .csv 파일</span></>)}
         </div>
 
         {showMapping&&rawPreview.length>0&&(
           <div style={{marginTop:14,padding:14,background:"#F8FAFC",borderRadius:10,border:"1px solid #E2E8F0"}}>
-            <div style={{fontSize:11,fontWeight:700,color:"#334155",marginBottom:8}}>📋 컬럼 매핑 (자동감지)</div>
+            <div style={{fontSize:13,fontWeight:700,color:"#334155",marginBottom:8}}>📋 컬럼 매핑 (자동감지)</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
               {[["barcode","바코드/품번"],["qty","수량"],["color","컬러"],["size","사이즈"],["name","상품명"],["style","스타일No"]].map(([key,label])=>(
                 <div key={key} style={{display:"flex",alignItems:"center",gap:6}}>
-                  <span style={{fontSize:11,color:"#64748B",width:65}}>{label}:</span>
-                  <select value={colMap[key]} onChange={e=>{const m={...colMap,[key]:+e.target.value};setColMap(m);if(rawPreview.length>1)autoConvert(rawPreview,m);}} style={{flex:1,padding:"3px 6px",borderRadius:4,border:"1px solid #E2E8F0",fontSize:11,outline:"none"}}>
+                  <span style={{fontSize:13,color:"#64748B",width:65}}>{label}:</span>
+                  <select value={colMap[key]} onChange={e=>{const m={...colMap,[key]:+e.target.value};setColMap(m);if(rawPreview.length>1)autoConvert(rawPreview,m);}} style={{flex:1,padding:"3px 6px",borderRadius:4,border:"1px solid #E2E8F0",fontSize:13,outline:"none"}}>
                     <option value={-1}>미지정</option>
                     {rawPreview[0]&&rawPreview[0].map((h,i)=><option key={i} value={i}>{i+1}열: {h||`(열${i+1})`}</option>)}
                   </select>
                 </div>
               ))}
             </div>
-            <div style={{marginTop:8,fontSize:10,color:"#94A3B8"}}>컬럼이 잘못 매핑되면 위에서 직접 변경해주세요</div>
+            <div style={{marginTop:8,fontSize:12,color:"#94A3B8"}}>컬럼이 잘못 매핑되면 위에서 직접 변경해주세요</div>
           </div>
         )}
 
         <div style={{marginTop:14,padding:12,background:"#F5F3FF",borderRadius:8,border:"1px solid #DDD6FE"}}>
-          <div style={{fontSize:11,fontWeight:700,color:"#7C3AED",marginBottom:6}}>📌 성은교역 패킹리스트 형식</div>
-          <div style={{fontSize:11,color:"#78716C",lineHeight:1.7}}>
+          <div style={{fontSize:13,fontWeight:700,color:"#7C3AED",marginBottom:6}}>📌 성은교역 패킹리스트 형식</div>
+          <div style={{fontSize:13,color:"#78716C",lineHeight:1.7}}>
             • 입력: <b>엑셀 파일</b> (.xls / .xlsx / .csv)<br/>
             • 출력: 바코드 매칭된 엑셀(CSV) 파일<br/>
             • 헤더 자동 감지 (스타일No/바코드/수량 등)<br/>
@@ -665,9 +665,9 @@ function PackingListTab(){
             borderBottom:supplier===t.id?`3px solid ${t.color}`:"3px solid transparent",
             borderRight:t.id!=="성은교역"?"1px solid #E2E8F0":"none"
           }}>
-            <div style={{fontSize:15,marginBottom:4}}>{t.icon}</div>
-            <div style={{fontSize:13,fontWeight:supplier===t.id?700:500,color:supplier===t.id?t.color:"#64748B"}}>{t.label}</div>
-            <div style={{fontSize:10,color:supplier===t.id?`${t.color}99`:"#94A3B8",marginTop:2}}>{t.desc}</div>
+            <div style={{fontSize:17,marginBottom:4}}>{t.icon}</div>
+            <div style={{fontSize:15,fontWeight:supplier===t.id?700:500,color:supplier===t.id?t.color:"#64748B"}}>{t.label}</div>
+            <div style={{fontSize:12,color:supplier===t.id?`${t.color}99`:"#94A3B8",marginTop:2}}>{t.desc}</div>
           </button>
         ))}
       </div>
@@ -1115,14 +1115,14 @@ function ScheduleTab(){
     {/* 헤더 */}
     <div style={{background:"#FFF",borderRadius:14,padding:"20px 28px",border:"1px solid #E2E8F0",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
       <div style={{display:"flex",alignItems:"center",gap:10}}>
-        <span style={{fontSize:20}}>📅</span>
-        <span style={{fontSize:17,fontWeight:700,color:"#0F172A"}}>입고 스케줄 관리</span>
+        <span style={{fontSize:22}}>📅</span>
+        <span style={{fontSize:19,fontWeight:700,color:"#0F172A"}}>입고 스케줄 관리</span>
       </div>
-      <div style={{fontSize:13,fontWeight:600,color:"#3B82F6"}}>{year}년 {month+1}월 {new Date().getDate()}일</div>
+      <div style={{fontSize:15,fontWeight:600,color:"#3B82F6"}}>{year}년 {month+1}월 {new Date().getDate()}일</div>
     </div>
 
     {/* 안내 */}
-    <div style={{padding:"12px 20px",borderRadius:10,background:"#FFFBEB",border:"1px solid #FDE68A",marginBottom:16,fontSize:12,color:"#92400E"}}>
+    <div style={{padding:"12px 20px",borderRadius:10,background:"#FFFBEB",border:"1px solid #FDE68A",marginBottom:16,fontSize:14,color:"#92400E"}}>
       💡 카카오톡 대화 내용을 붙여넣으면 AI가 자동으로 스케줄을 분석하거나, 직접 입력할 수 있습니다.
     </div>
 
@@ -1136,7 +1136,7 @@ function ScheduleTab(){
     {/* 캘린더 뷰 */}
     {viewMode==="calendar"&&<SectionCard title={`${year}년 ${month+1}월`} actions={
       <div style={{display:"flex",alignItems:"center",gap:14}}>
-        <div style={{display:"flex",alignItems:"center",gap:12,fontSize:11,fontWeight:600,color:"#475569"}}>
+        <div style={{display:"flex",alignItems:"center",gap:12,fontSize:13,fontWeight:600,color:"#475569"}}>
           <span style={{display:"inline-flex",alignItems:"center",gap:4}}>
             <span style={{display:"inline-block",width:8,height:8,borderRadius:"50%",background:"#F59E0B"}} />입고 일정 확인중
           </span>
@@ -1152,7 +1152,7 @@ function ScheduleTab(){
       </div>
     }>
       <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:1,background:"#E2E8F0",borderRadius:10,overflow:"hidden"}}>
-        {["일","월","화","수","목","금","토"].map((d,i)=>(<div key={d} style={{textAlign:"center",padding:"8px 4px",fontSize:12,fontWeight:700,color:i===0?"#DC2626":i===6?"#2563EB":"#64748B",background:"#F8FAFC"}}>{d}</div>))}
+        {["일","월","화","수","목","금","토"].map((d,i)=>(<div key={d} style={{textAlign:"center",padding:"8px 4px",fontSize:14,fontWeight:700,color:i===0?"#DC2626":i===6?"#2563EB":"#64748B",background:"#F8FAFC"}}>{d}</div>))}
         {Array.from({length:firstDayOfWeek},(_,i)=>(<div key={`e${i}`} style={{background:"#FAFAFA",minHeight:110}}
           onDragOver={e=>e.preventDefault()} />))}
         {Array.from({length:daysInMonth},(_,i)=>{
@@ -1166,11 +1166,11 @@ function ScheduleTab(){
             onDragOver={e=>handleCellDragOver(e,dayStr)}
             onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget))setDragOverDay(prev=>prev===dayStr?null:prev);}}
             onDrop={e=>handleCellDrop(e,dayStr)}>
-            <div style={{fontSize:12,fontWeight:isToday?800:500,color:isToday?"#2563EB":dow===0?"#DC2626":dow===6?"#2563EB":"#334155",marginBottom:4}}>{day}</div>
+            <div style={{fontSize:14,fontWeight:isToday?800:500,color:isToday?"#2563EB":dow===0?"#DC2626":dow===6?"#2563EB":"#334155",marginBottom:4}}>{day}</div>
             {events.map((ev,j)=>{const ec=evtColor(ev.eventType,ev.supplier);const isDragging=dragItem&&dragItem.id===ev.id&&dragItem.eventType===ev.eventType;return(
               <div key={`${ev.id}-${ev.eventType}`} draggable
                 title="클릭: 수정 / 드래그: 날짜 이동"
-                style={{padding:"3px 6px",borderRadius:4,marginBottom:2,background:ec.bg,fontSize:10,lineHeight:1.4,cursor:"grab",userSelect:"none",border:isDragging?"2px solid "+ec.color:"1px solid transparent",opacity:isDragging?0.5:1}}
+                style={{padding:"3px 6px",borderRadius:4,marginBottom:2,background:ec.bg,fontSize:12,lineHeight:1.4,cursor:"grab",userSelect:"none",border:isDragging?"2px solid "+ec.color:"1px solid transparent",opacity:isDragging?0.5:1}}
                 onDragStart={e=>handleDragStart(e,ev)}
                 onDragEnd={handleDragEnd}
                 onClick={()=>openEdit(ev)}>
@@ -1181,7 +1181,7 @@ function ScheduleTab(){
                   </span>
                   {ev.supplier&&<span style={{color:ec.color,opacity:0.85,fontWeight:500,flexShrink:0}}>· {ev.supplier}</span>}
                 </div>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:4,marginTop:12,fontSize:15,lineHeight:1.2}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:4,marginTop:12,fontSize:17,lineHeight:1.2}}>
                   <span style={{fontWeight:700,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{translateItemName(ev.item)}</span>
                   {ev.qty>0&&<span style={{color:"#0F172A",fontWeight:700,flexShrink:0}}>{ev.qty.toLocaleString()}장</span>}
                 </div>
@@ -1194,19 +1194,19 @@ function ScheduleTab(){
     {/* 이벤트 카드 클릭 → 수정 모달 */}
     {editingEvent&&(<div onClick={()=>setEditingEvent(null)} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
       <div onClick={e=>e.stopPropagation()} style={{background:"#FFF",borderRadius:14,padding:24,width:420,maxWidth:"92vw",boxShadow:"0 20px 50px rgba(0,0,0,0.25)"}}>
-        <div style={{fontSize:16,fontWeight:700,color:"#0F172A",marginBottom:4}}>스케줄 수정</div>
-        <div style={{fontSize:12,color:"#64748B",marginBottom:18}}>{editingEvent.supplier} · {editingEvent.label}</div>
+        <div style={{fontSize:18,fontWeight:700,color:"#0F172A",marginBottom:4}}>스케줄 수정</div>
+        <div style={{fontSize:14,color:"#64748B",marginBottom:18}}>{editingEvent.supplier} · {editingEvent.label}</div>
         <div style={{marginBottom:14}}>
-          <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>상품명</div>
+          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>상품명</div>
           <input value={editName} onChange={e=>setEditName(e.target.value)} autoFocus
             onKeyDown={e=>{if(e.key==="Enter")saveEdit();if(e.key==="Escape")setEditingEvent(null);}}
-            style={{width:"100%",padding:"9px 12px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:13,outline:"none",boxSizing:"border-box"}} />
+            style={{width:"100%",padding:"9px 12px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:15,outline:"none",boxSizing:"border-box"}} />
         </div>
         <div style={{marginBottom:18}}>
-          <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>수량 (장)</div>
+          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>수량 (장)</div>
           <input type="number" value={editQty} onChange={e=>setEditQty(e.target.value)}
             onKeyDown={e=>{if(e.key==="Enter")saveEdit();if(e.key==="Escape")setEditingEvent(null);}}
-            style={{width:"100%",padding:"9px 12px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:13,outline:"none",boxSizing:"border-box"}} />
+            style={{width:"100%",padding:"9px 12px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:15,outline:"none",boxSizing:"border-box"}} />
         </div>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
           <SmallBtn danger onClick={async()=>{if(window.confirm("이 스케줄을 삭제하시겠습니까?")){await delSchedule(editingEvent.id);setEditingEvent(null);}}}>🗑 삭제</SmallBtn>
@@ -1220,7 +1220,7 @@ function ScheduleTab(){
 
     {/* 업체별 뷰 */}
     {viewMode==="supplier"&&<>
-    <div style={{padding:"8px 14px",borderRadius:8,background:"#EFF6FF",border:"1px solid #DBEAFE",marginBottom:12,fontSize:12,color:"#1E40AF",fontWeight:600}}>
+    <div style={{padding:"8px 14px",borderRadius:8,background:"#EFF6FF",border:"1px solid #DBEAFE",marginBottom:12,fontSize:14,color:"#1E40AF",fontWeight:600}}>
       📅 {(()=>{const n=new Date();return `${n.getFullYear()}년 ${n.getMonth()+1}월부터 이후 모든 일정 표시`;})()}
     </div>
     <div style={{display:"flex",gap:8,marginBottom:12}}>
@@ -1231,7 +1231,7 @@ function ScheduleTab(){
       ].map(f=>{
         const active=statusFilter===f.key;
         return(<button key={f.key} onClick={()=>setStatusFilter(f.key)} style={{
-          padding:"6px 14px",borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer",
+          padding:"6px 14px",borderRadius:8,fontSize:14,fontWeight:600,cursor:"pointer",
           border:active?"1px solid #1E293B":"1px solid #E2E8F0",
           background:active?"#1E293B":"#FFF",color:active?"#FFF":"#475569",transition:"all 0.15s"
         }}>{f.icon} {f.label}</button>);
@@ -1256,7 +1256,7 @@ function ScheduleTab(){
         });
         return(<div key={sup} style={{background:st.bg,borderRadius:14,border:`1px solid ${st.color}20`,overflow:"hidden"}}>
           <div style={{padding:"12px 18px",background:`${st.color}15`,borderBottom:`1px solid ${st.color}20`}}>
-            <span style={{fontSize:14,fontWeight:700,color:st.color}}>{st.icon} {sup}</span>
+            <span style={{fontSize:16,fontWeight:700,color:st.color}}>{st.icon} {sup}</span>
           </div>
           <div style={{padding:12,maxHeight:500,overflowY:"auto"}}>
             {items.length>0?items.map((s,i)=>{
@@ -1264,14 +1264,14 @@ function ScheduleTab(){
               const dateInput=(field)=>(<input type="date" autoFocus value={inlineDraft} onChange={e=>setInlineDraft(e.target.value)}
                 onBlur={()=>commitInline(s)}
                 onKeyDown={e=>{if(e.key==="Enter")commitInline(s);else if(e.key==="Escape")cancelInline();}}
-                style={{...inlineInputStyle,fontSize:11,width:130}} />);
+                style={{...inlineInputStyle,fontSize:13,width:130}} />);
               const confirmed=isConfirmed(s);
               return(<div key={s.id||i} style={{background:"#FFF",borderRadius:10,padding:"12px 14px",marginBottom:8,border:"1px solid #E2E8F0",position:"relative"}}>
-              <button onClick={()=>delSchedule(s.id)} style={{position:"absolute",top:8,right:8,background:"none",border:"none",cursor:"pointer",fontSize:16,color:"#94A3B8"}}>×</button>
-              {s.oz_date&&<span style={{position:"absolute",top:10,right:28,padding:"1px 6px",borderRadius:3,fontSize:10,fontWeight:700,color:ddayColor(s.oz_date),background:`${ddayColor(s.oz_date)}15`}}>{dday(s.oz_date)}</span>}
+              <button onClick={()=>delSchedule(s.id)} style={{position:"absolute",top:8,right:8,background:"none",border:"none",cursor:"pointer",fontSize:18,color:"#94A3B8"}}>×</button>
+              {s.oz_date&&<span style={{position:"absolute",top:10,right:28,padding:"1px 6px",borderRadius:3,fontSize:12,fontWeight:700,color:ddayColor(s.oz_date),background:`${ddayColor(s.oz_date)}15`}}>{dday(s.oz_date)}</span>}
               <div onClick={()=>toggleStatus(s)} title="클릭하여 상태 변경" style={{
                 display:"inline-flex",alignItems:"center",gap:4,padding:"3px 9px",borderRadius:12,
-                fontSize:10.5,fontWeight:700,cursor:"pointer",userSelect:"none",marginBottom:6,
+                fontSize:12.5,fontWeight:700,cursor:"pointer",userSelect:"none",marginBottom:6,
                 background:confirmed?"#DCFCE7":"#FEF3C7",
                 color:confirmed?"#15803D":"#92400E",
                 border:"1px solid "+(confirmed?"#86EFAC":"#FCD34D")
@@ -1279,43 +1279,43 @@ function ScheduleTab(){
                 {confirmed?"🟢 입고 확정":"🟡 입고 일정 확인중"}
               </div>
               <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:8,flexWrap:"wrap"}}>
-                <div style={{fontSize:15,fontWeight:800,color:"#1E293B"}}>
+                <div style={{fontSize:17,fontWeight:800,color:"#1E293B"}}>
                   {isEdit("item")?(<input autoFocus value={inlineDraft} onChange={e=>setInlineDraft(e.target.value)}
                     onBlur={()=>commitInline(s)}
                     onKeyDown={e=>{if(e.key==="Enter")commitInline(s);else if(e.key==="Escape")cancelInline();}}
-                    style={{...inlineInputStyle,fontSize:15,fontWeight:800,minWidth:120}} />):
+                    style={{...inlineInputStyle,fontSize:17,fontWeight:800,minWidth:120}} />):
                     <span onClick={()=>startInline(s,"item")} title="클릭하여 수정" style={editableHover}>{translateItemName(s.item)||"(상품명)"}</span>}
                 </div>
-                <div style={{fontSize:13,color:"#334155"}}>
+                <div style={{fontSize:15,color:"#334155"}}>
                   {isEdit("qty")?(<><input type="number" autoFocus value={inlineDraft} onChange={e=>setInlineDraft(e.target.value)}
                     onBlur={()=>commitInline(s)}
                     onKeyDown={e=>{if(e.key==="Enter")commitInline(s);else if(e.key==="Escape")cancelInline();}}
-                    style={{...inlineInputStyle,fontSize:13,width:90}} /> 장</>):
+                    style={{...inlineInputStyle,fontSize:15,width:90}} /> 장</>):
                     <span onClick={()=>startInline(s,"qty")} title="클릭하여 수정" style={editableHover}>{s.qty?s.qty.toLocaleString()+" 장":"(수량)"}</span>}
                 </div>
               </div>
               <div style={{display:"flex",gap:0,padding:"6px 8px",background:"#F8FAFC",borderRadius:6,border:"1px solid #E2E8F0",marginBottom:6}}>
                 <div style={{flex:1,display:"flex",flexDirection:"column",gap:2,borderRight:"1px solid #E2E8F0",paddingRight:6,minWidth:0}}>
-                  <div style={{fontSize:10,color:"#94A3B8"}}>🚢 선적일</div>
-                  <div style={{fontSize:12,fontWeight:700,color:"#1E293B"}}>{isEdit("ship_date")?dateInput("ship_date"):
+                  <div style={{fontSize:12,color:"#94A3B8"}}>🚢 선적일</div>
+                  <div style={{fontSize:14,fontWeight:700,color:"#1E293B"}}>{isEdit("ship_date")?dateInput("ship_date"):
                     <span onClick={()=>startInline(s,"ship_date")} title="클릭하여 수정" style={editableHover}>{s.ship_date||"-"}</span>}</div>
                 </div>
                 <div style={{flex:1,display:"flex",flexDirection:"column",gap:2,borderRight:"1px solid #E2E8F0",padding:"0 6px",minWidth:0}}>
-                  <div style={{fontSize:10,color:"#94A3B8"}}>🇰🇷 한국도착</div>
-                  <div style={{fontSize:12,fontWeight:700,color:"#1E293B"}}>{isEdit("kr_date")?dateInput("kr_date"):
+                  <div style={{fontSize:12,color:"#94A3B8"}}>🇰🇷 한국도착</div>
+                  <div style={{fontSize:14,fontWeight:700,color:"#1E293B"}}>{isEdit("kr_date")?dateInput("kr_date"):
                     <span onClick={()=>startInline(s,"kr_date")} title="클릭하여 수정 (오즈센터 +2영업일 자동계산)" style={editableHover}>{s.kr_date||s.date||"-"}</span>}</div>
                 </div>
                 <div style={{flex:1,display:"flex",flexDirection:"column",gap:2,paddingLeft:6,minWidth:0}}>
-                  <div style={{fontSize:10,color:"#94A3B8"}}>📦 오즈센터</div>
-                  <div style={{fontSize:12,fontWeight:700,color:"#1E293B"}}>{isEdit("oz_date")?dateInput("oz_date"):
+                  <div style={{fontSize:12,color:"#94A3B8"}}>📦 오즈센터</div>
+                  <div style={{fontSize:14,fontWeight:700,color:"#1E293B"}}>{isEdit("oz_date")?dateInput("oz_date"):
                     <span onClick={()=>startInline(s,"oz_date")} title="클릭하여 수정" style={editableHover}>{s.oz_date||"-"}</span>}</div>
                 </div>
               </div>
-              <div style={{fontSize:11,color:"#94A3B8",marginTop:2}}>
+              <div style={{fontSize:13,color:"#94A3B8",marginTop:2}}>
                 {isEdit("ship_type")?(<select autoFocus value={inlineDraft} onChange={e=>setInlineDraft(e.target.value)}
                   onBlur={()=>commitInline(s)}
                   onKeyDown={e=>{if(e.key==="Enter")commitInline(s);else if(e.key==="Escape")cancelInline();}}
-                  style={{...inlineInputStyle,fontSize:11,width:140}}>
+                  style={{...inlineInputStyle,fontSize:13,width:140}}>
                   <option value="">(미지정)</option>
                   <option value="Air Shipment">✈️ Air</option>
                   <option value="Sea Shipment">🚢 Sea</option>
@@ -1325,8 +1325,8 @@ function ScheduleTab(){
               </div>
             </div>);}):(
               <div style={{textAlign:"center",padding:30,color:"#94A3B8"}}>
-                <div style={{fontSize:30,marginBottom:8}}>📭</div>
-                <div style={{fontSize:13}}>이번달 이후 일정 없음</div>
+                <div style={{fontSize:32,marginBottom:8}}>📭</div>
+                <div style={{fontSize:15}}>이번달 이후 일정 없음</div>
               </div>
             )}
           </div>
@@ -1339,7 +1339,7 @@ function ScheduleTab(){
     {viewMode==="input"&&<>
       {/* AI 스케줄 분석 */}
       <SectionCard title="🤖 AI 스케줄 분석" subtitle="카카오톡 대화 내용 붙여넣기">
-        <textarea value={chatInput} onChange={e=>setChatInput(e.target.value)} placeholder={"예시:\n[인도] 오전 10:45\n다음주 화요일에 브이넥티 300장 입고 예정입니다\n리드타임은 14일이에요\n\n[성은교역] 오후 2:13\n린넨팬츠 500장 4/5 입고..."} style={{width:"100%",height:120,padding:14,borderRadius:10,border:"1px solid #E2E8F0",fontSize:13,background:"#F8FAFC",resize:"vertical",outline:"none",boxSizing:"border-box",lineHeight:1.6}} />
+        <textarea value={chatInput} onChange={e=>setChatInput(e.target.value)} placeholder={"예시:\n[인도] 오전 10:45\n다음주 화요일에 브이넥티 300장 입고 예정입니다\n리드타임은 14일이에요\n\n[성은교역] 오후 2:13\n린넨팬츠 500장 4/5 입고..."} style={{width:"100%",height:120,padding:14,borderRadius:10,border:"1px solid #E2E8F0",fontSize:15,background:"#F8FAFC",resize:"vertical",outline:"none",boxSizing:"border-box",lineHeight:1.6}} />
         <div style={{marginTop:10,display:"flex",gap:8}}>
           <SmallBtn primary onClick={parseChat}>🤖 AI 분석</SmallBtn>
           <SmallBtn onClick={()=>alert("엑셀 다운로드 기능\n(구현 예정)")}>📊 엑셀 다운로드</SmallBtn>
@@ -1351,41 +1351,41 @@ function ScheduleTab(){
       <SectionCard title="✏️ 직접 등록">
         <div style={{display:"grid",gridTemplateColumns:"110px 110px 1fr 90px 130px 130px 130px 1fr 90px",gap:10,alignItems:"end"}}>
           <div>
-            <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>업체</div>
-            <select value={formSupplier} onChange={e=>setFormSupplier(e.target.value)} style={{width:"100%",padding:"8px 10px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:12,outline:"none"}}>
+            <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>업체</div>
+            <select value={formSupplier} onChange={e=>setFormSupplier(e.target.value)} style={{width:"100%",padding:"8px 10px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:14,outline:"none"}}>
               {SUPPLIERS.map(s=><option key={s}>{s}</option>)}
             </select>
           </div>
           <div>
-            <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>운송</div>
-            <select value={formShipType} onChange={e=>setFormShipType(e.target.value)} style={{width:"100%",padding:"8px 10px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:12,outline:"none"}}>
+            <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>운송</div>
+            <select value={formShipType} onChange={e=>setFormShipType(e.target.value)} style={{width:"100%",padding:"8px 10px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:14,outline:"none"}}>
               <option value="Air Shipment">✈️ Air</option>
               <option value="Sea Shipment">🚢 Sea</option>
               <option value="국내">🚚 국내</option>
             </select>
           </div>
           <div>
-            <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>상품명</div>
+            <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>상품명</div>
             <Input value={formName} onChange={e=>setFormName(e.target.value)} placeholder="상품명 입력" />
           </div>
           <div>
-            <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>수량</div>
+            <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>수량</div>
             <Input value={formQty} onChange={e=>setFormQty(e.target.value)} placeholder="수량" type="number" />
           </div>
           <div>
-            <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>🚢 선적일</div>
+            <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>🚢 선적일</div>
             <Input type="date" value={formShipDate} onChange={e=>setFormShipDate(e.target.value)} />
           </div>
           <div>
-            <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>🇰🇷 한국 도착일</div>
+            <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>🇰🇷 한국 도착일</div>
             <Input type="date" value={formKrDate} onChange={e=>handleKrDate(e.target.value)} />
           </div>
           <div>
-            <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>📦 오즈센터 도착일 (+2영업일)</div>
+            <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>📦 오즈센터 도착일 (+2영업일)</div>
             <Input type="date" value={formOzDate} onChange={e=>setFormOzDate(e.target.value)} />
           </div>
           <div>
-            <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>비고</div>
+            <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>비고</div>
             <Input value={formNote} onChange={e=>setFormNote(e.target.value)} placeholder="메모" />
           </div>
           <SmallBtn primary onClick={addSchedule}>✅ 등록</SmallBtn>
@@ -1424,25 +1424,25 @@ function SampleTab(){
       <div style={{marginBottom:16,display:"flex",gap:12}}>
         {SAMPLE_STATUSES.map(st=>{const count=samples.filter(s=>s.status===st).length;return(
           <div key={st} style={{flex:1,padding:"10px 14px",borderRadius:8,background:`${STATUS_COLORS[st]}10`,border:`1px solid ${STATUS_COLORS[st]}25`,textAlign:"center"}}>
-            <div style={{fontSize:18,fontWeight:800,color:STATUS_COLORS[st]}}>{count}</div>
-            <div style={{fontSize:10,color:"#64748B",fontWeight:600,marginTop:2}}>{st}</div>
+            <div style={{fontSize:20,fontWeight:800,color:STATUS_COLORS[st]}}>{count}</div>
+            <div style={{fontSize:12,color:"#64748B",fontWeight:600,marginTop:2}}>{st}</div>
           </div>);})}
       </div>
       <Table headers={["품번","상품명","업체","진행상태","의뢰일","입고예정일","비고"]} maxH={350}>
         {samples.map((s)=>(
           <tr key={s.id}>
-            <Td style={{fontFamily:"monospace",fontSize:12,fontWeight:600}}>{s.code}</Td>
+            <Td style={{fontFamily:"monospace",fontSize:14,fontWeight:600}}>{s.code}</Td>
             <Td>{s.name}</Td>
             <Td><Badge color={getSupColor(s.supplier)}>{(s.supplier||"").length>10?(s.supplier||"").slice(0,10)+"…":s.supplier}</Badge></Td>
-            <Td><select value={s.status} onChange={e=>updateSample(s.id,"status",e.target.value)} style={{padding:"4px 8px",borderRadius:6,border:`1px solid ${STATUS_COLORS[s.status]}40`,background:`${STATUS_COLORS[s.status]}15`,color:STATUS_COLORS[s.status],fontSize:12,fontWeight:700,cursor:"pointer",outline:"none"}}>{SAMPLE_STATUSES.map(st=><option key={st} value={st}>{st}</option>)}</select></Td>
+            <Td><select value={s.status} onChange={e=>updateSample(s.id,"status",e.target.value)} style={{padding:"4px 8px",borderRadius:6,border:`1px solid ${STATUS_COLORS[s.status]}40`,background:`${STATUS_COLORS[s.status]}15`,color:STATUS_COLORS[s.status],fontSize:14,fontWeight:700,cursor:"pointer",outline:"none"}}>{SAMPLE_STATUSES.map(st=><option key={st} value={st}>{st}</option>)}</select></Td>
             <Td>{s.request_date}</Td><Td>{s.expected_date}</Td>
-            <Td style={{fontSize:12,color:s.note?"#D97706":"#94A3B8"}}>{s.note||"-"}</Td>
+            <Td style={{fontSize:14,color:s.note?"#D97706":"#94A3B8"}}>{s.note||"-"}</Td>
           </tr>))}
       </Table>
       <div style={{marginTop:16,display:"flex",gap:4}}>
         {SAMPLE_STATUSES.map((st,i)=>(<div key={st} style={{display:"flex",alignItems:"center",flex:1}}>
           <div style={{flex:1,height:6,borderRadius:3,background:`linear-gradient(90deg, ${STATUS_COLORS[st]}, ${STATUS_COLORS[SAMPLE_STATUSES[Math.min(i+1,5)]]})`,opacity:0.5}} />
-          {i<5&&<span style={{fontSize:10,color:"#CBD5E1",margin:"0 2px"}}>→</span>}
+          {i<5&&<span style={{fontSize:12,color:"#CBD5E1",margin:"0 2px"}}>→</span>}
         </div>))}
       </div>
     </SectionCard>);
@@ -1481,12 +1481,12 @@ function MeasurementTab(){
       <Table headers={["품번","상품명","구분","사이즈",...Object.values(fieldNames),"편차","비고"]} maxH={400}>
         {filtered.map((m)=>{const dev=getDev(m);return(
           <tr key={m.id}>
-            <Td style={{fontFamily:"monospace",fontSize:12,fontWeight:600}}>{m.code}</Td><Td>{m.name}</Td>
+            <Td style={{fontFamily:"monospace",fontSize:14,fontWeight:600}}>{m.code}</Td><Td>{m.name}</Td>
             <Td><Badge color={m.type==="샘플"?"#3B82F6":"#F59E0B"}>{m.type}</Badge></Td>
             <Td style={{fontWeight:600}}>{m.size}</Td>
-            {allFields.map(f=>(<Td key={f} style={{fontWeight:m[f]?600:400,color:dev&&dev[f]?(Math.abs(dev[f])>0.5?"#DC2626":"#D97706"):"#334155",fontSize:13}}>{m[f]||"-"}{dev&&dev[f]&&<span style={{fontSize:9,marginLeft:2}}>({dev[f]>0?"+":""}{dev[f]})</span>}</Td>))}
+            {allFields.map(f=>(<Td key={f} style={{fontWeight:m[f]?600:400,color:dev&&dev[f]?(Math.abs(dev[f])>0.5?"#DC2626":"#D97706"):"#334155",fontSize:15}}>{m[f]||"-"}{dev&&dev[f]&&<span style={{fontSize:11,marginLeft:2}}>({dev[f]>0?"+":""}{dev[f]})</span>}</Td>))}
             <Td>{dev?<Badge color={Object.values(dev).some(d=>Math.abs(d)>0.5)?"#DC2626":"#D97706"}>{Object.values(dev).some(d=>Math.abs(d)>0.5)?"편차주의":"미세편차"}</Badge>:m.type==="생산"?<Badge color="#94A3B8">샘플없음</Badge>:"-"}</Td>
-            <Td style={{fontSize:12,color:m.note?"#D97706":"#94A3B8"}}>{m.note||"-"}</Td>
+            <Td style={{fontSize:14,color:m.note?"#D97706":"#94A3B8"}}>{m.note||"-"}</Td>
           </tr>);})}
       </Table>
     </SectionCard>);
@@ -1514,18 +1514,18 @@ function PriceTab(){
         {filtered.map((p,i)=>{
           const diff=p.originalPrice-p.finalPrice;const pct=p.originalPrice?((diff/p.originalPrice)*100).toFixed(1):0;
           return(<tr key={i} onClick={()=>setEditing(editing===i?null:i)} style={{cursor:"pointer",background:editing===i?"#F8FAFC":"transparent"}}>
-            <Td style={{fontFamily:"monospace",fontSize:12,fontWeight:600}}>{p.code}</Td><Td>{p.name}</Td>
+            <Td style={{fontFamily:"monospace",fontSize:14,fontWeight:600}}>{p.code}</Td><Td>{p.name}</Td>
             <Td><Badge color={getSupColor(p.supplier)}>{p.supplier.length>10?p.supplier.slice(0,10)+"…":p.supplier}</Badge></Td>
             <Td>{editing===i?<Input value={p.originalPrice} onChange={e=>updatePrice(i,"originalPrice",+e.target.value)} style={{width:80}} type="number" />:`₩${p.originalPrice.toLocaleString()}`}</Td>
             <Td>{editing===i?<Input value={p.adjustedPrice} onChange={e=>updatePrice(i,"adjustedPrice",+e.target.value)} style={{width:80}} type="number" />:`₩${p.adjustedPrice.toLocaleString()}`}</Td>
             <Td style={{fontWeight:700,color:"#059669"}}>{editing===i?<Input value={p.finalPrice} onChange={e=>updatePrice(i,"finalPrice",+e.target.value)} style={{width:80}} type="number" />:`₩${p.finalPrice.toLocaleString()}`}</Td>
-            <Td>{diff>0&&<span style={{color:"#DC2626",fontSize:12,fontWeight:600}}>▼ {pct}%</span>}</Td>
+            <Td>{diff>0&&<span style={{color:"#DC2626",fontSize:14,fontWeight:600}}>▼ {pct}%</span>}</Td>
             <Td>{editing===i?<Input value={p.moq} onChange={e=>updatePrice(i,"moq",+e.target.value)} style={{width:60}} type="number" />:p.moq||"-"}</Td>
-            <Td style={{fontSize:12,color:"#64748B"}}>{editing===i?<Input value={p.note} onChange={e=>updatePrice(i,"note",e.target.value)} style={{width:80}} />:(p.note||"-")}</Td>
+            <Td style={{fontSize:14,color:"#64748B"}}>{editing===i?<Input value={p.note} onChange={e=>updatePrice(i,"note",e.target.value)} style={{width:80}} />:(p.note||"-")}</Td>
           </tr>);
         })}
       </Table>
-      <div style={{marginTop:12,fontSize:11,color:"#94A3B8"}}>행을 클릭하면 수정 모드로 전환됩니다 · 전체 {UNIQUE_PRODUCTS}개 상품</div>
+      <div style={{marginTop:12,fontSize:13,color:"#94A3B8"}}>행을 클릭하면 수정 모드로 전환됩니다 · 전체 {UNIQUE_PRODUCTS}개 상품</div>
     </SectionCard>
   );
 }
@@ -1538,7 +1538,7 @@ function ReorderTab(){
   const ReorderImg=({code})=>{const src=getImg(code);return(
     <div style={{width:40,height:40,borderRadius:6,overflow:"hidden",background:"#F1F5F9",flexShrink:0,border:"1px solid #E2E8F0"}}>
       {src?<img src={src} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{e.target.style.display="none";e.target.parentNode.innerHTML='<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:14px;color:#CBD5E1">📷</div>';}} />
-      :<div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,color:"#CBD5E1"}}>📷</div>}
+      :<div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,color:"#CBD5E1"}}>📷</div>}
     </div>);};
 
   // Google Apps Script Web App URL - 설정 후 여기에 입력
@@ -1677,31 +1677,31 @@ function ReorderTab(){
   const statusCounts={};
   ["품절","긴급발주","발주필요","발주검토","재고충분"].forEach(st=>{statusCounts[st]=withStatus.filter(r=>r.status===st).length;});
 
-  const SortTh=({col,children})=>(<th onClick={()=>{if(sortCol===col)setSortAsc(!sortAsc);else{setSortCol(col);setSortAsc(true);}}} style={{padding:"10px 12px",textAlign:"left",fontWeight:600,color:"#64748B",fontSize:11,letterSpacing:0.4,borderBottom:"1px solid #E2E8F0",whiteSpace:"nowrap",textTransform:"uppercase",cursor:"pointer",userSelect:"none",background:"#F8FAFC"}}>{children}{sortCol===col?(sortAsc?" ▲":" ▼"):""}</th>);
+  const SortTh=({col,children})=>(<th onClick={()=>{if(sortCol===col)setSortAsc(!sortAsc);else{setSortCol(col);setSortAsc(true);}}} style={{padding:"10px 12px",textAlign:"left",fontWeight:600,color:"#64748B",fontSize:13,letterSpacing:0.4,borderBottom:"1px solid #E2E8F0",whiteSpace:"nowrap",textTransform:"uppercase",cursor:"pointer",userSelect:"none",background:"#F8FAFC"}}>{children}{sortCol===col?(sortAsc?" ▲":" ▼"):""}</th>);
 
   return(<>
     <SectionCard title="🔄 리오더 아이템 확인" subtitle={`마지막 갱신: ${lastRefresh}`}
       actions={<div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-        <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:"#64748B",cursor:"pointer"}}><input type="checkbox" checked={autoEnabled} onChange={e=>setAutoEnabled(e.target.checked)} style={{accentColor:"#1E293B"}} />매일 11:00 자동갱신</label>
+        <label style={{display:"flex",alignItems:"center",gap:6,fontSize:14,color:"#64748B",cursor:"pointer"}}><input type="checkbox" checked={autoEnabled} onChange={e=>setAutoEnabled(e.target.checked)} style={{accentColor:"#1E293B"}} />매일 11:00 자동갱신</label>
         <SmallBtn primary onClick={fetchData}>{loading?"⏳ 불러오는 중...":"🔄 구글시트 불러오기"}</SmallBtn>
         <SmallBtn onClick={()=>setPasteMode(!pasteMode)}>{pasteMode?"✕ 닫기":"📋 데이터 붙여넣기"}</SmallBtn>
         <SmallBtn onClick={()=>setShowSetup(!showSetup)}>⚙️ 설정</SmallBtn>
       </div>}>
 
       {/* 자동갱신 안내 */}
-      {autoEnabled&&<div style={{padding:"10px 16px",borderRadius:8,background:"#EFF6FF",border:"1px solid #BFDBFE",marginBottom:16,fontSize:12,color:"#1E40AF",display:"flex",alignItems:"center",gap:8}}>⏰ 매일 오전 11:00에 구글 시트 데이터를 자동으로 불러옵니다 (Apps Script 트리거 설정 필요)</div>}
+      {autoEnabled&&<div style={{padding:"10px 16px",borderRadius:8,background:"#EFF6FF",border:"1px solid #BFDBFE",marginBottom:16,fontSize:14,color:"#1E40AF",display:"flex",alignItems:"center",gap:8}}>⏰ 매일 오전 11:00에 구글 시트 데이터를 자동으로 불러옵니다 (Apps Script 트리거 설정 필요)</div>}
 
       {/* Apps Script 설정 안내 */}
       {showSetup&&<div style={{padding:20,borderRadius:12,background:"#FFFBEB",border:"1px solid #FDE68A",marginBottom:16}}>
-        <div style={{fontSize:14,fontWeight:700,color:"#92400E",marginBottom:12}}>⚙️ Google Apps Script 설정 가이드</div>
-        <div style={{fontSize:12,color:"#78716C",lineHeight:2}}>
+        <div style={{fontSize:16,fontWeight:700,color:"#92400E",marginBottom:12}}>⚙️ Google Apps Script 설정 가이드</div>
+        <div style={{fontSize:14,color:"#78716C",lineHeight:2}}>
           <b>1단계:</b> 구글 시트에서 <b>확장 프로그램 → Apps Script</b> 클릭<br/>
           <b>2단계:</b> 아래 코드를 복사하여 스크립트 편집기에 붙여넣기<br/>
           <b>3단계:</b> <b>배포 → 새 배포 → 웹 앱</b> 선택 → 액세스: <b>"모든 사용자"</b> → 배포<br/>
           <b>4단계:</b> 생성된 URL을 아래에 붙여넣기<br/>
           <b>5단계:</b> 매일 11시 자동실행은 Apps Script에서 <b>트리거 추가</b> → 시간 기반 → 매일 오전 11시
         </div>
-        <div style={{marginTop:12,padding:14,background:"#1E293B",borderRadius:8,fontSize:11,fontFamily:"monospace",color:"#E2E8F0",lineHeight:1.8,overflowX:"auto",whiteSpace:"pre",maxHeight:220,overflowY:"auto"}}>{`function doGet() {
+        <div style={{marginTop:12,padding:14,background:"#1E293B",borderRadius:8,fontSize:13,fontFamily:"monospace",color:"#E2E8F0",lineHeight:1.8,overflowX:"auto",whiteSpace:"pre",maxHeight:220,overflowY:"auto"}}>{`function doGet() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
 
   // 기본상품_발주 탭
@@ -1750,9 +1750,9 @@ function ReorderTab(){
 
       {/* 데이터 붙여넣기 모드 */}
       {pasteMode&&<div style={{padding:20,borderRadius:12,background:"#F8FAFC",border:"1px solid #E2E8F0",marginBottom:16}}>
-        <div style={{fontSize:13,fontWeight:700,color:"#334155",marginBottom:10}}>📋 구글 시트에서 데이터 복사 → 여기에 붙여넣기</div>
-        <div style={{fontSize:11,color:"#64748B",marginBottom:10}}>구글 시트에서 헤더 포함 전체 범위를 선택 → Ctrl+C → 아래 텍스트 영역에 Ctrl+V</div>
-        <textarea value={pasteText} onChange={e=>setPasteText(e.target.value)} placeholder="구글 시트에서 복사한 데이터를 여기에 붙여넣기..." style={{width:"100%",height:120,padding:12,borderRadius:8,border:"1px solid #E2E8F0",fontSize:12,fontFamily:"monospace",background:"#FFF",resize:"vertical",outline:"none",boxSizing:"border-box"}} />
+        <div style={{fontSize:15,fontWeight:700,color:"#334155",marginBottom:10}}>📋 구글 시트에서 데이터 복사 → 여기에 붙여넣기</div>
+        <div style={{fontSize:13,color:"#64748B",marginBottom:10}}>구글 시트에서 헤더 포함 전체 범위를 선택 → Ctrl+C → 아래 텍스트 영역에 Ctrl+V</div>
+        <textarea value={pasteText} onChange={e=>setPasteText(e.target.value)} placeholder="구글 시트에서 복사한 데이터를 여기에 붙여넣기..." style={{width:"100%",height:120,padding:12,borderRadius:8,border:"1px solid #E2E8F0",fontSize:14,fontFamily:"monospace",background:"#FFF",resize:"vertical",outline:"none",boxSizing:"border-box"}} />
         <div style={{marginTop:10,display:"flex",gap:8}}>
           <SmallBtn primary onClick={()=>parsePaste("basic")}>기본상품_발주로 적용</SmallBtn>
           <SmallBtn primary onClick={()=>parsePaste("artwork")}>아트웍_발주로 적용</SmallBtn>
@@ -1767,9 +1767,9 @@ function ReorderTab(){
             flex:1,padding:"14px 20px",border:"none",cursor:"pointer",transition:"all 0.2s",
             background:subTab===t.id?"#1E293B":"#FAFAFA",color:subTab===t.id?"#FFF":"#64748B",
             borderBottom:subTab===t.id?`3px solid ${t.color}`:"3px solid transparent",
-            fontSize:13,fontWeight:subTab===t.id?700:500
+            fontSize:15,fontWeight:subTab===t.id?700:500
           }}>
-            {t.label} <span style={{fontSize:11,opacity:0.7,marginLeft:4}}>({t.count}건)</span>
+            {t.label} <span style={{fontSize:13,opacity:0.7,marginLeft:4}}>({t.count}건)</span>
           </button>
         ))}
       </div>
@@ -1778,8 +1778,8 @@ function ReorderTab(){
       <div style={{display:"flex",gap:10,marginBottom:16}}>
         {["품절","긴급발주","발주필요","발주검토","재고충분"].map(st=>{const cnt=statusCounts[st]||0;const{color,bg}=statusStyle(st);
           return(<div key={st} onClick={()=>setFilter(filter===st?"전체":st)} style={{flex:1,padding:"16px 14px",borderRadius:10,background:bg,border:`1px solid ${color}20`,textAlign:"center",cursor:"pointer",outline:filter===st?`2px solid ${color}`:"none",transition:"all 0.15s"}}>
-            <div style={{fontSize:32,fontWeight:800,color}}>{cnt}</div>
-            <div style={{fontSize:13,fontWeight:600,color,marginTop:4}}>{st}</div>
+            <div style={{fontSize:34,fontWeight:800,color}}>{cnt}</div>
+            <div style={{fontSize:15,fontWeight:600,color,marginTop:4}}>{st}</div>
           </div>);
         })}
       </div>
@@ -1787,13 +1787,13 @@ function ReorderTab(){
       {/* 검색 */}
       <div style={{marginBottom:12,display:"flex",gap:8}}>
         <Input value={search} onChange={e=>setSearch(e.target.value)} placeholder="상품코드/상품명/옵션 검색..." style={{maxWidth:300}} />
-        <span style={{fontSize:12,color:"#64748B",alignSelf:"center"}}>{sorted.length}건 표시</span>
+        <span style={{fontSize:14,color:"#64748B",alignSelf:"center"}}>{sorted.length}건 표시</span>
       </div>
 
       {/* 기본상품_발주 테이블 */}
       {subTab==="basic"&&(sorted.length>0?(
         <div style={{overflowX:"auto",borderRadius:10,border:"1px solid #E2E8F0",maxHeight:480,overflowY:"auto"}}>
-          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12.5}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:14.5}}>
             <thead style={{position:"sticky",top:0,zIndex:1}}>
               <tr>
                 <SortTh col="status">상태</SortTh>
@@ -1816,8 +1816,8 @@ function ReorderTab(){
             <tbody>
               {sorted.map((r,i)=>{const{color,bg}=statusStyle(r.status);return(
                 <tr key={i} style={{background:r.status==="긴급발주"?"#FEF2F208":r.status==="발주필요"?"#FFFBEB08":"transparent"}}>
-                  <Td><span style={{padding:"3px 10px",borderRadius:4,fontSize:10,fontWeight:700,color,background:bg,whiteSpace:"nowrap"}}>{r.status}</span></Td>
-                  <Td style={{fontFamily:"monospace",fontSize:11,fontWeight:600,whiteSpace:"nowrap"}}>{r.code}</Td>
+                  <Td><span style={{padding:"3px 10px",borderRadius:4,fontSize:12,fontWeight:700,color,background:bg,whiteSpace:"nowrap"}}>{r.status}</span></Td>
+                  <Td style={{fontFamily:"monospace",fontSize:13,fontWeight:600,whiteSpace:"nowrap"}}>{r.code}</Td>
                   <Td style={{padding:"6px 10px"}}><div style={{display:"flex",alignItems:"center",gap:8}}><ReorderImg code={r.code} /><span style={{maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.name}</span></div></Td>
                   <Td style={{whiteSpace:"nowrap",minWidth:120}}>{r.option}</Td>
                   <Td><Badge>{r.classification}</Badge></Td>
@@ -1836,7 +1836,7 @@ function ReorderTab(){
           </table>
         </div>
       ):(
-        <div style={{padding:40,textAlign:"center",color:"#94A3B8",fontSize:13}}>
+        <div style={{padding:40,textAlign:"center",color:"#94A3B8",fontSize:15}}>
           {basicData.length===0?"구글 시트에서 데이터를 불러와주세요. 위의 '구글시트 불러오기' 또는 '데이터 붙여넣기'를 사용하세요.":"검색 결과가 없습니다."}
         </div>
       ))}
@@ -1844,7 +1844,7 @@ function ReorderTab(){
       {/* 아트웍_발주 테이블 */}
       {subTab==="artwork"&&(sorted.length>0?(
         <div style={{overflowX:"auto",borderRadius:10,border:"1px solid #E2E8F0",maxHeight:480,overflowY:"auto"}}>
-          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12.5}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:14.5}}>
             <thead style={{position:"sticky",top:0,zIndex:1}}>
               <tr>
                 <SortTh col="status">상태</SortTh>
@@ -1867,8 +1867,8 @@ function ReorderTab(){
             <tbody>
               {sorted.map((r,i)=>{const{color,bg}=statusStyle(r.status);return(
                 <tr key={i} style={{background:r.status==="긴급발주"?"#FEF2F208":r.status==="발주필요"?"#FFFBEB08":"transparent"}}>
-                  <Td><span style={{padding:"3px 10px",borderRadius:4,fontSize:10,fontWeight:700,color,background:bg,whiteSpace:"nowrap"}}>{r.status}</span></Td>
-                  <Td style={{fontFamily:"monospace",fontSize:11,fontWeight:600,whiteSpace:"nowrap"}}>{r.code}</Td>
+                  <Td><span style={{padding:"3px 10px",borderRadius:4,fontSize:12,fontWeight:700,color,background:bg,whiteSpace:"nowrap"}}>{r.status}</span></Td>
+                  <Td style={{fontFamily:"monospace",fontSize:13,fontWeight:600,whiteSpace:"nowrap"}}>{r.code}</Td>
                   <Td style={{padding:"6px 10px"}}><div style={{display:"flex",alignItems:"center",gap:8}}><ReorderImg code={r.code} /><span style={{maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.name}</span></div></Td>
                   <Td style={{whiteSpace:"nowrap",minWidth:120}}>{r.option}</Td>
                   <Td><Badge>{r.classification}</Badge></Td>
@@ -1887,7 +1887,7 @@ function ReorderTab(){
           </table>
         </div>
       ):(
-        <div style={{padding:40,textAlign:"center",color:"#94A3B8",fontSize:13}}>
+        <div style={{padding:40,textAlign:"center",color:"#94A3B8",fontSize:15}}>
           {artworkData.length===0?"구글 시트에서 데이터를 불러와주세요. 위의 '구글시트 불러오기' 또는 '데이터 붙여넣기'를 사용하세요.":"검색 결과가 없습니다."}
         </div>
       ))}
@@ -2180,21 +2180,21 @@ function OrderTrackingTab(){
     {/* 헤더 */}
     <div style={{background:"#FFF",borderRadius:14,padding:"20px 28px",border:"1px solid #E2E8F0",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
       <div style={{display:"flex",alignItems:"center",gap:10}}>
-        <span style={{fontSize:20}}>📊</span>
-        <span style={{fontSize:17,fontWeight:700,color:"#0F172A"}}>오더 누적 입고 수량</span>
+        <span style={{fontSize:22}}>📊</span>
+        <span style={{fontSize:19,fontWeight:700,color:"#0F172A"}}>오더 누적 입고 수량</span>
       </div>
-      <div style={{fontSize:13,fontWeight:600,color:"#3B82F6"}}>{new Date().toLocaleDateString("ko-KR",{year:"numeric",month:"long",day:"numeric"})}</div>
+      <div style={{fontSize:15,fontWeight:600,color:"#3B82F6"}}>{new Date().toLocaleDateString("ko-KR",{year:"numeric",month:"long",day:"numeric"})}</div>
     </div>
 
     {/* 안내 */}
-    <div style={{padding:"12px 20px",borderRadius:10,background:"#EFF6FF",border:"1px solid #BFDBFE",marginBottom:16,fontSize:12,color:"#1E40AF"}}>
+    <div style={{padding:"12px 20px",borderRadius:10,background:"#EFF6FF",border:"1px solid #BFDBFE",marginBottom:16,fontSize:14,color:"#1E40AF"}}>
       📋 작업지시서를 업로드하면 상품별 총 오더 수량이 자동 정리됩니다. 이후 패킹리스트 파일을 날짜별로 업로드하면 입고 수량이 누적됩니다.
     </div>
 
     {/* 하단 버튼 영역 */}
     <div style={{display:"flex",gap:10,marginBottom:16,alignItems:"center",flexWrap:"wrap"}}>
       <div style={{display:"flex",alignItems:"center",gap:6}}>
-        <span style={{fontSize:12,color:"#64748B"}}>입고날짜</span>
+        <span style={{fontSize:14,color:"#64748B"}}>입고날짜</span>
         <Input type="date" value={plDate} onChange={e=>setPlDate(e.target.value)} style={{width:150}} />
       </div>
       <SmallBtn primary onClick={()=>plRef.current?.click()}>📦 패킹리스트 업로드</SmallBtn>
@@ -2212,27 +2212,27 @@ function OrderTrackingTab(){
     {/* 전체 현황 카드 */}
     {totalOrder>0&&<div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:16}}>
       <div style={{padding:"14px 16px",borderRadius:10,background:"#F8FAFC",border:"1px solid #E2E8F0",textAlign:"center"}}>
-        <div style={{fontSize:10,fontWeight:600,color:"#94A3B8",textTransform:"uppercase"}}>총 오더</div>
-        <div style={{fontSize:24,fontWeight:800,color:"#1E293B",marginTop:2}}>{totalOrder.toLocaleString()}<span style={{fontSize:11,color:"#94A3B8"}}> pcs</span></div>
+        <div style={{fontSize:12,fontWeight:600,color:"#94A3B8",textTransform:"uppercase"}}>총 오더</div>
+        <div style={{fontSize:26,fontWeight:800,color:"#1E293B",marginTop:2}}>{totalOrder.toLocaleString()}<span style={{fontSize:13,color:"#94A3B8"}}> pcs</span></div>
       </div>
       <div style={{padding:"14px 16px",borderRadius:10,background:"#F0FDF4",border:"1px solid #BBF7D0",textAlign:"center"}}>
-        <div style={{fontSize:10,fontWeight:600,color:"#059669",textTransform:"uppercase"}}>누적 입고</div>
-        <div style={{fontSize:24,fontWeight:800,color:"#059669",marginTop:2}}>{totalInbound.toLocaleString()}<span style={{fontSize:11,color:"#6EE7B7"}}> pcs</span></div>
+        <div style={{fontSize:12,fontWeight:600,color:"#059669",textTransform:"uppercase"}}>누적 입고</div>
+        <div style={{fontSize:26,fontWeight:800,color:"#059669",marginTop:2}}>{totalInbound.toLocaleString()}<span style={{fontSize:13,color:"#6EE7B7"}}> pcs</span></div>
       </div>
       <div style={{padding:"14px 16px",borderRadius:10,background:totalRemain>0?"#FEF2F2":"#F0FDF4",border:"1px solid "+(totalRemain>0?"#FECACA":"#BBF7D0"),textAlign:"center"}}>
-        <div style={{fontSize:10,fontWeight:600,color:totalRemain>0?"#DC2626":"#059669",textTransform:"uppercase"}}>잔여 수량</div>
-        <div style={{fontSize:24,fontWeight:800,color:totalRemain>0?"#DC2626":"#059669",marginTop:2}}>{totalRemain.toLocaleString()}<span style={{fontSize:11,color:"#94A3B8"}}> pcs</span></div>
+        <div style={{fontSize:12,fontWeight:600,color:totalRemain>0?"#DC2626":"#059669",textTransform:"uppercase"}}>잔여 수량</div>
+        <div style={{fontSize:26,fontWeight:800,color:totalRemain>0?"#DC2626":"#059669",marginTop:2}}>{totalRemain.toLocaleString()}<span style={{fontSize:13,color:"#94A3B8"}}> pcs</span></div>
       </div>
       <div style={{padding:"14px 16px",borderRadius:10,background:"#EFF6FF",border:"1px solid #BFDBFE",textAlign:"center"}}>
-        <div style={{fontSize:10,fontWeight:600,color:"#2563EB",textTransform:"uppercase"}}>입고율</div>
-        <div style={{fontSize:24,fontWeight:800,color:"#2563EB",marginTop:2}}>{totalProgress}%</div>
+        <div style={{fontSize:12,fontWeight:600,color:"#2563EB",textTransform:"uppercase"}}>입고율</div>
+        <div style={{fontSize:26,fontWeight:800,color:"#2563EB",marginTop:2}}>{totalProgress}%</div>
         <div style={{marginTop:4,height:5,background:"#E2E8F0",borderRadius:3}}><div style={{height:"100%",borderRadius:3,background:totalProgress>=100?"#059669":"#2563EB",width:Math.min(totalProgress,100)+"%"}} /></div>
       </div>
     </div>}
 
     {/* 시즌 탭 */}
     {seasons.length>1&&<div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
-      {seasons.map(s=>(<div key={s} onClick={()=>setActiveSeason(s)} style={{padding:"6px 16px",borderRadius:8,fontSize:12,fontWeight:activeSeason===s?700:500,
+      {seasons.map(s=>(<div key={s} onClick={()=>setActiveSeason(s)} style={{padding:"6px 16px",borderRadius:8,fontSize:14,fontWeight:activeSeason===s?700:500,
         color:activeSeason===s?"#FFF":s==="전체"?"#334155":"#2563EB",
         background:activeSeason===s?(s==="전체"?"#1E293B":"#2563EB"):(s==="전체"?"#F1F5F9":"#EFF6FF"),
         border:`1px solid ${activeSeason===s?"transparent":"#E2E8F0"}`,cursor:"pointer",transition:"all 0.15s"}}>{s}</div>))}
@@ -2241,7 +2241,7 @@ function OrderTrackingTab(){
     {/* 검색 */}
     {orderSummary.length>0&&<div style={{marginBottom:12,display:"flex",gap:8,alignItems:"center"}}>
       <Input value={search} onChange={e=>setSearch(e.target.value)} placeholder="상품명/컬러/스타일NO 검색..." style={{maxWidth:300}} />
-      <span style={{fontSize:12,color:"#64748B"}}>{filtered.length}건{activeSeason!=="전체"?" ("+activeSeason+")":""}</span>
+      <span style={{fontSize:14,color:"#64748B"}}>{filtered.length}건{activeSeason!=="전체"?" ("+activeSeason+")":""}</span>
     </div>}
 
     {/* 오더/입고 테이블 */}
@@ -2250,8 +2250,8 @@ function OrderTrackingTab(){
         {filtered.map((r,i)=>(
           <tr key={i} style={{background:r.remainQty<=0?"#F0FDF408":r.progress<30?"#FEF2F208":"transparent"}}>
             <Td style={{fontWeight:600,maxWidth:150,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.name}</Td>
-            <Td style={{fontFamily:"monospace",fontSize:11}}>{r.styleNo}</Td>
-            <Td style={{fontSize:11}}>{(r.supplier||"").length>8?(r.supplier||"").slice(0,8)+"…":r.supplier}</Td>
+            <Td style={{fontFamily:"monospace",fontSize:13}}>{r.styleNo}</Td>
+            <Td style={{fontSize:13}}>{(r.supplier||"").length>8?(r.supplier||"").slice(0,8)+"…":r.supplier}</Td>
             <Td style={{fontWeight:600}}>{r.color}</Td>
             <Td>{r.size}</Td>
             <Td style={{fontWeight:700}}>{r.orderQty.toLocaleString()}</Td>
@@ -2259,29 +2259,29 @@ function OrderTrackingTab(){
             <Td style={{fontWeight:700,color:r.remainQty>0?"#DC2626":"#059669"}}>{r.remainQty.toLocaleString()}</Td>
             <Td><div style={{display:"flex",alignItems:"center",gap:6}}>
               <div style={{flex:1,height:6,background:"#F1F5F9",borderRadius:3,maxWidth:50}}><div style={{height:"100%",borderRadius:3,background:r.progress>=100?"#059669":r.progress>=50?"#2563EB":"#DC2626",width:Math.min(r.progress,100)+"%"}} /></div>
-              <span style={{fontSize:11,fontWeight:600,color:r.progress>=100?"#059669":r.progress>=50?"#2563EB":"#DC2626",whiteSpace:"nowrap"}}>{r.progress}%</span>
+              <span style={{fontSize:13,fontWeight:600,color:r.progress>=100?"#059669":r.progress>=50?"#2563EB":"#DC2626",whiteSpace:"nowrap"}}>{r.progress}%</span>
             </div></Td>
-            <Td>{r.inboundHistory.length>0?(<div style={{display:"flex",gap:3,flexWrap:"wrap"}}>{r.inboundHistory.map((h,j)=>(<span key={j} style={{fontSize:9,padding:"2px 5px",borderRadius:3,background:"#EFF6FF",color:"#2563EB",fontWeight:600,whiteSpace:"nowrap"}}>{(h.date||"").slice(5)} {h.qty}</span>))}</div>):<span style={{fontSize:11,color:"#94A3B8"}}>-</span>}</Td>
+            <Td>{r.inboundHistory.length>0?(<div style={{display:"flex",gap:3,flexWrap:"wrap"}}>{r.inboundHistory.map((h,j)=>(<span key={j} style={{fontSize:11,padding:"2px 5px",borderRadius:3,background:"#EFF6FF",color:"#2563EB",fontWeight:600,whiteSpace:"nowrap"}}>{(h.date||"").slice(5)} {h.qty}</span>))}</div>):<span style={{fontSize:13,color:"#94A3B8"}}>-</span>}</Td>
           </tr>))}
       </Table>
     ):orders.length===0?(
       <div style={{padding:60,textAlign:"center",color:"#94A3B8"}}>
-        <div style={{fontSize:40,marginBottom:12}}>📋</div>
-        <div style={{fontSize:14}}>작업지시서 엑셀 파일을 업로드하면 오더 데이터가 자동 정리됩니다.</div>
+        <div style={{fontSize:42,marginBottom:12}}>📋</div>
+        <div style={{fontSize:16}}>작업지시서 엑셀 파일을 업로드하면 오더 데이터가 자동 정리됩니다.</div>
       </div>
     ):(
-      <div style={{padding:30,textAlign:"center",color:"#94A3B8",fontSize:13}}>검색 결과가 없습니다.</div>
+      <div style={{padding:30,textAlign:"center",color:"#94A3B8",fontSize:15}}>검색 결과가 없습니다.</div>
     )}
 
     {/* 날짜/패킹별 입고 이력 */}
     {inboundByDate.length>0&&<div style={{marginTop:20}}>
-      <div style={{fontSize:14,fontWeight:700,color:"#0F172A",marginBottom:10}}>📅 입고 이력</div>
+      <div style={{fontSize:16,fontWeight:700,color:"#0F172A",marginBottom:10}}>📅 입고 이력</div>
       {inboundByDate.map((d,i)=>(<div key={i} style={{padding:"12px 16px",borderRadius:8,background:"#F8FAFC",border:"1px solid #E2E8F0",marginBottom:8}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-          <span style={{fontSize:13,fontWeight:700,color:"#1E293B"}}>{d.label} {d.date&&d.label!==d.date?`(${d.date})`:""}</span>
+          <span style={{fontSize:15,fontWeight:700,color:"#1E293B"}}>{d.label} {d.date&&d.label!==d.date?`(${d.date})`:""}</span>
           <Badge color="#059669">총 {d.totalQty.toLocaleString()}pcs</Badge>
         </div>
-        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{d.items.slice(0,10).map((item,j)=>(<span key={j} style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"#EFF6FF",color:"#1E40AF",fontWeight:600}}>{item.product_name||item.color} {item.size} {item.qty}pcs</span>))}{d.items.length>10&&<span style={{fontSize:10,color:"#94A3B8"}}>+{d.items.length-10}건</span>}</div>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{d.items.slice(0,10).map((item,j)=>(<span key={j} style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#EFF6FF",color:"#1E40AF",fontWeight:600}}>{item.product_name||item.color} {item.size} {item.qty}pcs</span>))}{d.items.length>10&&<span style={{fontSize:12,color:"#94A3B8"}}>+{d.items.length-10}건</span>}</div>
       </div>))}
     </div>}
 
@@ -2292,9 +2292,9 @@ function OrderTrackingTab(){
         onDragLeave={e=>{e.currentTarget.style.borderColor="#FDE68A";}}
         onDrop={e=>{e.preventDefault();e.currentTarget.style.borderColor="#FDE68A";if(e.dataTransfer.files[0]){setWoFileName(e.dataTransfer.files[0].name);parseWorkOrder(e.dataTransfer.files[0]);}}}>
         <input ref={woRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={e=>{if(e.target.files[0]){setWoFileName(e.target.files[0].name);parseWorkOrder(e.target.files[0]);}}} />
-        <span style={{fontSize:24}}>📂</span>
-        {woFileName?<span style={{fontSize:13,fontWeight:600,color:"#D97706"}}>{woFileName}</span>
-        :<><span style={{fontSize:13,fontWeight:600,color:"#D97706"}}>작업지시서 엑셀 드래그 또는 클릭</span><span style={{fontSize:11,color:"#94A3B8"}}>.xlsx / .xls</span></>}
+        <span style={{fontSize:26}}>📂</span>
+        {woFileName?<span style={{fontSize:15,fontWeight:600,color:"#D97706"}}>{woFileName}</span>
+        :<><span style={{fontSize:15,fontWeight:600,color:"#D97706"}}>작업지시서 엑셀 드래그 또는 클릭</span><span style={{fontSize:13,color:"#94A3B8"}}>.xlsx / .xls</span></>}
       </div>
     </SectionCard>
   </>);
@@ -2471,14 +2471,14 @@ function PlanningTab(){
     {/* 헤더 + 시즌 탭 */}
     <div style={{background:"#FFF",borderRadius:14,padding:"20px 28px",border:"1px solid #E2E8F0",marginBottom:16}}>
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
-        <span style={{fontSize:20}}>💡</span>
-        <span style={{fontSize:17,fontWeight:700,color:"#0F172A"}}>아이템 기획</span>
-        <span style={{fontSize:12,color:"#64748B",marginLeft:6}}>{seasonItems.length}개 아이템 · {activeSeason}</span>
+        <span style={{fontSize:22}}>💡</span>
+        <span style={{fontSize:19,fontWeight:700,color:"#0F172A"}}>아이템 기획</span>
+        <span style={{fontSize:14,color:"#64748B",marginLeft:6}}>{seasonItems.length}개 아이템 · {activeSeason}</span>
       </div>
       <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
         {seasons.map(s=>(
           <button key={s} onClick={()=>setActiveSeason(s)} style={{
-            padding:"6px 16px",borderRadius:8,fontSize:12,fontWeight:700,cursor:"pointer",
+            padding:"6px 16px",borderRadius:8,fontSize:14,fontWeight:700,cursor:"pointer",
             border:activeSeason===s?"1px solid #1E293B":"1px solid #E2E8F0",
             background:activeSeason===s?"#1E293B":"#FFF",
             color:activeSeason===s?"#FFF":"#475569",letterSpacing:0.3
@@ -2486,7 +2486,7 @@ function PlanningTab(){
         ))}
         <input value={newSeason} onChange={e=>setNewSeason(e.target.value)} placeholder="예: 27SS"
           onKeyDown={e=>{if(e.key==="Enter")addSeason();}}
-          style={{padding:"7px 10px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:12,width:120,outline:"none",marginLeft:6}} />
+          style={{padding:"7px 10px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:14,width:120,outline:"none",marginLeft:6}} />
         <SmallBtn onClick={addSeason}>+ 시즌 추가</SmallBtn>
       </div>
     </div>
@@ -2498,36 +2498,36 @@ function PlanningTab(){
         <SmallBtn onClick={resetApiKey}>🔑 API 키 재설정</SmallBtn>
       </div>
     }>
-      {trendLoading&&<div style={{padding:20,textAlign:"center",color:"#64748B",fontSize:13}}>웹 검색 + 분석 중입니다. 30~60초 소요될 수 있어요...</div>}
-      {trendError&&<div style={{padding:14,background:"#FEF2F2",border:"1px solid #FCA5A5",borderRadius:8,color:"#B91C1C",fontSize:12,whiteSpace:"pre-wrap"}}>❌ {trendError}</div>}
-      {!trendLoading&&!trendError&&!trendData&&<div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:13}}>버튼을 눌러 {activeSeason} 트렌드 분석을 시작하세요. 카테고리별 추천 아이템 / 예상 가격대 / 인기 소재 / 인기 컬러가 표시됩니다.</div>}
+      {trendLoading&&<div style={{padding:20,textAlign:"center",color:"#64748B",fontSize:15}}>웹 검색 + 분석 중입니다. 30~60초 소요될 수 있어요...</div>}
+      {trendError&&<div style={{padding:14,background:"#FEF2F2",border:"1px solid #FCA5A5",borderRadius:8,color:"#B91C1C",fontSize:14,whiteSpace:"pre-wrap"}}>❌ {trendError}</div>}
+      {!trendLoading&&!trendError&&!trendData&&<div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:15}}>버튼을 눌러 {activeSeason} 트렌드 분석을 시작하세요. 카테고리별 추천 아이템 / 예상 가격대 / 인기 소재 / 인기 컬러가 표시됩니다.</div>}
       {trendData&&<>
-        <div style={{padding:"6px 12px",background:"#EFF6FF",border:"1px solid #DBEAFE",borderRadius:6,marginBottom:10,fontSize:11,color:"#1E40AF",fontWeight:600}}>📊 {trendSeason} 트렌드 분석 결과 (Claude + 웹 검색)</div>
+        <div style={{padding:"6px 12px",background:"#EFF6FF",border:"1px solid #DBEAFE",borderRadius:6,marginBottom:10,fontSize:13,color:"#1E40AF",fontWeight:600}}>📊 {trendSeason} 트렌드 분석 결과 (Claude + 웹 검색)</div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:12}}>
           {["상의","하의","아우터","모자","가방"].map(cat=>{
             const d=trendData[cat];if(!d)return null;
             return(<div key={cat} style={{padding:"14px 16px",borderRadius:10,background:"#F8FAFC",border:"1px solid #E2E8F0"}}>
-              <div style={{fontSize:13,fontWeight:800,color:"#0F172A",marginBottom:8}}>{cat}</div>
-              {d.priceRange&&<div style={{fontSize:11,marginBottom:6}}>
+              <div style={{fontSize:15,fontWeight:800,color:"#0F172A",marginBottom:8}}>{cat}</div>
+              {d.priceRange&&<div style={{fontSize:13,marginBottom:6}}>
                 <span style={{color:"#64748B"}}>💰 가격대 </span>
                 <span style={{color:"#1E293B",fontWeight:700}}>{d.priceRange}</span>
               </div>}
               {Array.isArray(d.items)&&d.items.length>0&&<div style={{marginBottom:8}}>
-                <div style={{fontSize:10,color:"#94A3B8",fontWeight:600,marginBottom:3}}>추천 아이템</div>
+                <div style={{fontSize:12,color:"#94A3B8",fontWeight:600,marginBottom:3}}>추천 아이템</div>
                 <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
-                  {d.items.map((it,i)=>(<span key={i} style={{padding:"2px 8px",borderRadius:4,background:"#DBEAFE",color:"#1E40AF",fontSize:11,fontWeight:600}}>{it}</span>))}
+                  {d.items.map((it,i)=>(<span key={i} style={{padding:"2px 8px",borderRadius:4,background:"#DBEAFE",color:"#1E40AF",fontSize:13,fontWeight:600}}>{it}</span>))}
                 </div>
               </div>}
               {Array.isArray(d.materials)&&d.materials.length>0&&<div style={{marginBottom:6}}>
-                <div style={{fontSize:10,color:"#94A3B8",fontWeight:600,marginBottom:3}}>인기 소재</div>
+                <div style={{fontSize:12,color:"#94A3B8",fontWeight:600,marginBottom:3}}>인기 소재</div>
                 <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
-                  {d.materials.map((m,i)=>(<span key={i} style={{padding:"2px 7px",borderRadius:4,background:"#FEF3C7",color:"#92400E",fontSize:10,fontWeight:600}}>🧵 {m}</span>))}
+                  {d.materials.map((m,i)=>(<span key={i} style={{padding:"2px 7px",borderRadius:4,background:"#FEF3C7",color:"#92400E",fontSize:12,fontWeight:600}}>🧵 {m}</span>))}
                 </div>
               </div>}
               {Array.isArray(d.colors)&&d.colors.length>0&&<div>
-                <div style={{fontSize:10,color:"#94A3B8",fontWeight:600,marginBottom:3}}>인기 컬러</div>
+                <div style={{fontSize:12,color:"#94A3B8",fontWeight:600,marginBottom:3}}>인기 컬러</div>
                 <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
-                  {d.colors.map((c,i)=>(<span key={i} style={{padding:"2px 7px",borderRadius:4,background:"#F0FDF4",color:"#15803D",fontSize:10,fontWeight:600}}>🎨 {c}</span>))}
+                  {d.colors.map((c,i)=>(<span key={i} style={{padding:"2px 7px",borderRadius:4,background:"#F0FDF4",color:"#15803D",fontSize:12,fontWeight:600}}>🎨 {c}</span>))}
                 </div>
               </div>}
             </div>);
@@ -2540,10 +2540,10 @@ function PlanningTab(){
     <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:10,marginBottom:16,marginTop:16}}>
       {categorySummary.map(c=>(
         <div key={c.category} style={{padding:"12px 14px",borderRadius:12,background:"#FFF",border:"1px solid #E2E8F0"}}>
-          <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>{c.category}</div>
-          <div style={{fontSize:18,fontWeight:800,color:"#1E293B"}}>{c.count}<span style={{fontSize:11,fontWeight:500,color:"#94A3B8",marginLeft:3}}>건</span></div>
-          <div style={{fontSize:11,color:"#3B82F6",fontWeight:600,marginTop:4}}>평균가 {c.avgPrice.toLocaleString()}원</div>
-          <div style={{fontSize:10,color:"#94A3B8"}}>원가 {c.avgCost.toLocaleString()}원</div>
+          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>{c.category}</div>
+          <div style={{fontSize:20,fontWeight:800,color:"#1E293B"}}>{c.count}<span style={{fontSize:13,fontWeight:500,color:"#94A3B8",marginLeft:3}}>건</span></div>
+          <div style={{fontSize:13,color:"#3B82F6",fontWeight:600,marginTop:4}}>평균가 {c.avgPrice.toLocaleString()}원</div>
+          <div style={{fontSize:12,color:"#94A3B8"}}>원가 {c.avgCost.toLocaleString()}원</div>
         </div>
       ))}
     </div>
@@ -2552,43 +2552,43 @@ function PlanningTab(){
     <SectionCard title="✏️ 레퍼런스 등록">
       <div style={{display:"grid",gridTemplateColumns:"1.5fr 110px 1.5fr 1.5fr 110px 110px",gap:10,alignItems:"end",marginBottom:10}}>
         <div>
-          <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>상품명</div>
+          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>상품명</div>
           <Input value={fName} onChange={e=>setFName(e.target.value)} placeholder="상품명" />
         </div>
         <div>
-          <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>카테고리</div>
-          <select value={fCategory} onChange={e=>setFCategory(e.target.value)} style={{width:"100%",padding:"7px 10px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:13,outline:"none",background:"#F8FAFC"}}>
+          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>카테고리</div>
+          <select value={fCategory} onChange={e=>setFCategory(e.target.value)} style={{width:"100%",padding:"7px 10px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:15,outline:"none",background:"#F8FAFC"}}>
             {PLANNING_CATEGORIES.map(c=><option key={c}>{c}</option>)}
           </select>
         </div>
         <div>
-          <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>레퍼런스 URL</div>
+          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>레퍼런스 URL</div>
           <Input value={fRefUrl} onChange={e=>setFRefUrl(e.target.value)} placeholder="https://..." />
         </div>
         <div>
-          <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>이미지 URL</div>
+          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>이미지 URL</div>
           <Input value={fImageUrl} onChange={e=>setFImageUrl(e.target.value)} placeholder="https://..." />
         </div>
         <div>
-          <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>예상 판매가</div>
+          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>예상 판매가</div>
           <Input type="number" value={fPrice} onChange={e=>setFPrice(e.target.value)} placeholder="원" />
         </div>
         <div>
-          <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>예상 원가</div>
+          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>예상 원가</div>
           <Input type="number" value={fCost} onChange={e=>setFCost(e.target.value)} placeholder="원" />
         </div>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 2fr 100px",gap:10,alignItems:"end"}}>
         <div>
-          <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>소재</div>
+          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>소재</div>
           <Input value={fMaterial} onChange={e=>setFMaterial(e.target.value)} placeholder="예: 면 100%" />
         </div>
         <div>
-          <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>컬러</div>
+          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>컬러</div>
           <Input value={fColors} onChange={e=>setFColors(e.target.value)} placeholder="예: 블랙, 화이트" />
         </div>
         <div>
-          <div style={{fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4}}>메모</div>
+          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>메모</div>
           <Input value={fNote} onChange={e=>setFNote(e.target.value)} placeholder="추가 메모" />
         </div>
         <SmallBtn primary onClick={addPlanning}>✅ 등록</SmallBtn>
@@ -2597,9 +2597,9 @@ function PlanningTab(){
 
     {/* 카테고리 필터 */}
     <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
-      <span style={{fontSize:12,fontWeight:600,color:"#64748B",marginRight:4}}>카테고리:</span>
+      <span style={{fontSize:14,fontWeight:600,color:"#64748B",marginRight:4}}>카테고리:</span>
       <button onClick={()=>setCatFilter("all")} style={{
-        padding:"6px 12px",borderRadius:6,fontSize:12,fontWeight:600,cursor:"pointer",
+        padding:"6px 12px",borderRadius:6,fontSize:14,fontWeight:600,cursor:"pointer",
         border:catFilter==="all"?"1px solid #1E293B":"1px solid #E2E8F0",
         background:catFilter==="all"?"#1E293B":"#FFF",color:catFilter==="all"?"#FFF":"#475569"
       }}>전체 ({seasonItems.length})</button>
@@ -2608,7 +2608,7 @@ function PlanningTab(){
         if(cnt===0)return null;
         const active=catFilter===c;
         return(<button key={c} onClick={()=>setCatFilter(c)} style={{
-          padding:"6px 12px",borderRadius:6,fontSize:12,fontWeight:600,cursor:"pointer",
+          padding:"6px 12px",borderRadius:6,fontSize:14,fontWeight:600,cursor:"pointer",
           border:active?"1px solid #1E293B":"1px solid #E2E8F0",
           background:active?"#1E293B":"#FFF",color:active?"#FFF":"#475569"
         }}>{c} ({cnt})</button>);
@@ -2617,35 +2617,35 @@ function PlanningTab(){
 
     {/* 갤러리 */}
     {filtered.length===0?(
-      <SectionCard><div style={{padding:40,textAlign:"center",color:"#94A3B8",fontSize:13}}>등록된 아이템이 없습니다. 위에서 레퍼런스를 등록해보세요.</div></SectionCard>
+      <SectionCard><div style={{padding:40,textAlign:"center",color:"#94A3B8",fontSize:15}}>등록된 아이템이 없습니다. 위에서 레퍼런스를 등록해보세요.</div></SectionCard>
     ):(<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:14}}>
       {filtered.map(p=>{
         const sc=PLANNING_STATUS_COLORS[p.status||"아이디어"];
         return(<div key={p.id} style={{background:"#FFF",borderRadius:12,border:"1px solid #E2E8F0",overflow:"hidden",position:"relative",transition:"transform 0.15s"}}>
-          <button onClick={()=>delPlanning(p.id)} style={{position:"absolute",top:6,right:6,width:24,height:24,background:"rgba(255,255,255,0.92)",border:"1px solid #E2E8F0",borderRadius:"50%",cursor:"pointer",fontSize:14,color:"#94A3B8",zIndex:2,lineHeight:1}}>×</button>
+          <button onClick={()=>delPlanning(p.id)} style={{position:"absolute",top:6,right:6,width:24,height:24,background:"rgba(255,255,255,0.92)",border:"1px solid #E2E8F0",borderRadius:"50%",cursor:"pointer",fontSize:16,color:"#94A3B8",zIndex:2,lineHeight:1}}>×</button>
           <div style={{height:200,background:"#F8FAFC",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
             {p.image_url?
               <img src={p.image_url} alt={p.name} style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{e.currentTarget.style.display="none";}} />
-              :<div style={{fontSize:36,color:"#CBD5E1"}}>🖼️</div>}
+              :<div style={{fontSize:38,color:"#CBD5E1"}}>🖼️</div>}
           </div>
           <div style={{padding:"10px 12px"}}>
-            <div style={{fontSize:10,color:"#94A3B8",fontWeight:600,marginBottom:2,textTransform:"uppercase",letterSpacing:0.3}}>{p.category||"-"}</div>
-            <div style={{fontSize:13,fontWeight:700,color:"#0F172A",marginBottom:4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={p.name}>{p.name}</div>
-            <div style={{fontSize:11,color:"#475569",marginBottom:6}}>
+            <div style={{fontSize:12,color:"#94A3B8",fontWeight:600,marginBottom:2,textTransform:"uppercase",letterSpacing:0.3}}>{p.category||"-"}</div>
+            <div style={{fontSize:15,fontWeight:700,color:"#0F172A",marginBottom:4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={p.name}>{p.name}</div>
+            <div style={{fontSize:13,color:"#475569",marginBottom:6}}>
               {p.est_price?<><span style={{fontWeight:700,color:"#1E293B"}}>{p.est_price.toLocaleString()}원</span></>:"-"}
               {p.est_cost?<span style={{color:"#94A3B8",marginLeft:4}}>· 원가 {p.est_cost.toLocaleString()}</span>:""}
             </div>
             <div onClick={()=>advanceStatus(p)} title="클릭: 다음 단계로 (아이디어→샘플의뢰→샘플확인→생산확정)" style={{
               display:"inline-flex",alignItems:"center",gap:5,padding:"3px 10px",borderRadius:12,
-              fontSize:10.5,fontWeight:700,cursor:"pointer",userSelect:"none",
+              fontSize:12.5,fontWeight:700,cursor:"pointer",userSelect:"none",
               background:`${sc}15`,color:sc,border:`1px solid ${sc}33`
             }}>● {p.status||"아이디어"}</div>
-            {(p.material||p.colors)&&<div style={{fontSize:10,color:"#64748B",marginTop:6,lineHeight:1.4}}>
+            {(p.material||p.colors)&&<div style={{fontSize:12,color:"#64748B",marginTop:6,lineHeight:1.4}}>
               {p.material&&<div>🧵 {p.material}</div>}
               {p.colors&&<div>🎨 {p.colors}</div>}
             </div>}
-            {p.ref_url&&<a href={p.ref_url} target="_blank" rel="noreferrer" style={{display:"block",marginTop:6,fontSize:10,color:"#3B82F6",textDecoration:"none"}}>🔗 레퍼런스 링크</a>}
-            {p.note&&<div style={{fontSize:10,color:"#94A3B8",marginTop:6,fontStyle:"italic",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={p.note}>{p.note}</div>}
+            {p.ref_url&&<a href={p.ref_url} target="_blank" rel="noreferrer" style={{display:"block",marginTop:6,fontSize:12,color:"#3B82F6",textDecoration:"none"}}>🔗 레퍼런스 링크</a>}
+            {p.note&&<div style={{fontSize:12,color:"#94A3B8",marginTop:6,fontStyle:"italic",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={p.note}>{p.note}</div>}
           </div>
         </div>);
       })}
@@ -2676,7 +2676,7 @@ function ProductMasterTab(){
   const ImgCell=({src})=>(
     <div style={{width:48,height:48,borderRadius:6,overflow:"hidden",background:"#F1F5F9",flexShrink:0,border:"1px solid #E2E8F0"}}>
       {src?<img src={src} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{e.target.style.display="none";e.target.parentNode.innerHTML='<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:16px;color:#CBD5E1">📷</div>';}} />
-      :<div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,color:"#CBD5E1"}}>📷</div>}
+      :<div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,color:"#CBD5E1"}}>📷</div>}
     </div>
   );
 
@@ -2684,11 +2684,11 @@ function ProductMasterTab(){
     <SectionCard title="📋 전체 상품 마스터" subtitle={`전체 ${SKUS.length.toLocaleString()}개 SKU · ${UNIQUE_PRODUCTS.toLocaleString()}개 상품 · 이미지 포함`}
       actions={<div style={{display:"flex",gap:8,alignItems:"center"}}>
         <Input value={search} onChange={e=>{setSearch(e.target.value);setPage(0);}} placeholder="품번/상품명/바코드 검색..." style={{width:200}} />
-        <select value={stockFilter} onChange={e=>{setStockFilter(e.target.value);setPage(0);}} style={{padding:"6px 10px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:12,outline:"none",cursor:"pointer"}}><option value="전체">전체</option><option value="재고있음">재고있음</option><option value="재고없음">재고없음</option><option value="입고대기">입고대기</option></select>
+        <select value={stockFilter} onChange={e=>{setStockFilter(e.target.value);setPage(0);}} style={{padding:"6px 10px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:14,outline:"none",cursor:"pointer"}}><option value="전체">전체</option><option value="재고있음">재고있음</option><option value="재고없음">재고없음</option><option value="입고대기">입고대기</option></select>
         <SmallBtn primary={viewMode==="table"} onClick={()=>{setViewMode("table");setPage(0);}}>📋 리스트</SmallBtn>
         <SmallBtn primary={viewMode==="grid"} onClick={()=>{setViewMode("grid");setPage(0);}}>🖼 갤러리</SmallBtn>
       </div>}>
-      <div style={{marginBottom:8,fontSize:12,color:"#64748B"}}>검색결과: {filtered.length.toLocaleString()}건 · {page+1}/{totalPages||1} 페이지</div>
+      <div style={{marginBottom:8,fontSize:14,color:"#64748B"}}>검색결과: {filtered.length.toLocaleString()}건 · {page+1}/{totalPages||1} 페이지</div>
 
       {viewMode==="grid"?(
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:12,maxHeight:520,overflowY:"auto",padding:2}}>
@@ -2696,19 +2696,19 @@ function ProductMasterTab(){
             <div key={i} style={{borderRadius:10,border:"1px solid #E2E8F0",overflow:"hidden",background:s[F.STOCK]===0?"#FAFAFA":"#FFF",transition:"all 0.15s",boxShadow:"0 1px 3px rgba(0,0,0,0.04)"}}>
               <div style={{width:"100%",height:160,background:"#F1F5F9",overflow:"hidden",position:"relative"}}>
                 {s[F.IMG]?<img src={s[F.IMG]} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{e.target.style.display="none";}} />
-                :<div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:40,color:"#CBD5E1"}}>📷</div>}
-                {s[F.STOCK]===0&&<div style={{position:"absolute",top:6,right:6,padding:"2px 8px",borderRadius:4,background:"#DC2626",color:"#FFF",fontSize:10,fontWeight:700}}>품절</div>}
-                {s[F.STOCK]>0&&s[F.STOCK]<=5&&<div style={{position:"absolute",top:6,right:6,padding:"2px 8px",borderRadius:4,background:"#D97706",color:"#FFF",fontSize:10,fontWeight:700}}>재고부족</div>}
-                {s[F.PENDING]>0&&<div style={{position:"absolute",top:6,left:6,padding:"2px 8px",borderRadius:4,background:"#3B82F6",color:"#FFF",fontSize:10,fontWeight:700}}>입고대기 {s[F.PENDING]}</div>}
+                :<div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:42,color:"#CBD5E1"}}>📷</div>}
+                {s[F.STOCK]===0&&<div style={{position:"absolute",top:6,right:6,padding:"2px 8px",borderRadius:4,background:"#DC2626",color:"#FFF",fontSize:12,fontWeight:700}}>품절</div>}
+                {s[F.STOCK]>0&&s[F.STOCK]<=5&&<div style={{position:"absolute",top:6,right:6,padding:"2px 8px",borderRadius:4,background:"#D97706",color:"#FFF",fontSize:12,fontWeight:700}}>재고부족</div>}
+                {s[F.PENDING]>0&&<div style={{position:"absolute",top:6,left:6,padding:"2px 8px",borderRadius:4,background:"#3B82F6",color:"#FFF",fontSize:12,fontWeight:700}}>입고대기 {s[F.PENDING]}</div>}
               </div>
               <div style={{padding:"10px 12px"}}>
-                <div style={{fontSize:12,fontWeight:700,color:"#0F172A",marginBottom:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{s[F.NAME]}</div>
-                <div style={{fontSize:11,color:"#64748B",marginBottom:4}}>{s[F.OPT]}</div>
+                <div style={{fontSize:14,fontWeight:700,color:"#0F172A",marginBottom:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{s[F.NAME]}</div>
+                <div style={{fontSize:13,color:"#64748B",marginBottom:4}}>{s[F.OPT]}</div>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <span style={{fontFamily:"monospace",fontSize:10,color:"#94A3B8"}}>{s[F.CODE]}</span>
-                  <span style={{fontSize:12,fontWeight:700,color:s[F.STOCK]===0?"#DC2626":s[F.STOCK]<=5?"#D97706":"#059669"}}>재고 {s[F.STOCK]}</span>
+                  <span style={{fontFamily:"monospace",fontSize:12,color:"#94A3B8"}}>{s[F.CODE]}</span>
+                  <span style={{fontSize:14,fontWeight:700,color:s[F.STOCK]===0?"#DC2626":s[F.STOCK]<=5?"#D97706":"#059669"}}>재고 {s[F.STOCK]}</span>
                 </div>
-                <div style={{marginTop:4,fontSize:11,color:"#64748B"}}>₩{s[F.SUPPLY].toLocaleString()}</div>
+                <div style={{marginTop:4,fontSize:13,color:"#64748B"}}>₩{s[F.SUPPLY].toLocaleString()}</div>
               </div>
             </div>
           ))}
@@ -2717,14 +2717,14 @@ function ProductMasterTab(){
         <Table headers={["No.","이미지","대표코드","상품코드","상품명","옵션","바코드","카테고리","원가","공급가","현재고","입고대기"]} maxH={460}>
           {pageData.map((s,i)=>(
             <tr key={i} style={{background:s[F.STOCK]===0&&s[F.PENDING]===0?"#FAFAFA":"transparent"}}>
-              <Td style={{color:"#94A3B8",fontSize:12}}>{page*PER+i+1}</Td>
+              <Td style={{color:"#94A3B8",fontSize:14}}>{page*PER+i+1}</Td>
               <Td style={{padding:"6px 10px"}}><ImgCell src={s[F.IMG]} /></Td>
-              <Td style={{fontFamily:"monospace",fontSize:12}}>{s[F.REP]}</Td>
-              <Td style={{fontFamily:"monospace",fontSize:12,fontWeight:700}}>{s[F.CODE]}</Td>
+              <Td style={{fontFamily:"monospace",fontSize:14}}>{s[F.REP]}</Td>
+              <Td style={{fontFamily:"monospace",fontSize:14,fontWeight:700}}>{s[F.CODE]}</Td>
               <Td style={{fontWeight:600,maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s[F.NAME]}</Td>
               <Td style={{fontWeight:600}}>{s[F.OPT]}</Td>
-              <Td style={{fontFamily:"monospace",fontSize:10}}>{s[F.BC]}</Td>
-              <Td style={{fontSize:11}}>{s[F.CAT]?s[F.CAT].split(">").pop().trim():"-"}</Td>
+              <Td style={{fontFamily:"monospace",fontSize:12}}>{s[F.BC]}</Td>
+              <Td style={{fontSize:13}}>{s[F.CAT]?s[F.CAT].split(">").pop().trim():"-"}</Td>
               <Td>₩{s[F.COST].toLocaleString()}</Td>
               <Td>₩{s[F.SUPPLY].toLocaleString()}</Td>
               <Td style={{fontWeight:700,color:s[F.STOCK]===0?"#DC2626":s[F.STOCK]<=5?"#D97706":"#059669"}}>{s[F.STOCK]}</Td>
@@ -2736,7 +2736,7 @@ function ProductMasterTab(){
 
       <div style={{display:"flex",justifyContent:"center",gap:6,marginTop:14}}>
         <SmallBtn onClick={()=>setPage(Math.max(0,page-1))} primary={page>0}>◀ 이전</SmallBtn>
-        <span style={{padding:"6px 14px",fontSize:12,color:"#64748B"}}>{page+1} / {totalPages||1}</span>
+        <span style={{padding:"6px 14px",fontSize:14,color:"#64748B"}}>{page+1} / {totalPages||1}</span>
         <SmallBtn onClick={()=>setPage(Math.min((totalPages||1)-1,page+1))} primary={page<(totalPages||1)-1}>다음 ▶</SmallBtn>
       </div>
     </SectionCard>
@@ -2813,16 +2813,16 @@ export default function Dashboard(){
         <div style={{padding:"22px 24px",borderRadius:14,background:"linear-gradient(135deg,#EFF6FF 0%,#F5F3FF 100%)",border:"1px solid #BFDBFE",boxShadow:"0 2px 8px rgba(59,130,246,0.08)"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
             <div>
-              <div style={{fontSize:11,fontWeight:600,color:"#6366F1",letterSpacing:0.5,textTransform:"uppercase",marginBottom:6}}>📦 이번주 입고건</div>
-              <div style={{fontSize:36,fontWeight:800,color:"#3B82F6",letterSpacing:-1.5}}>{thisWeekSchedules.length}<span style={{fontSize:14,fontWeight:500,color:"#93C5FD",marginLeft:4}}>건</span></div>
-              <div style={{fontSize:12,color:"#6B7280",marginTop:6}}>총 {thisWeekTotalQty.toLocaleString()}장 입고 예정</div>
+              <div style={{fontSize:13,fontWeight:600,color:"#6366F1",letterSpacing:0.5,textTransform:"uppercase",marginBottom:6}}>📦 이번주 입고건</div>
+              <div style={{fontSize:38,fontWeight:800,color:"#3B82F6",letterSpacing:-1.5}}>{thisWeekSchedules.length}<span style={{fontSize:16,fontWeight:500,color:"#93C5FD",marginLeft:4}}>건</span></div>
+              <div style={{fontSize:14,color:"#6B7280",marginTop:6}}>총 {thisWeekTotalQty.toLocaleString()}장 입고 예정</div>
             </div>
-            <div style={{width:48,height:48,borderRadius:12,background:"#3B82F620",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>📅</div>
+            <div style={{width:48,height:48,borderRadius:12,background:"#3B82F620",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24}}>📅</div>
           </div>
           <div style={{marginTop:14,display:"flex",gap:6,flexWrap:"wrap"}}>
-            {thisWeekSchedules.slice(0,3).map((s,i)=>(<div key={s.id||i} style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"#DBEAFE",color:"#1E40AF",fontWeight:600}}>{(s.item||"").slice(0,8)}… {(s.qty||0).toLocaleString()}장</div>))}
-            {thisWeekSchedules.length>3&&<div style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"#E0E7FF",color:"#4338CA",fontWeight:600}}>+{thisWeekSchedules.length-3}건</div>}
-            {thisWeekSchedules.length===0&&<div style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"#F1F5F9",color:"#94A3B8",fontWeight:600}}>이번주 입고건 없음</div>}
+            {thisWeekSchedules.slice(0,3).map((s,i)=>(<div key={s.id||i} style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#DBEAFE",color:"#1E40AF",fontWeight:600}}>{(s.item||"").slice(0,8)}… {(s.qty||0).toLocaleString()}장</div>))}
+            {thisWeekSchedules.length>3&&<div style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#E0E7FF",color:"#4338CA",fontWeight:600}}>+{thisWeekSchedules.length-3}건</div>}
+            {thisWeekSchedules.length===0&&<div style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#F1F5F9",color:"#94A3B8",fontWeight:600}}>이번주 입고건 없음</div>}
           </div>
         </div>
 
@@ -2830,16 +2830,16 @@ export default function Dashboard(){
         <div style={{padding:"22px 24px",borderRadius:14,background:"linear-gradient(135deg,#FEF2F2 0%,#FFF7ED 100%)",border:"1px solid #FECACA",boxShadow:"0 2px 8px rgba(220,38,38,0.08)"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
             <div>
-              <div style={{fontSize:11,fontWeight:600,color:"#DC2626",letterSpacing:0.5,textTransform:"uppercase",marginBottom:6}}>🔄 리오더 긴급발주</div>
-              {reorderLoading?<div style={{fontSize:14,color:"#94A3B8"}}>불러오는 중...</div>
-              :<div style={{fontSize:36,fontWeight:800,color:"#DC2626",letterSpacing:-1.5}}>{reorderActionItems.length}<span style={{fontSize:14,fontWeight:500,color:"#FCA5A5",marginLeft:4}}>건</span></div>}
-              {!reorderLoading&&<div style={{fontSize:12,color:"#6B7280",marginTop:6}}>긴급 {reorderUrgent.length} · 필요 {reorderWarning.length} · 검토 {reorderReview.length}</div>}
+              <div style={{fontSize:13,fontWeight:600,color:"#DC2626",letterSpacing:0.5,textTransform:"uppercase",marginBottom:6}}>🔄 리오더 긴급발주</div>
+              {reorderLoading?<div style={{fontSize:16,color:"#94A3B8"}}>불러오는 중...</div>
+              :<div style={{fontSize:38,fontWeight:800,color:"#DC2626",letterSpacing:-1.5}}>{reorderActionItems.length}<span style={{fontSize:16,fontWeight:500,color:"#FCA5A5",marginLeft:4}}>건</span></div>}
+              {!reorderLoading&&<div style={{fontSize:14,color:"#6B7280",marginTop:6}}>긴급 {reorderUrgent.length} · 필요 {reorderWarning.length} · 검토 {reorderReview.length}</div>}
             </div>
-            <div style={{width:48,height:48,borderRadius:12,background:"#DC262620",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>🚨</div>
+            <div style={{width:48,height:48,borderRadius:12,background:"#DC262620",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24}}>🚨</div>
           </div>
           {!reorderLoading&&<div style={{marginTop:14,display:"flex",gap:6,flexWrap:"wrap"}}>
-            {reorderActionItems.slice(0,3).map((r,i)=>{const d=Math.round(r.exhaustDays||0);const c=d<=60?"#DC2626":d<=75?"#D97706":"#2563EB";return(<div key={i} style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:`${c}15`,color:c,fontWeight:600}}>{(r.name||"").slice(0,10)} {Math.round(d)}일</div>);})}
-            {reorderActionItems.length>3&&<div style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:"#FEE2E2",color:"#DC2626",fontWeight:600}}>+{reorderActionItems.length-3}건</div>}
+            {reorderActionItems.slice(0,3).map((r,i)=>{const d=Math.round(r.exhaustDays||0);const c=d<=60?"#DC2626":d<=75?"#D97706":"#2563EB";return(<div key={i} style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:`${c}15`,color:c,fontWeight:600}}>{(r.name||"").slice(0,10)} {Math.round(d)}일</div>);})}
+            {reorderActionItems.length>3&&<div style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#FEE2E2",color:"#DC2626",fontWeight:600}}>+{reorderActionItems.length-3}건</div>}
           </div>}
         </div>
 
@@ -2847,14 +2847,14 @@ export default function Dashboard(){
         <div style={{padding:"22px 24px",borderRadius:14,background:"linear-gradient(135deg,#F0FDF4 0%,#ECFDF5 100%)",border:"1px solid #BBF7D0",boxShadow:"0 2px 8px rgba(16,185,129,0.08)"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
             <div>
-              <div style={{fontSize:11,fontWeight:600,color:"#059669",letterSpacing:0.5,textTransform:"uppercase",marginBottom:6}}>🧪 샘플 진행건</div>
-              <div style={{fontSize:36,fontWeight:800,color:"#10B981",letterSpacing:-1.5}}>6<span style={{fontSize:14,fontWeight:500,color:"#6EE7B7",marginLeft:4}}>건</span></div>
-              <div style={{fontSize:12,color:"#6B7280",marginTop:6}}>진행중 5 · 승인완료 1</div>
+              <div style={{fontSize:13,fontWeight:600,color:"#059669",letterSpacing:0.5,textTransform:"uppercase",marginBottom:6}}>🧪 샘플 진행건</div>
+              <div style={{fontSize:38,fontWeight:800,color:"#10B981",letterSpacing:-1.5}}>6<span style={{fontSize:16,fontWeight:500,color:"#6EE7B7",marginLeft:4}}>건</span></div>
+              <div style={{fontSize:14,color:"#6B7280",marginTop:6}}>진행중 5 · 승인완료 1</div>
             </div>
-            <div style={{width:48,height:48,borderRadius:12,background:"#10B98120",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>🧪</div>
+            <div style={{width:48,height:48,borderRadius:12,background:"#10B98120",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24}}>🧪</div>
           </div>
           <div style={{marginTop:14,display:"flex",gap:6,flexWrap:"wrap"}}>
-            {[["샘플제작중",2,"#3B82F6"],["배송중",1,"#8B5CF6"],["검수완료",1,"#10B981"],["원단확인",1,"#F59E0B"]].map(([st,cnt,c],i)=>(<div key={i} style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:`${c}18`,color:c,fontWeight:600}}>{st} {cnt}</div>))}
+            {[["샘플제작중",2,"#3B82F6"],["배송중",1,"#8B5CF6"],["검수완료",1,"#10B981"],["원단확인",1,"#F59E0B"]].map(([st,cnt,c],i)=>(<div key={i} style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:`${c}18`,color:c,fontWeight:600}}>{st} {cnt}</div>))}
           </div>
         </div>
       </div>
@@ -2863,7 +2863,7 @@ export default function Dashboard(){
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
         {/* 왼쪽: 리오더 발주 필요 품목 */}
         <SectionCard title="🔄 리오더 — 발주 필요 품목">
-          {reorderLoading?<div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:13}}>⏳ 구글시트 데이터 불러오는 중...</div>
+          {reorderLoading?<div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:15}}>⏳ 구글시트 데이터 불러오는 중...</div>
           :reorderActionItems.length>0?reorderActionItems.slice(0,8).map((r,i)=>{
             const d=Math.round(r.exhaustDays||0);
             const st=d<=60?"긴급발주":d<=75?"발주필요":"발주검토";
@@ -2875,43 +2875,43 @@ export default function Dashboard(){
                 {skuImgMap[r.code]&&<div style={{width:36,height:36,borderRadius:6,overflow:"hidden",border:"1px solid #E2E8F0",flexShrink:0}}><img src={skuImgMap[r.code]} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{e.target.style.display="none";}}/></div>}
                 <div>
                   <div style={{display:"flex",alignItems:"center",gap:6}}>
-                    <span style={{padding:"1px 6px",borderRadius:3,fontSize:9,fontWeight:700,color:stColor,background:`${stColor}15`}}>{st}</span>
-                    <span style={{fontSize:12,fontWeight:700,color:"#334155"}}>{r.name}</span>
+                    <span style={{padding:"1px 6px",borderRadius:3,fontSize:11,fontWeight:700,color:stColor,background:`${stColor}15`}}>{st}</span>
+                    <span style={{fontSize:14,fontWeight:700,color:"#334155"}}>{r.name}</span>
                   </div>
-                  <div style={{fontSize:11,color:"#6B7280",marginTop:1}}>{r.code} {r.option} · 소진 {d}일</div>
+                  <div style={{fontSize:13,color:"#6B7280",marginTop:1}}>{r.code} {r.option} · 소진 {d}일</div>
                 </div>
               </div>
               <div style={{textAlign:"right"}}>
-                <div style={{fontSize:16,fontWeight:800,color:stColor}}>{Math.round(r.stock)}개</div>
-                <div style={{fontSize:10,color:"#94A3B8"}}>현재고</div>
+                <div style={{fontSize:18,fontWeight:800,color:stColor}}>{Math.round(r.stock)}개</div>
+                <div style={{fontSize:12,color:"#94A3B8"}}>현재고</div>
               </div>
             </div>);
-          }):<div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:13}}>발주 필요 항목이 없습니다</div>}
-          {reorderActionItems.length>8&&<div style={{textAlign:"center",fontSize:12,color:"#94A3B8",marginTop:4,cursor:"pointer"}} onClick={()=>setActiveTab("reorder")}>외 {reorderActionItems.length-8}건 더보기 → 리오더 탭</div>}
+          }):<div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:15}}>발주 필요 항목이 없습니다</div>}
+          {reorderActionItems.length>8&&<div style={{textAlign:"center",fontSize:14,color:"#94A3B8",marginTop:4,cursor:"pointer"}} onClick={()=>setActiveTab("reorder")}>외 {reorderActionItems.length-8}건 더보기 → 리오더 탭</div>}
         </SectionCard>
 
         {/* 오른쪽: 입고대기 현황 + 샘플 진행 현황 */}
         <div>
           <SectionCard title="📦 입고대기 현황" subtitle={`${pendingSchedules.length}건 · 총 ${pendingTotalQty.toLocaleString()}장`}>
             {pendingSchedules.length===0?(
-              <div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:13}}>입고 대기 일정이 없습니다</div>
+              <div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:15}}>입고 대기 일정이 없습니다</div>
             ):(<div style={{maxHeight:340,overflowY:"auto",paddingRight:2}}>
               {pendingSchedules.map((s,i)=>{
                 const confirmed=s.status==="입고확정";
                 const sup=SCHEDULE_SUP_STYLES[s.supplier]||{color:"#64748B",bg:"#F8FAFC",icon:"📦"};
                 return(<div key={s.id||i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",borderRadius:8,marginBottom:6,background:sup.bg,border:`1px solid ${sup.color}33`,borderLeft:`4px solid ${sup.color}`}}>
                   <div style={{minWidth:0,flex:1}}>
-                    <div style={{fontSize:13,fontWeight:600,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                    <div style={{fontSize:15,fontWeight:600,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                       <span style={{marginRight:4}}>{confirmed?"🟢":"🟡"}</span>{translateItemName(s.item)||"(상품명)"}
                     </div>
-                    <div style={{fontSize:11,color:"#64748B",marginTop:2,display:"flex",alignItems:"center",gap:4}}>
+                    <div style={{fontSize:13,color:"#64748B",marginTop:2,display:"flex",alignItems:"center",gap:4}}>
                       <span>{s.kr_date||s.date||"-"}</span>
                       <span style={{color:sup.color,fontWeight:700}}>· {sup.icon} {s.supplier||"-"}</span>
                     </div>
                   </div>
                   <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>
-                    <div style={{fontSize:15,fontWeight:700,color:sup.color}}>{(s.qty||0).toLocaleString()}장</div>
-                    <div style={{fontSize:10,color:confirmed?"#15803D":"#B45309",fontWeight:600}}>{confirmed?"입고 확정":"입고 일정 확인중"}</div>
+                    <div style={{fontSize:17,fontWeight:700,color:sup.color}}>{(s.qty||0).toLocaleString()}장</div>
+                    <div style={{fontSize:12,color:confirmed?"#15803D":"#B45309",fontWeight:600}}>{confirmed?"입고 확정":"입고 일정 확인중"}</div>
                   </div>
                 </div>);
               })}
@@ -2923,8 +2923,8 @@ export default function Dashboard(){
               {SAMPLE_STATUSES.map(st=>{
                 const count=[0,1,2,1,1,1][SAMPLE_STATUSES.indexOf(st)];
                 return(<div key={st} style={{flex:"1 1 70px",textAlign:"center",padding:"10px 6px",borderRadius:8,background:`${STATUS_COLORS[st]}10`}}>
-                  <div style={{fontSize:20,fontWeight:800,color:STATUS_COLORS[st]}}>{count}</div>
-                  <div style={{fontSize:9,color:STATUS_COLORS[st],fontWeight:600,marginTop:2}}>{st}</div>
+                  <div style={{fontSize:22,fontWeight:800,color:STATUS_COLORS[st]}}>{count}</div>
+                  <div style={{fontSize:11,color:STATUS_COLORS[st],fontWeight:600,marginTop:2}}>{st}</div>
                 </div>);
               })}
             </div>
