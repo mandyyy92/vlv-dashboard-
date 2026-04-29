@@ -2446,6 +2446,11 @@ function PlanningTab(){
       if(!res.ok)throw new Error(`HTTP ${res.status}`);
       const data=await res.json();
       const list=Array.isArray(data?.trends)?data.trends:Array.isArray(data)?data:[];
+      // TODO: 디버그 후 제거
+      if(list&&list.length>0){
+        console.log('[무신사 응답 첫 아이템 키]',Object.keys(list[0]));
+        console.log('[무신사 응답 첫 아이템 샘플]',list[0]);
+      }
       setTrendData(list);
     }catch(e){
       console.error("Trend load error:",e);
@@ -2455,25 +2460,32 @@ function PlanningTab(){
     }
   };
 
-  // 응답 필드 정규화 헬퍼
-  const t_image=(it)=>it.image||it.image_url||it.imageUrl||it.thumbnail||"";
-  const t_name=(it)=>it.name||it.title||"-";
-  const t_brand=(it)=>it.brand||it.maker||"";
-  const t_category=(it)=>it.category||it.category1||"";
-  const t_mall=(it)=>it.mall||it.mallName||it.shop||"";
-  const t_link=(it)=>it.link||it.url||it.ref_url||"";
-  const t_keyword=(it)=>it.keyword||it.searchKeyword||"";
+  // 응답 필드 정규화 헬퍼 — 한글 키(Apps Script) 우선, 영문 키 fallback
+  const parseKrPrice=(v)=>{
+    if(v==null)return 0;
+    if(typeof v==="number")return v;
+    return parseInt(String(v).replace(/[^0-9]/g,""))||0;
+  };
+  const t_image=(it)=>it["이미지"]||it["이미지URL"]||it.image||it.image_url||it.imageUrl||it.thumbnail||"";
+  const t_name=(it)=>it["상품명"]||it["제목"]||it.name||it.title||"";
+  const t_brand=(it)=>it["브랜드"]||it["판매처"]||it.brand||it.maker||it.mallName||it.seller||"";
+  const t_category=(it)=>it["카테고리"]||it["분류"]||it.category||it.category1||"";
+  const t_mall=(it)=>it["쇼핑몰"]||it.mall||it.mallName||it.shop||"";
+  const t_link=(it)=>it["링크"]||it["URL"]||it.url||it.link||it.productUrl||it.ref_url||"";
+  const t_keyword=(it)=>it["키워드"]||it["검색어"]||it.keyword||it.searchKeyword||it.searchTerm||"";
   const t_priceMin=(it)=>{
-    if(it.priceMin!=null)return parseInt(it.priceMin)||0;
-    if(it.lprice!=null)return parseInt(it.lprice)||0;
-    if(it.price&&typeof it.price==="object")return parseInt(it.price.min)||0;
-    if(it.price!=null)return parseInt(it.price)||0;
+    for(const k of ["최저가","가격","판매가","priceMin","lprice"]){
+      const v=it[k];if(v!=null){const n=parseKrPrice(v);if(n)return n;}
+    }
+    if(it.price&&typeof it.price==="object")return parseKrPrice(it.price.min);
+    if(it.price!=null)return parseKrPrice(it.price);
     return 0;
   };
   const t_priceMax=(it)=>{
-    if(it.priceMax!=null)return parseInt(it.priceMax)||0;
-    if(it.hprice!=null)return parseInt(it.hprice)||0;
-    if(it.price&&typeof it.price==="object")return parseInt(it.price.max)||0;
+    for(const k of ["최고가","정가","priceMax","hprice"]){
+      const v=it[k];if(v!=null){const n=parseKrPrice(v);if(n)return n;}
+    }
+    if(it.price&&typeof it.price==="object")return parseKrPrice(it.price.max);
     return 0;
   };
   const t_priceLabel=(it)=>{
@@ -2483,17 +2495,21 @@ function PlanningTab(){
     return "";
   };
 
-  // 카테고리 목록 (필터 탭용 — 데이터에서 자동 추출)
+  // 필터 탭용 키워드 목록 (사용자가 등록한 검색 키워드 기준)
   const trendCategories=useMemo(()=>{
     const set=new Set();
-    trendData.forEach(it=>{const c=t_category(it);if(c)set.add(c);});
+    trendData.forEach(it=>{const k=t_keyword(it);if(k)set.add(k);});
     return Array.from(set);
   },[trendData]);
 
-  // 카테고리 필터 적용
+  // 필터 적용 — 키워드 일치, 키워드 필드 없으면 상품명 includes 로 fallback
   const filteredTrends=useMemo(()=>{
     if(trendCatFilter==="all")return trendData;
-    return trendData.filter(it=>t_category(it)===trendCatFilter);
+    return trendData.filter(it=>{
+      const kw=t_keyword(it);
+      if(kw)return kw===trendCatFilter;
+      return t_name(it).includes(trendCatFilter);
+    });
   },[trendData,trendCatFilter]);
 
   // 무신사 카테고리 → planning 카테고리 자동 매핑
