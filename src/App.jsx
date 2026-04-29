@@ -1277,32 +1277,41 @@ function ScheduleTab(){
               }}>
                 {confirmed?"🟢 입고 확정":"🟡 입고 일정 확인중"}
               </div>
-              <div style={{fontSize:11,color:"#16A34A",fontWeight:600,minHeight:16}}>
-                🚢 선적일: {isEdit("ship_date")?dateInput("ship_date"):
-                  <span onClick={()=>startInline(s,"ship_date")} title="클릭하여 수정" style={editableHover}>{s.ship_date||"-"}</span>}
+              <div style={{display:"flex",gap:0,padding:"6px 8px",background:"#F8FAFC",borderRadius:6,border:"1px solid #E2E8F0",marginBottom:6}}>
+                <div style={{flex:1,display:"flex",flexDirection:"column",gap:2,borderRight:"1px solid #E2E8F0",paddingRight:6,minWidth:0}}>
+                  <div style={{fontSize:10,color:"#94A3B8"}}>🚢 선적일</div>
+                  <div style={{fontSize:12,fontWeight:700,color:"#1E293B"}}>{isEdit("ship_date")?dateInput("ship_date"):
+                    <span onClick={()=>startInline(s,"ship_date")} title="클릭하여 수정" style={editableHover}>{s.ship_date||"-"}</span>}</div>
+                </div>
+                <div style={{flex:1,display:"flex",flexDirection:"column",gap:2,borderRight:"1px solid #E2E8F0",padding:"0 6px",minWidth:0}}>
+                  <div style={{fontSize:10,color:"#94A3B8"}}>🇰🇷 한국도착</div>
+                  <div style={{fontSize:12,fontWeight:700,color:"#1E293B"}}>{isEdit("kr_date")?dateInput("kr_date"):
+                    <span onClick={()=>startInline(s,"kr_date")} title="클릭하여 수정 (오즈센터 +2영업일 자동계산)" style={editableHover}>{s.kr_date||s.date||"-"}</span>}</div>
+                </div>
+                <div style={{flex:1,display:"flex",flexDirection:"column",gap:2,paddingLeft:6,minWidth:0}}>
+                  <div style={{fontSize:10,color:"#94A3B8"}}>📦 오즈센터</div>
+                  <div style={{fontSize:12,fontWeight:700,color:"#1E293B",display:"flex",alignItems:"center",gap:3,flexWrap:"wrap"}}>
+                    {isEdit("oz_date")?dateInput("oz_date"):
+                      <span onClick={()=>startInline(s,"oz_date")} title="클릭하여 수정" style={editableHover}>{s.oz_date||"-"}</span>}
+                    {s.oz_date&&<span style={{padding:"1px 5px",borderRadius:3,fontSize:9,fontWeight:700,color:ddayColor(s.oz_date),background:`${ddayColor(s.oz_date)}15`}}>{dday(s.oz_date)}</span>}
+                  </div>
+                </div>
               </div>
-              <div style={{fontSize:11,color:"#64748B"}}>
-                🇰🇷 한국 도착: {isEdit("kr_date")?dateInput("kr_date"):
-                  <span onClick={()=>startInline(s,"kr_date")} title="클릭하여 수정 (오즈센터 +2영업일 자동계산)" style={editableHover}>{s.kr_date||s.date||"-"}</span>}
-              </div>
-              <div style={{fontSize:11,display:"flex",alignItems:"center",gap:4}}>
-                📦 <span style={{fontWeight:600}}>오즈센터: {isEdit("oz_date")?dateInput("oz_date"):
-                  <span onClick={()=>startInline(s,"oz_date")} title="클릭하여 수정" style={editableHover}>{s.oz_date||"-"}</span>}</span>
-                {s.oz_date&&<span style={{padding:"1px 6px",borderRadius:3,fontSize:10,fontWeight:700,color:ddayColor(s.oz_date),background:`${ddayColor(s.oz_date)}15`}}>{dday(s.oz_date)}</span>}
-              </div>
-              <div style={{fontSize:15,fontWeight:800,color:"#1E293B",marginTop:6}}>
-                {isEdit("item")?(<input autoFocus value={inlineDraft} onChange={e=>setInlineDraft(e.target.value)}
-                  onBlur={()=>commitInline(s)}
-                  onKeyDown={e=>{if(e.key==="Enter")commitInline(s);else if(e.key==="Escape")cancelInline();}}
-                  style={{...inlineInputStyle,fontSize:15,fontWeight:800,width:"100%"}} />):
-                  <span onClick={()=>startInline(s,"item")} title="클릭하여 수정" style={editableHover}>{translateItemName(s.item)||"(상품명)"}</span>}
-              </div>
-              <div style={{fontSize:13,color:"#334155",marginTop:2}}>
-                {isEdit("qty")?(<><input type="number" autoFocus value={inlineDraft} onChange={e=>setInlineDraft(e.target.value)}
-                  onBlur={()=>commitInline(s)}
-                  onKeyDown={e=>{if(e.key==="Enter")commitInline(s);else if(e.key==="Escape")cancelInline();}}
-                  style={{...inlineInputStyle,fontSize:13,width:90}} /> 장</>):
-                  <span onClick={()=>startInline(s,"qty")} title="클릭하여 수정" style={editableHover}>{s.qty?s.qty.toLocaleString()+" 장":"(수량)"}</span>}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8,marginTop:6}}>
+                <div style={{fontSize:15,fontWeight:800,color:"#1E293B",flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                  {isEdit("item")?(<input autoFocus value={inlineDraft} onChange={e=>setInlineDraft(e.target.value)}
+                    onBlur={()=>commitInline(s)}
+                    onKeyDown={e=>{if(e.key==="Enter")commitInline(s);else if(e.key==="Escape")cancelInline();}}
+                    style={{...inlineInputStyle,fontSize:15,fontWeight:800,width:"100%"}} />):
+                    <span onClick={()=>startInline(s,"item")} title="클릭하여 수정" style={editableHover}>{translateItemName(s.item)||"(상품명)"}</span>}
+                </div>
+                <div style={{fontSize:13,color:"#334155",flexShrink:0}}>
+                  {isEdit("qty")?(<><input type="number" autoFocus value={inlineDraft} onChange={e=>setInlineDraft(e.target.value)}
+                    onBlur={()=>commitInline(s)}
+                    onKeyDown={e=>{if(e.key==="Enter")commitInline(s);else if(e.key==="Escape")cancelInline();}}
+                    style={{...inlineInputStyle,fontSize:13,width:90}} /> 장</>):
+                    <span onClick={()=>startInline(s,"qty")} title="클릭하여 수정" style={editableHover}>{s.qty?s.qty.toLocaleString()+" 장":"(수량)"}</span>}
+                </div>
               </div>
               <div style={{fontSize:11,color:"#94A3B8",marginTop:2}}>
                 {isEdit("ship_type")?(<select autoFocus value={inlineDraft} onChange={e=>setInlineDraft(e.target.value)}
