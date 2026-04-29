@@ -2326,7 +2326,7 @@ function PlanningTab(){
   const[trendLoading,setTrendLoading]=useState(false);
   const[trendData,setTrendData]=useState([]);
   const[trendError,setTrendError]=useState("");
-  const[trendKeyword,setTrendKeyword]=useState("all");
+  const[trendCatFilter,setTrendCatFilter]=useState("all");
   const[trendAdded,setTrendAdded]=useState({});
   const TREND_URL="https://script.google.com/macros/s/AKfycbwAqWsChdObSMX2T6rfJwiQsAB-VV1xhHcwwA-Des1CjigKnN2ZgT10I9ALkwfB6IkZfA/exec";
 
@@ -2450,18 +2450,18 @@ function PlanningTab(){
     return "";
   };
 
-  // 키워드 목록 (필터 탭용)
-  const trendKeywords=useMemo(()=>{
+  // 카테고리 목록 (필터 탭용 — 데이터에서 자동 추출)
+  const trendCategories=useMemo(()=>{
     const set=new Set();
-    trendData.forEach(it=>{const k=t_keyword(it);if(k)set.add(k);});
+    trendData.forEach(it=>{const c=t_category(it);if(c)set.add(c);});
     return Array.from(set);
   },[trendData]);
 
-  // 키워드 필터 적용
+  // 카테고리 필터 적용
   const filteredTrends=useMemo(()=>{
-    if(trendKeyword==="all")return trendData;
-    return trendData.filter(it=>t_keyword(it)===trendKeyword);
-  },[trendData,trendKeyword]);
+    if(trendCatFilter==="all")return trendData;
+    return trendData.filter(it=>t_category(it)===trendCatFilter);
+  },[trendData,trendCatFilter]);
 
   // 트렌드 카드 → 기획 테이블에 즉시 등록
   const addFromTrend=async(item,key)=>{
@@ -2493,65 +2493,61 @@ function PlanningTab(){
   if(loading)return <SectionCard title="💡 아이템 기획"><div style={{textAlign:"center",padding:40,color:"#94A3B8"}}>⏳ 데이터 불러오는 중...</div></SectionCard>;
 
   return(<>
-    {/* 네이버 쇼핑 트렌드 (제일 상단) */}
-    <SectionCard title="🛍️ 네이버 쇼핑 트렌드" subtitle="키워드별 인기 상품을 자동으로 불러와 카드로 표시" actions={
-      <SmallBtn primary onClick={loadTrends}>{trendLoading?"⏳ 불러오는 중...":"🔄 트렌드 불러오기"}</SmallBtn>
+    {/* 무신사 트렌드 (제일 상단) */}
+    <SectionCard title="🔥 무신사 트렌드" subtitle="카테고리별 인기 상품을 자동으로 불러와 카드로 표시" actions={
+      <SmallBtn primary onClick={loadTrends}>{trendLoading?"⏳ 불러오는 중...":"🔄 새로고침"}</SmallBtn>
     }>
-      {trendLoading&&trendData.length===0&&<div style={{padding:20,textAlign:"center",color:"#64748B",fontSize:15}}>네이버 쇼핑에서 인기 상품을 불러오는 중...</div>}
+      {trendLoading&&trendData.length===0&&<div style={{padding:20,textAlign:"center",color:"#64748B",fontSize:15}}>무신사에서 인기 상품을 불러오는 중...</div>}
       {trendError&&<div style={{padding:14,background:"#FEF2F2",border:"1px solid #FCA5A5",borderRadius:8,color:"#B91C1C",fontSize:14,whiteSpace:"pre-wrap",marginBottom:10}}>❌ {trendError}</div>}
-      {!trendLoading&&!trendError&&trendData.length===0&&<div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:15}}>표시할 트렌드 데이터가 없습니다. "트렌드 불러오기" 버튼을 눌러 다시 시도해주세요.</div>}
+      {!trendLoading&&!trendError&&trendData.length===0&&<div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:15}}>표시할 트렌드 데이터가 없습니다. "새로고침" 버튼을 눌러 다시 시도해주세요.</div>}
       {trendData.length>0&&<>
-        {/* 키워드 필터 탭 */}
-        {trendKeywords.length>0&&<div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
-          <span style={{fontSize:13,fontWeight:600,color:"#64748B",marginRight:4}}>키워드:</span>
-          <button onClick={()=>setTrendKeyword("all")} style={{
+        {/* 카테고리 필터 탭 */}
+        {trendCategories.length>0&&<div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
+          <span style={{fontSize:13,fontWeight:600,color:"#64748B",marginRight:4}}>카테고리:</span>
+          <button onClick={()=>setTrendCatFilter("all")} style={{
             padding:"5px 12px",borderRadius:6,fontSize:13,fontWeight:600,cursor:"pointer",
-            border:trendKeyword==="all"?"1px solid #1E293B":"1px solid #E2E8F0",
-            background:trendKeyword==="all"?"#1E293B":"#FFF",color:trendKeyword==="all"?"#FFF":"#475569"
+            border:trendCatFilter==="all"?"1px solid #1E293B":"1px solid #E2E8F0",
+            background:trendCatFilter==="all"?"#1E293B":"#FFF",color:trendCatFilter==="all"?"#FFF":"#475569"
           }}>전체 ({trendData.length})</button>
-          {trendKeywords.map(kw=>{
-            const cnt=trendData.filter(it=>t_keyword(it)===kw).length;
-            const active=trendKeyword===kw;
-            return(<button key={kw} onClick={()=>setTrendKeyword(kw)} style={{
+          {trendCategories.map(cat=>{
+            const cnt=trendData.filter(it=>t_category(it)===cat).length;
+            const active=trendCatFilter===cat;
+            return(<button key={cat} onClick={()=>setTrendCatFilter(cat)} style={{
               padding:"5px 12px",borderRadius:6,fontSize:13,fontWeight:600,cursor:"pointer",
               border:active?"1px solid #1E293B":"1px solid #E2E8F0",
               background:active?"#1E293B":"#FFF",color:active?"#FFF":"#475569"
-            }}>{kw} ({cnt})</button>);
+            }}>{cat} ({cnt})</button>);
           })}
         </div>}
-        {/* 카드 그리드 */}
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:12}}>
+        {/* 카드 3열 그리드 */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}}>
           {filteredTrends.map((it,i)=>{
-            const key=`${t_keyword(it)||"x"}-${i}-${t_name(it)}`;
+            const key=`${t_category(it)||"x"}-${i}-${t_name(it)}`;
             const added=trendAdded[key];
             const cat=t_category(it);
             const fallbackIcon=PLANNING_CATEGORY_ICONS[cat]||"🛍️";
             const img=t_image(it);
             const link=t_link(it);
+            const brand=t_brand(it);
             return(<div key={key} style={{background:"#FFF",borderRadius:10,border:"1px solid #E2E8F0",overflow:"hidden",display:"flex",flexDirection:"column"}}>
-              <div style={{height:160,background:"#F8FAFC",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",position:"relative"}}>
+              <div style={{height:120,background:"#F8FAFC",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",position:"relative"}}>
                 {img?
                   <img src={img} alt={t_name(it)} style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{e.currentTarget.style.display="none";}} />
-                  :<div style={{fontSize:64,lineHeight:1}}>{fallbackIcon}</div>}
-                {t_keyword(it)&&<div style={{position:"absolute",top:6,left:6,padding:"2px 7px",borderRadius:4,background:"rgba(15,23,42,0.78)",color:"#FFF",fontSize:10,fontWeight:600}}>{t_keyword(it)}</div>}
+                  :<div style={{fontSize:48,lineHeight:1}}>{fallbackIcon}</div>}
+                {brand&&<div style={{position:"absolute",top:6,left:6,padding:"2px 8px",borderRadius:4,background:"rgba(15,23,42,0.85)",color:"#FFF",fontSize:10,fontWeight:700,letterSpacing:0.2}}>{brand}</div>}
               </div>
               <div style={{padding:"10px 12px",display:"flex",flexDirection:"column",gap:4,flex:1}}>
-                <div style={{fontSize:14,fontWeight:700,color:"#0F172A",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={t_name(it)}>{t_name(it)}</div>
-                {t_priceLabel(it)&&<div style={{fontSize:13,color:"#3B82F6",fontWeight:700}}>💰 {t_priceLabel(it)}</div>}
-                {(t_brand(it)||t_mall(it))&&<div style={{fontSize:11,color:"#64748B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                  {t_brand(it)&&<span style={{fontWeight:600}}>{t_brand(it)}</span>}
-                  {t_brand(it)&&t_mall(it)&&<span style={{margin:"0 4px",color:"#CBD5E1"}}>·</span>}
-                  {t_mall(it)&&<span>🏪 {t_mall(it)}</span>}
-                </div>}
-                {cat&&<div style={{fontSize:11,color:"#94A3B8"}}>📂 {cat}</div>}
+                <div style={{fontSize:13,fontWeight:700,color:"#0F172A",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={t_name(it)}>{t_name(it)}</div>
+                {t_priceLabel(it)&&<div style={{fontSize:13,color:"#1E293B",fontWeight:800}}>{t_priceLabel(it)}</div>}
+                {cat&&<div style={{fontSize:11,color:"#94A3B8",fontWeight:600}}>📂 {cat}</div>}
                 <div style={{display:"flex",gap:6,marginTop:"auto",paddingTop:8}}>
-                  {link&&<a href={link} target="_blank" rel="noreferrer" style={{flex:1,padding:"5px 10px",borderRadius:6,background:"#F1F5F9",color:"#1E293B",fontSize:11,fontWeight:600,textDecoration:"none",textAlign:"center",border:"1px solid #E2E8F0"}}>🔗 참고</a>}
+                  {link&&<a href={link} target="_blank" rel="noreferrer" style={{flex:1,padding:"5px 10px",borderRadius:6,background:"#F1F5F9",color:"#1E293B",fontSize:11,fontWeight:600,textDecoration:"none",textAlign:"center",border:"1px solid #E2E8F0"}}>🔗 상품보기</a>}
                   <button onClick={()=>addFromTrend(it,key)} disabled={added} style={{
                     flex:1,padding:"5px 10px",borderRadius:6,fontSize:11,fontWeight:700,cursor:added?"default":"pointer",
                     border:"1px solid "+(added?"#86EFAC":"#1E293B"),
                     background:added?"#DCFCE7":"#1E293B",
                     color:added?"#15803D":"#FFF"
-                  }}>{added?"✓ 추가됨":"+ 기획 추가"}</button>
+                  }}>{added?"✓ 추가됨":"➕ 기획추가"}</button>
                 </div>
               </div>
             </div>);
