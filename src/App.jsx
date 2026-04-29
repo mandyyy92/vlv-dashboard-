@@ -1165,7 +1165,7 @@ function ScheduleTab(){
             {events.map((ev,j)=>{const ec=evtColor(ev.eventType,ev.supplier);const isDragging=dragItem&&dragItem.id===ev.id&&dragItem.eventType===ev.eventType;return(
               <div key={`${ev.id}-${ev.eventType}`} draggable
                 title="클릭: 수정 / 드래그: 날짜 이동"
-                style={{padding:"3px 6px",borderRadius:4,marginBottom:2,background:ec.bg,fontSize:12,lineHeight:1.4,cursor:"grab",userSelect:"none",border:isDragging?"2px solid "+ec.color:"1px solid transparent",opacity:isDragging?0.5:1}}
+                style={{padding:"5px 8px",borderRadius:4,marginBottom:2,background:ec.bg,fontSize:12,lineHeight:1.4,cursor:"grab",userSelect:"none",border:isDragging?"2px solid "+ec.color:"1px solid transparent",opacity:isDragging?0.5:1}}
                 onDragStart={e=>handleDragStart(e,ev)}
                 onDragEnd={handleDragEnd}
                 onClick={()=>openEdit(ev)}>
