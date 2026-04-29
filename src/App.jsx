@@ -1200,9 +1200,17 @@ function ScheduleTab(){
         const next=new Date(now.getFullYear(),now.getMonth()+1,1);
         const nextYM=`${next.getFullYear()}-${String(next.getMonth()+1).padStart(2,"0")}`;
         const inRange=(s)=>[s.ship_date,s.kr_date,s.oz_date,s.date].some(d=>d&&(d.startsWith(thisYM)||d.startsWith(nextYM)));
+        const todayStr=now.toISOString().slice(0,10);
+        const primaryDate=(s)=>s.oz_date||s.kr_date||s.date||"";
         return SUPPLIERS.map(sup=>{
         const st=SUP_STYLES[sup];
-        const items=schedules.filter(s=>s.supplier===sup&&inRange(s)).sort((a,b)=>(a.kr_date||a.date||"").localeCompare(b.kr_date||b.date||""));
+        const items=schedules.filter(s=>s.supplier===sup&&inRange(s)).sort((a,b)=>{
+          const aD=primaryDate(a),bD=primaryDate(b);
+          const aPast=!!aD&&aD<todayStr,bPast=!!bD&&bD<todayStr;
+          if(aPast!==bPast)return aPast?1:-1;
+          if(aPast)return bD.localeCompare(aD);
+          return aD.localeCompare(bD);
+        });
         return(<div key={sup} style={{background:st.bg,borderRadius:14,border:`1px solid ${st.color}20`,overflow:"hidden"}}>
           <div style={{padding:"12px 18px",background:`${st.color}15`,borderBottom:`1px solid ${st.color}20`}}>
             <span style={{fontSize:14,fontWeight:700,color:st.color}}>{st.icon} {sup}</span>
