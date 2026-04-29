@@ -1211,7 +1211,7 @@ function ScheduleTab(){
     {/* 업체별 뷰 */}
     {viewMode==="supplier"&&<>
     <div style={{padding:"8px 14px",borderRadius:8,background:"#EFF6FF",border:"1px solid #DBEAFE",marginBottom:12,fontSize:12,color:"#1E40AF",fontWeight:600}}>
-      📅 {(()=>{const n=new Date();const nx=new Date(n.getFullYear(),n.getMonth()+1,1);return `${n.getFullYear()}년 ${n.getMonth()+1}월 + ${nx.getFullYear()}년 ${nx.getMonth()+1}월 일정만 표시`;})()}
+      📅 {(()=>{const n=new Date();return `${n.getFullYear()}년 ${n.getMonth()+1}월부터 이후 모든 일정 표시`;})()}
     </div>
     <div style={{display:"flex",gap:8,marginBottom:12}}>
       {[
@@ -1230,10 +1230,8 @@ function ScheduleTab(){
     <div style={{display:"grid",gridTemplateColumns:`repeat(${SUPPLIERS.length},1fr)`,gap:16}}>
       {(()=>{
         const now=new Date();
-        const thisYM=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
-        const next=new Date(now.getFullYear(),now.getMonth()+1,1);
-        const nextYM=`${next.getFullYear()}-${String(next.getMonth()+1).padStart(2,"0")}`;
-        const inRange=(s)=>[s.ship_date,s.kr_date,s.oz_date,s.date].some(d=>d&&(d.startsWith(thisYM)||d.startsWith(nextYM)));
+        const monthStart=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-01`;
+        const inRange=(s)=>[s.ship_date,s.kr_date,s.oz_date,s.date].some(d=>d&&d>=monthStart);
         const todayStr=now.toISOString().slice(0,10);
         const primaryDate=(s)=>s.oz_date||s.kr_date||s.date||"";
         return SUPPLIERS.map(sup=>{
@@ -1311,7 +1309,7 @@ function ScheduleTab(){
             </div>);}):(
               <div style={{textAlign:"center",padding:30,color:"#94A3B8"}}>
                 <div style={{fontSize:30,marginBottom:8}}>📭</div>
-                <div style={{fontSize:13}}>이번달/다음달 일정 없음</div>
+                <div style={{fontSize:13}}>이번달 이후 일정 없음</div>
               </div>
             )}
           </div>
