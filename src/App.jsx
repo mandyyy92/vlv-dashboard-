@@ -2299,15 +2299,19 @@ function OrderTrackingTab(){
 const PLANNING_CATEGORIES=["상의","하의","아우터","모자","가방","기타"];
 const PLANNING_CATEGORY_ICONS={"상의":"👕","하의":"👖","아우터":"🧥","모자":"🧢","가방":"👜","기타":"🛍️"};
 const PLANNING_STATUSES=["아이디어","샘플의뢰","샘플확인","생산확정"];
-const PLANNING_STATUS_COLORS={"아이디어":"#94A3B8","샘플의뢰":"#F59E0B","샘플확인":"#3B82F6","생산확정":"#10B981"};
+const PLANNING_STATUS_COLORS={"아이디어":"#94A3B8","샘플의뢰":"#F59E0B","샘플확인":"#3B82F6","생산확정":"#059669"};
 
 function PlanningTab(){
   const[items,setItems]=useState([]);
   const[loading,setLoading]=useState(true);
-  const[seasons,setSeasons]=useState(["26FW","27SS"]);
-  const[activeSeason,setActiveSeason]=useState("26FW");
-  const[newSeason,setNewSeason]=useState("");
+  const[seasons,setSeasons]=useState(()=>{
+    try{const raw=localStorage.getItem("vlv_planning_seasons");if(raw){const arr=JSON.parse(raw);if(Array.isArray(arr)&&arr.length)return arr;}}catch(e){}
+    return["26FW","27SS"];
+  });
+  const[activeSeason,setActiveSeason]=useState(()=>localStorage.getItem("vlv_planning_active_season")||"26FW");
   const[catFilter,setCatFilter]=useState("all");
+  useEffect(()=>{try{localStorage.setItem("vlv_planning_seasons",JSON.stringify(seasons));}catch(e){}},[seasons]);
+  useEffect(()=>{try{localStorage.setItem("vlv_planning_active_season",activeSeason);}catch(e){}},[activeSeason]);
 
   const[fName,setFName]=useState("");
   const[fCategory,setFCategory]=useState("상의");
@@ -2347,7 +2351,8 @@ function PlanningTab(){
     const arr=seasonItems.filter(p=>p.category===cat);
     const avgPrice=arr.length?Math.round(arr.reduce((s,p)=>s+(p.est_price||0),0)/arr.length):0;
     const avgCost=arr.length?Math.round(arr.reduce((s,p)=>s+(p.est_cost||0),0)/arr.length):0;
-    return{category:cat,count:arr.length,avgPrice,avgCost};
+    const avgMargin=avgPrice>0?Math.round(((avgPrice-avgCost)/avgPrice)*100):0;
+    return{category:cat,count:arr.length,avgPrice,avgCost,avgMargin};
   }),[seasonItems]);
 
   const addPlanning=async()=>{
@@ -2392,11 +2397,12 @@ function PlanningTab(){
   };
 
   const addSeason=()=>{
-    const v=newSeason.trim().toUpperCase();
+    const input=window.prompt("새 시즌을 입력하세요 (예: 27SS, 27FW)");
+    if(!input)return;
+    const v=input.trim().toUpperCase();
     if(!v)return;
     if(!seasons.includes(v))setSeasons(p=>[...p,v].sort());
     setActiveSeason(v);
-    setNewSeason("");
   };
 
   // 트렌드 데이터 로드 (Google Apps Script → 네이버 쇼핑)
@@ -2570,85 +2576,85 @@ function PlanningTab(){
             color:activeSeason===s?"#FFF":"#475569",letterSpacing:0.3
           }}>{s}</button>
         ))}
-        <input value={newSeason} onChange={e=>setNewSeason(e.target.value)} placeholder="예: 27SS"
-          onKeyDown={e=>{if(e.key==="Enter")addSeason();}}
-          style={{padding:"7px 10px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:14,width:120,outline:"none",marginLeft:6}} />
-        <SmallBtn onClick={addSeason}>+ 시즌 추가</SmallBtn>
+        <button onClick={addSeason} title="새 시즌 추가" style={{
+          padding:"6px 14px",borderRadius:8,fontSize:16,fontWeight:700,cursor:"pointer",
+          border:"1px dashed #94A3B8",background:"#FFF",color:"#475569",lineHeight:1
+        }}>+</button>
       </div>
     </div>
 
-    {/* 카테고리별 평균가 요약 */}
-    <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:10,marginBottom:16}}>
-      {categorySummary.map(c=>(
-        <div key={c.category} style={{padding:"12px 14px",borderRadius:12,background:"#FFF",border:"1px solid #E2E8F0"}}>
-          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>{c.category}</div>
-          <div style={{fontSize:20,fontWeight:800,color:"#1E293B"}}>{c.count}<span style={{fontSize:13,fontWeight:500,color:"#94A3B8",marginLeft:3}}>건</span></div>
-          <div style={{fontSize:13,color:"#3B82F6",fontWeight:600,marginTop:4}}>평균가 {c.avgPrice.toLocaleString()}원</div>
-          <div style={{fontSize:12,color:"#94A3B8"}}>원가 {c.avgCost.toLocaleString()}원</div>
-        </div>
-      ))}
+    {/* 카테고리별 요약 (건수 / 평균 판매가 / 평균 원가 / 평균 마진율) */}
+    <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:16}}>
+      {categorySummary.map(c=>{
+        const icon=PLANNING_CATEGORY_ICONS[c.category]||"🛍️";
+        return(<div key={c.category} style={{padding:"14px 16px",borderRadius:12,background:"#FFF",border:"1px solid #E2E8F0"}}>
+          <div style={{fontSize:13,fontWeight:700,color:"#0F172A",marginBottom:8,display:"flex",alignItems:"center",gap:6}}>
+            <span style={{fontSize:16}}>{icon}</span>{c.category}
+            <span style={{marginLeft:"auto",fontSize:18,fontWeight:800,color:"#1E293B"}}>{c.count}<span style={{fontSize:12,fontWeight:500,color:"#94A3B8",marginLeft:2}}>건</span></span>
+          </div>
+          <div style={{fontSize:12,color:"#3B82F6",fontWeight:600}}>판매가 {c.avgPrice.toLocaleString()}원</div>
+          <div style={{fontSize:12,color:"#64748B",marginTop:2}}>원가 {c.avgCost.toLocaleString()}원</div>
+          <div style={{fontSize:12,color:c.avgMargin>=50?"#059669":c.avgMargin>=30?"#F59E0B":"#94A3B8",fontWeight:700,marginTop:2}}>마진 {c.avgMargin}%</div>
+        </div>);
+      })}
     </div>
 
     {/* 등록 폼 */}
     <SectionCard title="✏️ 레퍼런스 등록" subtitle="무신사 / 29CM 등 참고 링크와 이미지 URL을 넣으면 카드에 함께 표시됩니다">
-      <div style={{display:"flex",gap:14,alignItems:"flex-start"}}>
-        {/* 이미지 미리보기 */}
-        <div style={{flexShrink:0,width:160,height:160,borderRadius:10,background:"#F8FAFC",border:"1px solid #E2E8F0",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",position:"relative"}}>
-          {fImageUrl?
-            <img src={fImageUrl} alt="미리보기" style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{e.currentTarget.style.display="none";}} />
-            :<div style={{textAlign:"center",color:"#CBD5E1"}}>
-              <div style={{fontSize:30,marginBottom:4}}>🖼️</div>
-              <div style={{fontSize:12,color:"#94A3B8"}}>이미지 미리보기</div>
-            </div>}
+      <div style={{display:"grid",gridTemplateColumns:"1.5fr 110px 110px 110px",gap:10,alignItems:"end",marginBottom:10}}>
+        <div>
+          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>상품명</div>
+          <Input value={fName} onChange={e=>setFName(e.target.value)} placeholder="상품명" />
         </div>
-        {/* 입력 필드 */}
-        <div style={{flex:1,minWidth:0}}>
-          <div style={{display:"grid",gridTemplateColumns:"1.5fr 110px 110px 110px",gap:10,alignItems:"end",marginBottom:10}}>
-            <div>
-              <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>상품명</div>
-              <Input value={fName} onChange={e=>setFName(e.target.value)} placeholder="상품명" />
+        <div>
+          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>카테고리</div>
+          <select value={fCategory} onChange={e=>setFCategory(e.target.value)} style={{width:"100%",padding:"7px 10px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:15,outline:"none",background:"#F8FAFC"}}>
+            {PLANNING_CATEGORIES.map(c=><option key={c}>{c}</option>)}
+          </select>
+        </div>
+        <div>
+          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>예상 판매가</div>
+          <Input type="number" value={fPrice} onChange={e=>setFPrice(e.target.value)} placeholder="원" />
+        </div>
+        <div>
+          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>예상 원가</div>
+          <Input type="number" value={fCost} onChange={e=>setFCost(e.target.value)} placeholder="원" />
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,alignItems:"end",marginBottom:10}}>
+        <div>
+          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>참고 URL (무신사 / 29CM 등)</div>
+          <Input value={fRefUrl} onChange={e=>setFRefUrl(e.target.value)} placeholder="https://www.musinsa.com/..." />
+        </div>
+        <div>
+          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>이미지 URL</div>
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            <div style={{flex:1,minWidth:0}}><Input value={fImageUrl} onChange={e=>setFImageUrl(e.target.value)} placeholder="https://image.url/..." /></div>
+            <div style={{flexShrink:0,width:40,height:40,borderRadius:6,background:"#F8FAFC",border:"1px solid #E2E8F0",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
+              {fImageUrl?
+                <img src={fImageUrl} alt="미리보기" style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{e.currentTarget.style.display="none";}} />
+                :<span style={{fontSize:18,color:"#CBD5E1"}}>🖼️</span>}
             </div>
-            <div>
-              <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>카테고리</div>
-              <select value={fCategory} onChange={e=>setFCategory(e.target.value)} style={{width:"100%",padding:"7px 10px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:15,outline:"none",background:"#F8FAFC"}}>
-                {PLANNING_CATEGORIES.map(c=><option key={c}>{c}</option>)}
-              </select>
-            </div>
-            <div>
-              <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>예상 판매가</div>
-              <Input type="number" value={fPrice} onChange={e=>setFPrice(e.target.value)} placeholder="원" />
-            </div>
-            <div>
-              <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>예상 원가</div>
-              <Input type="number" value={fCost} onChange={e=>setFCost(e.target.value)} placeholder="원" />
-            </div>
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,alignItems:"end",marginBottom:10}}>
-            <div>
-              <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>참고 URL (무신사 / 29CM 등)</div>
-              <Input value={fRefUrl} onChange={e=>setFRefUrl(e.target.value)} placeholder="https://www.musinsa.com/..." />
-            </div>
-            <div>
-              <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>이미지 URL</div>
-              <Input value={fImageUrl} onChange={e=>setFImageUrl(e.target.value)} placeholder="https://image.url/..." />
-            </div>
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 2fr 100px",gap:10,alignItems:"end"}}>
-            <div>
-              <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>소재</div>
-              <Input value={fMaterial} onChange={e=>setFMaterial(e.target.value)} placeholder="예: 면 100%" />
-            </div>
-            <div>
-              <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>컬러</div>
-              <Input value={fColors} onChange={e=>setFColors(e.target.value)} placeholder="예: 블랙, 화이트" />
-            </div>
-            <div>
-              <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>추천 이유 / 메모</div>
-              <Input value={fNote} onChange={e=>setFNote(e.target.value)} placeholder="이 아이템을 기획에 넣은 이유 또는 추가 메모" />
-            </div>
-            <SmallBtn primary onClick={addPlanning}>✅ 등록</SmallBtn>
           </div>
         </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,alignItems:"end",marginBottom:10}}>
+        <div>
+          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>소재</div>
+          <Input value={fMaterial} onChange={e=>setFMaterial(e.target.value)} placeholder="예: 면 100%" />
+        </div>
+        <div>
+          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>컬러</div>
+          <Input value={fColors} onChange={e=>setFColors(e.target.value)} placeholder="예: 블랙, 화이트" />
+        </div>
+      </div>
+      <div style={{marginBottom:10}}>
+        <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>추천 이유 / 메모</div>
+        <textarea value={fNote} onChange={e=>setFNote(e.target.value)} placeholder="이 아이템을 기획에 넣은 이유 또는 추가 메모" rows={3}
+          style={{width:"100%",padding:"8px 12px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:13,color:"#1E293B",outline:"none",background:"#F8FAFC",boxSizing:"border-box",fontFamily:"inherit",resize:"vertical"}} />
+      </div>
+      <div style={{display:"flex",justifyContent:"flex-end"}}>
+        <SmallBtn primary onClick={addPlanning}>✅ 등록</SmallBtn>
       </div>
     </SectionCard>
 
@@ -2672,37 +2678,40 @@ function PlanningTab(){
       })}
     </div>
 
-    {/* 갤러리 */}
+    {/* 갤러리 (3열) */}
     {filtered.length===0?(
       <SectionCard><div style={{padding:40,textAlign:"center",color:"#94A3B8",fontSize:15}}>등록된 아이템이 없습니다. 위에서 레퍼런스를 등록해보세요.</div></SectionCard>
-    ):(<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:14}}>
+    ):(<div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14}}>
       {filtered.map(p=>{
         const sc=PLANNING_STATUS_COLORS[p.status||"아이디어"];
+        const margin=p.est_price>0?Math.round(((p.est_price-(p.est_cost||0))/p.est_price)*100):0;
+        const fallbackIcon=PLANNING_CATEGORY_ICONS[p.category]||"🛍️";
         return(<div key={p.id} style={{background:"#FFF",borderRadius:12,border:"1px solid #E2E8F0",overflow:"hidden",position:"relative",transition:"transform 0.15s"}}>
           <button onClick={()=>delPlanning(p.id)} style={{position:"absolute",top:6,right:6,width:24,height:24,background:"rgba(255,255,255,0.92)",border:"1px solid #E2E8F0",borderRadius:"50%",cursor:"pointer",fontSize:16,color:"#94A3B8",zIndex:2,lineHeight:1}}>×</button>
-          <div style={{height:200,background:"#F8FAFC",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
+          <div style={{height:150,background:"#F8FAFC",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
             {p.image_url?
               <img src={p.image_url} alt={p.name} style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{e.currentTarget.style.display="none";}} />
-              :<div style={{fontSize:38,color:"#CBD5E1"}}>🖼️</div>}
+              :<div style={{fontSize:54,lineHeight:1}}>{fallbackIcon}</div>}
           </div>
           <div style={{padding:"10px 12px"}}>
             <div style={{fontSize:12,color:"#94A3B8",fontWeight:600,marginBottom:2,textTransform:"uppercase",letterSpacing:0.3}}>{p.category||"-"}</div>
-            <div style={{fontSize:15,fontWeight:700,color:"#0F172A",marginBottom:4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={p.name}>{p.name}</div>
-            <div style={{fontSize:13,color:"#475569",marginBottom:6}}>
-              {p.est_price?<><span style={{fontWeight:700,color:"#1E293B"}}>{p.est_price.toLocaleString()}원</span></>:"-"}
-              {p.est_cost?<span style={{color:"#94A3B8",marginLeft:4}}>· 원가 {p.est_cost.toLocaleString()}</span>:""}
+            <div style={{fontSize:14,fontWeight:700,color:"#0F172A",marginBottom:4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={p.name}>{p.name}</div>
+            <div style={{fontSize:12,color:"#475569",marginBottom:6,lineHeight:1.5}}>
+              {p.est_price?<>판매 <span style={{fontWeight:700,color:"#1E293B"}}>{p.est_price.toLocaleString()}원</span></>:"판매 -"}
+              {p.est_cost?<span style={{color:"#94A3B8"}}> / 원가 {p.est_cost.toLocaleString()}원</span>:""}
+              {p.est_price>0&&<span style={{marginLeft:4,color:margin>=50?"#059669":margin>=30?"#F59E0B":"#94A3B8",fontWeight:700}}>/ 마진 {margin}%</span>}
             </div>
             <div onClick={()=>advanceStatus(p)} title="클릭: 다음 단계로 (아이디어→샘플의뢰→샘플확인→생산확정)" style={{
               display:"inline-flex",alignItems:"center",gap:5,padding:"3px 10px",borderRadius:12,
               fontSize:12.5,fontWeight:700,cursor:"pointer",userSelect:"none",
               background:`${sc}15`,color:sc,border:`1px solid ${sc}33`
             }}>● {p.status||"아이디어"}</div>
-            {(p.material||p.colors)&&<div style={{fontSize:12,color:"#64748B",marginTop:6,lineHeight:1.4}}>
-              {p.material&&<div>🧵 {p.material}</div>}
-              {p.colors&&<div>🎨 {p.colors}</div>}
+            {(p.material||p.colors)&&<div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:6}}>
+              {p.material&&<span style={{fontSize:11,padding:"2px 7px",borderRadius:4,background:"#FEF3C7",color:"#92400E",fontWeight:600}}>🧵 {p.material}</span>}
+              {p.colors&&<span style={{fontSize:11,padding:"2px 7px",borderRadius:4,background:"#F0FDF4",color:"#15803D",fontWeight:600}}>🎨 {p.colors}</span>}
             </div>}
-            {p.ref_url&&<a href={p.ref_url} target="_blank" rel="noreferrer" style={{display:"block",marginTop:6,fontSize:12,color:"#3B82F6",textDecoration:"none",fontWeight:600}}>🔗 참고</a>}
-            {p.note&&<div style={{fontSize:12,color:"#94A3B8",marginTop:6,fontStyle:"italic",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={p.note}>{p.note}</div>}
+            {p.ref_url&&<a href={p.ref_url} target="_blank" rel="noreferrer" style={{display:"inline-block",marginTop:8,padding:"4px 10px",borderRadius:6,background:"#F1F5F9",color:"#1E293B",fontSize:11,fontWeight:600,textDecoration:"none",border:"1px solid #E2E8F0"}}>🔗 참고링크</a>}
+            {p.note&&<div style={{fontSize:12,color:"#64748B",marginTop:8,lineHeight:1.4,whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{p.note}</div>}
           </div>
         </div>);
       })}
