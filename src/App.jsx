@@ -1052,6 +1052,9 @@ function ScheduleTab(){
     }else if(field==="ship_date"){
       if(!inlineDraft||inlineDraft===s.ship_date){cancelInline();return;}
       updates.ship_date=inlineDraft;
+    }else if(field==="ship_type"){
+      if(inlineDraft===(s.ship_type||"")){cancelInline();return;}
+      updates.ship_type=inlineDraft;
     }else{cancelInline();return;}
     const prev=s;
     setSchedules(p=>p.map(x=>x.id===s.id?{...x,...updates}:x));
@@ -1240,7 +1243,17 @@ function ScheduleTab(){
                   style={{...inlineInputStyle,fontSize:13,width:90}} /> 장</>):
                   <span onClick={()=>startInline(s,"qty")} title="클릭하여 수정" style={editableHover}>{s.qty?s.qty.toLocaleString()+" 장":"(수량)"}</span>}
               </div>
-              {s.ship_type&&<div style={{fontSize:11,color:"#94A3B8"}}>{s.ship_type}</div>}
+              <div style={{fontSize:11,color:"#94A3B8",marginTop:2}}>
+                {isEdit("ship_type")?(<select autoFocus value={inlineDraft} onChange={e=>setInlineDraft(e.target.value)}
+                  onBlur={()=>commitInline(s)}
+                  onKeyDown={e=>{if(e.key==="Enter")commitInline(s);else if(e.key==="Escape")cancelInline();}}
+                  style={{...inlineInputStyle,fontSize:11,width:140}}>
+                  <option value="">(미지정)</option>
+                  <option value="Air Shipment">✈️ Air Shipment</option>
+                  <option value="Sea Shipment">🚢 Sea Shipment</option>
+                </select>):
+                  <span onClick={()=>startInline(s,"ship_type")} title="클릭하여 수정" style={editableHover}>{s.ship_type==="Air Shipment"?"✈️ Air Shipment":s.ship_type==="Sea Shipment"?"🚢 Sea Shipment":s.ship_type||"(운송 미지정)"}</span>}
+              </div>
             </div>);}):(
               <div style={{textAlign:"center",padding:30,color:"#94A3B8"}}>
                 <div style={{fontSize:30,marginBottom:8}}>📭</div>
