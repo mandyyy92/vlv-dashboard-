@@ -1278,6 +1278,22 @@ function ScheduleTab(){
               }}>
                 {confirmed?"🟢 입고 확정":"🟡 입고 일정 확인중"}
               </div>
+              <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:8,flexWrap:"wrap"}}>
+                <div style={{fontSize:15,fontWeight:800,color:"#1E293B"}}>
+                  {isEdit("item")?(<input autoFocus value={inlineDraft} onChange={e=>setInlineDraft(e.target.value)}
+                    onBlur={()=>commitInline(s)}
+                    onKeyDown={e=>{if(e.key==="Enter")commitInline(s);else if(e.key==="Escape")cancelInline();}}
+                    style={{...inlineInputStyle,fontSize:15,fontWeight:800,minWidth:120}} />):
+                    <span onClick={()=>startInline(s,"item")} title="클릭하여 수정" style={editableHover}>{translateItemName(s.item)||"(상품명)"}</span>}
+                </div>
+                <div style={{fontSize:13,color:"#334155"}}>
+                  {isEdit("qty")?(<><input type="number" autoFocus value={inlineDraft} onChange={e=>setInlineDraft(e.target.value)}
+                    onBlur={()=>commitInline(s)}
+                    onKeyDown={e=>{if(e.key==="Enter")commitInline(s);else if(e.key==="Escape")cancelInline();}}
+                    style={{...inlineInputStyle,fontSize:13,width:90}} /> 장</>):
+                    <span onClick={()=>startInline(s,"qty")} title="클릭하여 수정" style={editableHover}>{s.qty?s.qty.toLocaleString()+" 장":"(수량)"}</span>}
+                </div>
+              </div>
               <div style={{display:"flex",gap:0,padding:"6px 8px",background:"#F8FAFC",borderRadius:6,border:"1px solid #E2E8F0",marginBottom:6}}>
                 <div style={{flex:1,display:"flex",flexDirection:"column",gap:2,borderRight:"1px solid #E2E8F0",paddingRight:6,minWidth:0}}>
                   <div style={{fontSize:10,color:"#94A3B8"}}>🚢 선적일</div>
@@ -1293,22 +1309,6 @@ function ScheduleTab(){
                   <div style={{fontSize:10,color:"#94A3B8"}}>📦 오즈센터</div>
                   <div style={{fontSize:12,fontWeight:700,color:"#1E293B"}}>{isEdit("oz_date")?dateInput("oz_date"):
                     <span onClick={()=>startInline(s,"oz_date")} title="클릭하여 수정" style={editableHover}>{s.oz_date||"-"}</span>}</div>
-                </div>
-              </div>
-              <div style={{display:"flex",alignItems:"baseline",gap:8,marginTop:6,flexWrap:"wrap"}}>
-                <div style={{fontSize:15,fontWeight:800,color:"#1E293B"}}>
-                  {isEdit("item")?(<input autoFocus value={inlineDraft} onChange={e=>setInlineDraft(e.target.value)}
-                    onBlur={()=>commitInline(s)}
-                    onKeyDown={e=>{if(e.key==="Enter")commitInline(s);else if(e.key==="Escape")cancelInline();}}
-                    style={{...inlineInputStyle,fontSize:15,fontWeight:800,minWidth:120}} />):
-                    <span onClick={()=>startInline(s,"item")} title="클릭하여 수정" style={editableHover}>{translateItemName(s.item)||"(상품명)"}</span>}
-                </div>
-                <div style={{fontSize:13,color:"#334155"}}>
-                  {isEdit("qty")?(<><input type="number" autoFocus value={inlineDraft} onChange={e=>setInlineDraft(e.target.value)}
-                    onBlur={()=>commitInline(s)}
-                    onKeyDown={e=>{if(e.key==="Enter")commitInline(s);else if(e.key==="Escape")cancelInline();}}
-                    style={{...inlineInputStyle,fontSize:13,width:90}} /> 장</>):
-                    <span onClick={()=>startInline(s,"qty")} title="클릭하여 수정" style={editableHover}>{s.qty?s.qty.toLocaleString()+" 장":"(수량)"}</span>}
                 </div>
               </div>
               <div style={{fontSize:11,color:"#94A3B8",marginTop:2}}>
