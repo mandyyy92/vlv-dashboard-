@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { sb } from "./lib/supabaseClient";
+import { useReorderData, adaptToBasic } from "./hooks/useReorderData";
 import { useReferenceItems } from "./hooks/useReferenceItems";
 import ReferenceItemForm from "./components/ReferenceItemForm";
 import ReferenceItemCard from "./components/ReferenceItemCard";
@@ -1529,17 +1530,19 @@ function ReorderTab(){
       :<div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,color:"#CBD5E1"}}>📷</div>}
     </div>);};
 
-  // Google Apps Script Web App URL - 설정 후 여기에 입력
+  // (보존) Google Apps Script URL state — 현재 데이터 출처는 musinsa Supabase로 변경됨. 설정 패널 UI 유지를 위해 state는 남겨둠.
   const[scriptUrl,setScriptUrl]=useState("https://script.google.com/macros/s/AKfycbzW_vBv-rYSgv8TCUGBHMQqPPuCi2dvzrksh8LEwgV6Tgjt4KUJhLDNfSbTwtgztDOZ/exec");
   const[showSetup,setShowSetup]=useState(false);
 
   // 탭: 기본상품 / 아트웍
   const[subTab,setSubTab]=useState("basic");
 
+  // musinsa Supabase 데이터 (inventory + 최근 30일 배송 주문)
+  const{data:musinsaData,loading,lastUpdated,refetch}=useReorderData();
+
   // 데이터
   const[basicData,setBasicData]=useState([]);
   const[artworkData,setArtworkData]=useState([]);
-  const[loading,setLoading]=useState(false);
   const[lastRefresh,setLastRefresh]=useState(localStorage?.getItem?.("vlv_reorder_last")||"데이터 없음");
   const[autoEnabled,setAutoEnabled]=useState(true);
   const[filter,setFilter]=useState("전체");
@@ -1547,41 +1550,40 @@ function ReorderTab(){
   const[sortCol,setSortCol]=useState("name");
   const[sortAsc,setSortAsc]=useState(true);
 
-  // Google Sheets에서 데이터 가져오기
-  const fetchData=useCallback(async(silent)=>{
-    if(!scriptUrl)return;
-    if(!silent)setLoading(true);
-    try{
-      const res=await fetch(scriptUrl);
-      const json=await res.json();
-      if(json.basic){setBasicData(json.basic);try{localStorage?.setItem?.("vlv_reorder_basic",JSON.stringify(json.basic));}catch(e){}}
-      if(json.artwork){setArtworkData(json.artwork);try{localStorage?.setItem?.("vlv_reorder_artwork",JSON.stringify(json.artwork));}catch(e){}}
-      const now=new Date().toLocaleString("ko-KR");
-      setLastRefresh(now);
-      try{localStorage?.setItem?.("vlv_reorder_last",now);}catch(e){}
-    }catch(e){if(!silent)alert("데이터를 가져오는데 실패했습니다.\n\n오류: "+e.message);}
-    if(!silent)setLoading(false);
-  },[scriptUrl]);
-
-  // 페이지 접속 시 자동으로 데이터 불러오기
+  // musinsa Supabase 데이터 → 기존 basic 스키마로 어댑팅. 빈 응답일 때는 캐시 복원본을 덮어쓰지 않도록 early return.
   useEffect(()=>{
-    // 먼저 캐시된 데이터 복원
+    if(!musinsaData||musinsaData.length===0)return;
+    const adapted=adaptToBasic(musinsaData);
+    setBasicData(adapted);
+    try{localStorage?.setItem?.("vlv_reorder_basic",JSON.stringify(adapted));}catch(e){}
+    if(lastUpdated){
+      const label=`${lastUpdated} 수집분`;
+      setLastRefresh(label);
+      try{localStorage?.setItem?.("vlv_reorder_last",label);}catch(e){}
+    }
+  },[musinsaData,lastUpdated]);
+
+  // 수동 새로고침 (기존 "구글시트 불러오기" 버튼의 onClick 핸들러를 그대로 받음)
+  const fetchData=useCallback(()=>{refetch();},[refetch]);
+
+  // 페이지 접속 시 캐시된 데이터 복원 (hook 응답 도착 전 빠른 표시)
+  useEffect(()=>{
     try{
       const cb=localStorage?.getItem?.("vlv_reorder_basic");
       const ca=localStorage?.getItem?.("vlv_reorder_artwork");
       if(cb)setBasicData(JSON.parse(cb));
       if(ca)setArtworkData(JSON.parse(ca));
     }catch(e){}
-    // 자동으로 최신 데이터 불러오기
-    if(scriptUrl)fetchData(true);
-  },[fetchData]);
+  },[]);
 
-  // 자동갱신: 1시간마다 체크하여 데이터 갱신
+  // 자동갱신: 매시간 체크하여 오후 2시(14시)에만 실제 refetch 실행 (일 1회 갱신)
   useEffect(()=>{
-    if(!autoEnabled||!scriptUrl)return;
-    const interval=setInterval(()=>{fetchData(true);},3600000); // 1시간마다
+    if(!autoEnabled)return;
+    const interval=setInterval(()=>{
+      if(new Date().getHours()===14)refetch();
+    },3600000); // 1시간마다 체크, 14시일 때만 refetch
     return()=>clearInterval(interval);
-  },[autoEnabled,scriptUrl,fetchData]);
+  },[autoEnabled,refetch]);
 
   // 수동 데이터 입력 (복사-붙여넣기용)
   const[pasteMode,setPasteMode]=useState(false);
@@ -1670,14 +1672,14 @@ function ReorderTab(){
   return(<>
     <SectionCard title="🔄 리오더 아이템 확인" subtitle={`마지막 갱신: ${lastRefresh}`}
       actions={<div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-        <label style={{display:"flex",alignItems:"center",gap:6,fontSize:14,color:"#64748B",cursor:"pointer"}}><input type="checkbox" checked={autoEnabled} onChange={e=>setAutoEnabled(e.target.checked)} style={{accentColor:"#1E293B"}} />매일 11:00 자동갱신</label>
-        <SmallBtn primary onClick={fetchData}>{loading?"⏳ 불러오는 중...":"🔄 구글시트 불러오기"}</SmallBtn>
+        <label style={{display:"flex",alignItems:"center",gap:6,fontSize:14,color:"#64748B",cursor:"pointer"}}><input type="checkbox" checked={autoEnabled} onChange={e=>setAutoEnabled(e.target.checked)} style={{accentColor:"#1E293B"}} />매일 오후 2시 자동갱신</label>
+        <SmallBtn primary onClick={fetchData}>{loading?"⏳ 불러오는 중...":"🔄 데이터 새로고침"}</SmallBtn>
         <SmallBtn onClick={()=>setPasteMode(!pasteMode)}>{pasteMode?"✕ 닫기":"📋 데이터 붙여넣기"}</SmallBtn>
         <SmallBtn onClick={()=>setShowSetup(!showSetup)}>⚙️ 설정</SmallBtn>
       </div>}>
 
       {/* 자동갱신 안내 */}
-      {autoEnabled&&<div style={{padding:"10px 16px",borderRadius:8,background:"#EFF6FF",border:"1px solid #BFDBFE",marginBottom:16,fontSize:14,color:"#1E40AF",display:"flex",alignItems:"center",gap:8}}>⏰ 매일 오전 11:00에 구글 시트 데이터를 자동으로 불러옵니다 (Apps Script 트리거 설정 필요)</div>}
+      {autoEnabled&&<div style={{padding:"10px 16px",borderRadius:8,background:"#EFF6FF",border:"1px solid #BFDBFE",marginBottom:16,fontSize:14,color:"#1E40AF",display:"flex",alignItems:"center",gap:8}}>📅 매일 오후 2시에 musinsa Supabase에서 최신 재고/판매 데이터를 자동으로 가져옵니다</div>}
 
       {/* Apps Script 설정 안내 */}
       {showSetup&&<div style={{padding:20,borderRadius:12,background:"#FFFBEB",border:"1px solid #FDE68A",marginBottom:16}}>
@@ -1825,7 +1827,7 @@ function ReorderTab(){
         </div>
       ):(
         <div style={{padding:40,textAlign:"center",color:"#94A3B8",fontSize:15}}>
-          {basicData.length===0?"구글 시트에서 데이터를 불러와주세요. 위의 '구글시트 불러오기' 또는 '데이터 붙여넣기'를 사용하세요.":"검색 결과가 없습니다."}
+          {basicData.length===0?"데이터를 불러오는 중이거나 비어있습니다. 위의 '데이터 새로고침' 또는 '데이터 붙여넣기'를 사용하세요.":"검색 결과가 없습니다."}
         </div>
       ))}
 
@@ -1876,7 +1878,7 @@ function ReorderTab(){
         </div>
       ):(
         <div style={{padding:40,textAlign:"center",color:"#94A3B8",fontSize:15}}>
-          {artworkData.length===0?"구글 시트에서 데이터를 불러와주세요. 위의 '구글시트 불러오기' 또는 '데이터 붙여넣기'를 사용하세요.":"검색 결과가 없습니다."}
+          {artworkData.length===0?"아트웍 구분 데이터가 없습니다. musinsa Supabase에는 아트웍 분류 정보가 없어 빈 상태입니다.":"검색 결과가 없습니다."}
         </div>
       ))}
     </SectionCard>
