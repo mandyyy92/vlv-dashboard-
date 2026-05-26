@@ -3127,21 +3127,6 @@ export default function Dashboard(){
   const[time,setTime]=useState(new Date());
   useEffect(()=>{const t=setInterval(()=>setTime(new Date()),60000);return()=>clearInterval(t);},[]);
 
-  // 리오더 구글시트 데이터를 대시보드에서도 불러오기
-  const[reorderData,setReorderData]=useState([]);
-  const[reorderLoading,setReorderLoading]=useState(true);
-  const SCRIPT_URL="https://script.google.com/macros/s/AKfycbzW_vBv-rYSgv8TCUGBHMQqPPuCi2dvzrksh8LEwgV6Tgjt4KUJhLDNfSbTwtgztDOZ/exec";
-
-  useEffect(()=>{(async()=>{
-    try{
-      const res=await fetch(SCRIPT_URL);
-      const json=await res.json();
-      const all=[...(json.basic||[]),...(json.artwork||[])];
-      setReorderData(all);
-    }catch(e){console.error("리오더 데이터 로드 실패:",e);}
-    setReorderLoading(false);
-  })();},[]);
-
   // Supabase schedules 데이터 (입고 스케줄 탭과 동일 소스)
   const[dashSchedules,setDashSchedules]=useState([]);
   useEffect(()=>{(async()=>{const data=await sb.get("schedules");setDashSchedules(data||[]);})();},[]);
@@ -3165,17 +3150,9 @@ export default function Dashboard(){
   },[dashSchedules]);
   const pendingTotalQty=useMemo(()=>pendingSchedules.reduce((sum,s)=>sum+(s.qty||0),0),[pendingSchedules]);
 
-  const reorderUrgent=useMemo(()=>reorderData.filter(r=>{const d=Math.round(r.exhaustDays||0);const s=Math.round(r.stock||0);return d>0&&s>0&&d<=60;}).sort((a,b)=>(a.exhaustDays||0)-(b.exhaustDays||0)),[reorderData]);
-  const reorderWarning=useMemo(()=>reorderData.filter(r=>{const d=Math.round(r.exhaustDays||0);const s=Math.round(r.stock||0);return d>0&&s>0&&d>60&&d<=75;}),[reorderData]);
-  const reorderReview=useMemo(()=>reorderData.filter(r=>{const d=Math.round(r.exhaustDays||0);const s=Math.round(r.stock||0);return d>0&&s>0&&d>75&&d<=90;}),[reorderData]);
-  const reorderSafe=useMemo(()=>reorderData.filter(r=>{const d=Math.round(r.exhaustDays||0);return d>90;}),[reorderData]);
-  const reorderActionItems=useMemo(()=>[...reorderUrgent,...reorderWarning,...reorderReview].sort((a,b)=>(a.exhaustDays||0)-(b.exhaustDays||0)),[reorderUrgent,reorderWarning,reorderReview]);
-  const skuImgMap=useMemo(()=>{const m={};SKUS.forEach(s=>{if(s[F.IMG]&&!m[s[F.CODE]])m[s[F.CODE]]=s[F.IMG];});return m;},[]);
-
   const tabs=[
     {id:"overview",label:"대시보드",icon:"⬡"},
     {id:"schedule",label:"입고 스케줄",icon:"📅"},
-    {id:"reorder",label:"리오더",icon:"🔄"},
     {id:"ordertrack",label:"오더 입고현황",icon:"📊"},
     {id:"planning",label:"아이템 기획",icon:"💡"},
     {id:"sample",label:"샘플 진행",icon:"🧪"},
@@ -3185,8 +3162,8 @@ export default function Dashboard(){
 
   const renderOverview=()=>(
     <>
-      {/* 상단 3카드: 이번주 입고건 / 리오더 긴급발주 / 샘플 진행건 */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16,marginBottom:20}}>
+      {/* 상단 2카드: 이번주 입고건 / 샘플 진행건 */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:16,marginBottom:20}}>
         {/* 1. 이번주 입고건 */}
         <div style={{padding:"22px 24px",borderRadius:14,background:"linear-gradient(135deg,#EFF6FF 0%,#F5F3FF 100%)",border:"1px solid #BFDBFE",boxShadow:"0 2px 8px rgba(59,130,246,0.08)"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
@@ -3204,24 +3181,7 @@ export default function Dashboard(){
           </div>
         </div>
 
-        {/* 2. 리오더 긴급발주 */}
-        <div style={{padding:"22px 24px",borderRadius:14,background:"linear-gradient(135deg,#FEF2F2 0%,#FFF7ED 100%)",border:"1px solid #FECACA",boxShadow:"0 2px 8px rgba(220,38,38,0.08)"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-            <div>
-              <div style={{fontSize:13,fontWeight:600,color:"#DC2626",letterSpacing:0.5,textTransform:"uppercase",marginBottom:6}}>🔄 리오더 긴급발주</div>
-              {reorderLoading?<div style={{fontSize:16,color:"#94A3B8"}}>불러오는 중...</div>
-              :<div style={{fontSize:38,fontWeight:800,color:"#DC2626",letterSpacing:-1.5}}>{reorderActionItems.length}<span style={{fontSize:16,fontWeight:500,color:"#FCA5A5",marginLeft:4}}>건</span></div>}
-              {!reorderLoading&&<div style={{fontSize:14,color:"#6B7280",marginTop:6}}>긴급 {reorderUrgent.length} · 필요 {reorderWarning.length} · 검토 {reorderReview.length}</div>}
-            </div>
-            <div style={{width:48,height:48,borderRadius:12,background:"#DC262620",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24}}>🚨</div>
-          </div>
-          {!reorderLoading&&<div style={{marginTop:14,display:"flex",gap:6,flexWrap:"wrap"}}>
-            {reorderActionItems.slice(0,3).map((r,i)=>{const d=Math.round(r.exhaustDays||0);const c=d<=60?"#DC2626":d<=75?"#D97706":"#2563EB";return(<div key={i} style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:`${c}15`,color:c,fontWeight:600}}>{(r.name||"").slice(0,10)} {Math.round(d)}일</div>);})}
-            {reorderActionItems.length>3&&<div style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#FEE2E2",color:"#DC2626",fontWeight:600}}>+{reorderActionItems.length-3}건</div>}
-          </div>}
-        </div>
-
-        {/* 3. 샘플 진행건 */}
+        {/* 2. 샘플 진행건 */}
         <div style={{padding:"22px 24px",borderRadius:14,background:"linear-gradient(135deg,#F0FDF4 0%,#ECFDF5 100%)",border:"1px solid #BBF7D0",boxShadow:"0 2px 8px rgba(16,185,129,0.08)"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
             <div>
@@ -3237,39 +3197,8 @@ export default function Dashboard(){
         </div>
       </div>
 
-      {/* 하단: 왼쪽=리오더 긴급발주, 오른쪽=입고대기+샘플진행 */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
-        {/* 왼쪽: 리오더 발주 필요 품목 */}
-        <SectionCard title="🔄 리오더 — 발주 필요 품목">
-          {reorderLoading?<div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:15}}>⏳ 구글시트 데이터 불러오는 중...</div>
-          :reorderActionItems.length>0?reorderActionItems.slice(0,8).map((r,i)=>{
-            const d=Math.round(r.exhaustDays||0);
-            const st=d<=60?"긴급발주":d<=75?"발주필요":"발주검토";
-            const stColor=d<=60?"#DC2626":d<=75?"#D97706":"#2563EB";
-            const stBg=d<=60?"#FEF2F2":d<=75?"#FFFBEB":"#EFF6FF";
-            return(
-            <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",borderRadius:8,background:stBg,border:`1px solid ${stColor}20`,marginBottom:6}}>
-              <div style={{display:"flex",alignItems:"center",gap:10}}>
-                {skuImgMap[r.code]&&<div style={{width:36,height:36,borderRadius:6,overflow:"hidden",border:"1px solid #E2E8F0",flexShrink:0}}><img src={skuImgMap[r.code]} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{e.target.style.display="none";}}/></div>}
-                <div>
-                  <div style={{display:"flex",alignItems:"center",gap:6}}>
-                    <span style={{padding:"1px 6px",borderRadius:3,fontSize:11,fontWeight:700,color:stColor,background:`${stColor}15`}}>{st}</span>
-                    <span style={{fontSize:14,fontWeight:700,color:"#334155"}}>{r.name}</span>
-                  </div>
-                  <div style={{fontSize:13,color:"#6B7280",marginTop:1}}>{r.code} {r.option} · 소진 {d}일</div>
-                </div>
-              </div>
-              <div style={{textAlign:"right"}}>
-                <div style={{fontSize:18,fontWeight:800,color:stColor}}>{Math.round(r.stock)}개</div>
-                <div style={{fontSize:12,color:"#94A3B8"}}>현재고</div>
-              </div>
-            </div>);
-          }):<div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:15}}>발주 필요 항목이 없습니다</div>}
-          {reorderActionItems.length>8&&<div style={{textAlign:"center",fontSize:14,color:"#94A3B8",marginTop:4,cursor:"pointer"}} onClick={()=>setActiveTab("reorder")}>외 {reorderActionItems.length-8}건 더보기 → 리오더 탭</div>}
-        </SectionCard>
-
-        {/* 오른쪽: 입고대기 현황 + 샘플 진행 현황 */}
-        <div>
+      {/* 하단: 입고대기 현황 + 샘플 진행 현황 (풀폭) */}
+      <div>
           <SectionCard title="📦 입고대기 현황" subtitle={`${pendingSchedules.length}건 · 총 ${pendingTotalQty.toLocaleString()}장`}>
             {pendingSchedules.length===0?(
               <div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:15}}>입고 대기 일정이 없습니다</div>
@@ -3307,7 +3236,6 @@ export default function Dashboard(){
               })}
             </div>
           </SectionCard>
-        </div>
       </div>
     </>
   );
