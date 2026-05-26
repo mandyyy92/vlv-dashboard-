@@ -2296,6 +2296,16 @@ const PLANNING_CATEGORY_ICONS={"상의":"👕","하의":"👖","아우터":"🧥
 const PLANNING_STATUSES=["아이디어","샘플의뢰","샘플확인","생산확정"];
 const PLANNING_STATUS_COLORS={"아이디어":"#94A3B8","샘플의뢰":"#F59E0B","샘플확인":"#3B82F6","생산확정":"#059669"};
 const TREND_CATEGORIES=["전체","상의","하의","아우터","신발","모자","가방","액세서리","기타"];
+const SUB_CATEGORIES={
+  "상의":["후디","맨투맨","반팔티셔츠","긴팔티셔츠","니트","카디건","셔츠"],
+  "하의":["데님","슬랙스","카고/조거","트레이닝","숏팬츠"],
+  "아우터":["바람막이/코치","플리스/뽀글이","패딩","코트","데님/레더자켓","점퍼"],
+  "신발":["스니커즈","부츠","로퍼/구두","샌들/슬리퍼"],
+  "모자":["캡","버킷햇","비니"],
+  "가방":["크로스백","백팩","토트백","에코백"],
+  "액세서리":["주얼리","안경/시계","머플러/스카프","벨트/키링"],
+  "기타":[]
+};
 
 function PlanningTab(){
   // 새 reference_items 테이블 (별도 등록 섹션) — 기존 planning 테이블과 공존
@@ -2515,11 +2525,80 @@ function PlanningTab(){
     return"기타";
   };
 
-  // 필터 적용 — 카테고리(정규화) + 검색어(상품명/브랜드/키워드)
+  // 세분류 매핑 — 키워드/상품명/카테고리 텍스트 기반
+  const mapTrendSubCategory=(item)=>{
+    const mainCat=mapTrendCategory(item);
+    if(mainCat==="기타"||!SUB_CATEGORIES[mainCat]?.length)return null;
+    const text=`${item["키워드"]||""} ${item["상품명"]||item.name||item.title||""} ${item["카테고리"]||item.category||""}`.toLowerCase();
+    if(mainCat==="상의"){
+      if(/후디|hood/i.test(text))return"후디";
+      if(/맨투맨|스웨트셔츠|sweatshirt|크루넥/i.test(text))return"맨투맨";
+      if(/반팔|반소매|short[\s-]?sleeve|링거|레글런/i.test(text))return"반팔티셔츠";
+      if(/긴팔|롱슬리브|long[\s-]?sleeve/i.test(text))return"긴팔티셔츠";
+      if(/니트|knit|코위찬/i.test(text)&&!/카디건/i.test(text))return"니트";
+      if(/카디건|cardigan/i.test(text))return"카디건";
+      if(/셔츠|블라우스|shirt/i.test(text))return"셔츠";
+      return null;
+    }
+    if(mainCat==="하의"){
+      if(/데님|진|배럴|디스트로이드|커브드|데님 팬츠/i.test(text))return"데님";
+      if(/슬랙스|핀턱|치노|울 슬랙스/i.test(text))return"슬랙스";
+      if(/카고|조거|벌룬|봄바초|와이드 팬츠/i.test(text))return"카고/조거";
+      if(/트레이닝|sweat[\s-]?pants/i.test(text))return"트레이닝";
+      if(/숏팬츠|반바지|버뮤다|숏츠|short[\s-]?pants/i.test(text))return"숏팬츠";
+      return null;
+    }
+    if(mainCat==="아우터"){
+      if(/바람막이|코치|아노락|windbreaker/i.test(text))return"바람막이/코치";
+      if(/플리스|뽀글이|쉐르파|fleece/i.test(text))return"플리스/뽀글이";
+      if(/패딩|down|구스다운|숏 패딩|롱 패딩|점퍼 베스트/i.test(text))return"패딩";
+      if(/코트|coat|발마칸|트렌치/i.test(text))return"코트";
+      if(/데님 자켓|레더 자켓|denim jacket|leather/i.test(text))return"데님/레더자켓";
+      if(/점퍼|자켓|jacket|바시티|MA-1/i.test(text))return"점퍼";
+      return null;
+    }
+    if(mainCat==="신발"){
+      if(/스니커즈|운동화|러닝화|레트로|코트|어글리|캔버스|스케이트/i.test(text))return"스니커즈";
+      if(/부츠|워커|첼시|컴뱃|레인|boots/i.test(text))return"부츠";
+      if(/로퍼|구두|페니|더비|메리 제인|loafer/i.test(text))return"로퍼/구두";
+      if(/샌들|슬라이드|버켄|클로그|sandal|slipper/i.test(text))return"샌들/슬리퍼";
+      return null;
+    }
+    if(mainCat==="모자"){
+      if(/캡|볼캡|베이스볼|cap/i.test(text))return"캡";
+      if(/버킷햇|bucket/i.test(text))return"버킷햇";
+      if(/비니|beanie|니트 비니|와플/i.test(text))return"비니";
+      return null;
+    }
+    if(mainCat==="가방"){
+      if(/크로스|cross/i.test(text))return"크로스백";
+      if(/백팩|backpack/i.test(text))return"백팩";
+      if(/토트|tote/i.test(text))return"토트백";
+      if(/에코|eco/i.test(text))return"에코백";
+      return null;
+    }
+    if(mainCat==="액세서리"){
+      if(/목걸이|반지|귀걸이|팔찌|주얼리|jewelry|necklace|ring/i.test(text))return"주얼리";
+      if(/안경|선글라스|시계|watch|glass/i.test(text))return"안경/시계";
+      if(/머플러|스카프|muffler|scarf/i.test(text))return"머플러/스카프";
+      if(/벨트|키링|서스펜더|넥타이|belt|keyring/i.test(text))return"벨트/키링";
+      return null;
+    }
+    return null;
+  };
+
+  // 필터 적용 — 카테고리(정규화, 대분류 또는 "대분류::세분류") + 검색어
   const filteredTrends=useMemo(()=>{
     const q=trendSearch.trim().toLowerCase();
     return trendData.filter(it=>{
-      const catMatch=trendCatFilter==="전체"||mapTrendCategory(it)===trendCatFilter;
+      let catMatch=false;
+      if(trendCatFilter==="전체")catMatch=true;
+      else if(trendCatFilter.includes("::")){
+        const[mainCat,subCat]=trendCatFilter.split("::");
+        catMatch=mapTrendCategory(it)===mainCat&&mapTrendSubCategory(it)===subCat;
+      }else{
+        catMatch=mapTrendCategory(it)===trendCatFilter;
+      }
       if(!q)return catMatch;
       const name=String(it["상품명"]||it.name||it.title||"").toLowerCase();
       const brand=String(it["브랜드"]||it.brand||"").toLowerCase();
@@ -2592,11 +2671,21 @@ function PlanningTab(){
           <label style={{fontSize:13,fontWeight:600,color:"#64748B"}}>카테고리:</label>
           <select value={trendCatFilter} onChange={e=>setTrendCatFilter(e.target.value)} style={{
             padding:"8px 32px 8px 12px",fontSize:13,border:"1px solid #E2E8F0",borderRadius:8,
-            background:"#FFF",cursor:"pointer",minWidth:160,outline:"none"
+            background:"#FFF",cursor:"pointer",minWidth:220,outline:"none"
           }}>
-            {TREND_CATEGORIES.map(cat=>{
-              const count=cat==="전체"?trendData.length:trendData.filter(it=>mapTrendCategory(it)===cat).length;
-              return(<option key={cat} value={cat}>{cat} ({count})</option>);
+            <option value="전체">전체 ({trendData.length})</option>
+            {TREND_CATEGORIES.filter(c=>c!=="전체").map(mainCat=>{
+              const mainCount=trendData.filter(it=>mapTrendCategory(it)===mainCat).length;
+              if(mainCount===0)return null;
+              const subList=SUB_CATEGORIES[mainCat]||[];
+              return(<optgroup key={mainCat} label={`━ ${mainCat} (${mainCount})`}>
+                <option value={mainCat}>{mainCat} 전체 ({mainCount})</option>
+                {subList.map(subCat=>{
+                  const subCount=trendData.filter(it=>mapTrendCategory(it)===mainCat&&mapTrendSubCategory(it)===subCat).length;
+                  if(subCount===0)return null;
+                  return(<option key={`${mainCat}::${subCat}`} value={`${mainCat}::${subCat}`}>　└ {subCat} ({subCount})</option>);
+                })}
+              </optgroup>);
             })}
           </select>
           <input type="text" placeholder="상품명/브랜드 검색..." value={trendSearch} onChange={e=>setTrendSearch(e.target.value)} style={{
