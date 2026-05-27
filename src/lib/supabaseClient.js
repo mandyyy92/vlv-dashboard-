@@ -3,8 +3,7 @@
 // App.jsx 와 hooks/ 양쪽에서 같은 인스턴스를 import 해서 씁니다.
 
 export const SUPABASE_URL="https://tzjpgqfdudbhygzmbygo.supabase.co";
-export const SUPABASE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR6anBncWZkdWRiaHlnem1ieWdvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4MTkzNTIsImV4cCI6MjA5MDM5NTM1Mn0.xQheWcHI-GqjGR8HHjhE_0x9KkGci-McoSQbI4AEHxc
-";
+export const SUPABASE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR6anBncWZkdWRiaHlnem1ieWdvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4MTkzNTIsImV4cCI6MjA5MDM5NTM1Mn0.xQheWcHI-GqjGR8HHjhE_0x9KkGci-McoSQbI4AEHxc";
 export const sbHeaders={
   "apikey":SUPABASE_KEY,
   "Authorization":`Bearer ${SUPABASE_KEY}`,
