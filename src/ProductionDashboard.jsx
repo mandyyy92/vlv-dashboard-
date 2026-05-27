@@ -490,10 +490,73 @@ function OrderDrawer({ order, onClose, onAddInbound, onDelete, onUpdate }) {
   const [editing, setEditing] = useState(false);
   const [contractDate, setContractDate] = useState(order.contract_date || "");
   const [expectedDate, setExpectedDate] = useState(order.expected_final_date || "");
+  const contractInputRef = useRef(null);
+  const [contractUploading, setContractUploading] = useState(false);
 
   const saveDate = async () => {
     await onUpdate({ contract_date: contractDate || null, expected_final_date: expectedDate || null });
     setEditing(false);
+  };
+
+  const uploadContract = async (file) => {
+    if (!file) return;
+    setContractUploading(true);
+    try {
+      // 파일명: order_id_타임스탬프_원본명
+      const ext = file.name.split(".").pop();
+      const safeName = `${order.id}_${Date.now()}.${ext}`;
+      const uploadUrl = `${SUPABASE_URL}/storage/v1/object/contracts/${safeName}`;
+      const r = await fetch(uploadUrl, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${SUPABASE_KEY}`,
+          "apikey": SUPABASE_KEY,
+          "Content-Type": file.type || "application/octet-stream",
+          "x-upsert": "true",
+        },
+        body: file,
+      });
+      if (!r.ok) {
+        const t = await r.text();
+        throw new Error(`Storage 업로드 실패: ${t}`);
+      }
+      const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/contracts/${safeName}`;
+      await onUpdate({
+        contract_file_url: publicUrl,
+        contract_file_name: file.name,
+        contract_uploaded_at: new Date().toISOString(),
+      });
+    } catch (e) {
+      alert("계약서 업로드 실패: " + e.message);
+    }
+    setContractUploading(false);
+  };
+
+  const downloadContract = async () => {
+    if (!order.contract_file_url) return;
+    try {
+      // Private 버킷이라 signed URL 생성
+      const path = order.contract_file_url.split("/contracts/")[1];
+      const r = await fetch(`${SUPABASE_URL}/storage/v1/object/sign/contracts/${path}`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${SUPABASE_KEY}`,
+          "apikey": SUPABASE_KEY,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ expiresIn: 3600 }),
+      });
+      if (r.ok) {
+        const data = await r.json();
+        const fullUrl = `${SUPABASE_URL}/storage/v1${data.signedURL || data.signedUrl}`;
+        window.open(fullUrl, "_blank");
+      } else {
+        // signed URL 실패 시 그냥 public URL로 시도
+        window.open(order.contract_file_url, "_blank");
+      }
+    } catch (e) {
+      window.open(order.contract_file_url, "_blank");
+    }
   };
 
   return (
@@ -521,6 +584,50 @@ function OrderDrawer({ order, onClose, onAddInbound, onDelete, onUpdate }) {
             <div style={{ ...S.progBar, marginTop: 12, height: 8, width: "100%" }}>
               <div style={{ ...S.progFill, width: `${order.receive_rate}%`, background: order.status === "delayed" ? "#B91C1C" : order.status === "completed" ? "#15803D" : "#0369A1" }} />
             </div>
+          </div>
+
+          {/* 계약서 카드 */}
+          <div style={S.drawerCard}>
+            <div style={S.drawerCardHead}>📄 계약서</div>
+            {contractUploading ? (
+              <div style={{ marginTop: 10, textAlign: "center", padding: 20 }}>
+                <div style={{ ...S.spinner, width: 24, height: 24, borderWidth: 2 }} />
+                <div style={{ fontSize: 12, color: "#64748B", marginTop: 8 }}>업로드 중...</div>
+              </div>
+            ) : order.contract_file_url ? (
+              <div style={{ marginTop: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "white", padding: "10px 12px", borderRadius: 6, border: "1px solid #E2E8F0" }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 13, color: "#1F2937", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{order.contract_file_name || "계약서"}</div>
+                    <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 3 }}>
+                      업로드: {order.contract_uploaded_at ? new Date(order.contract_uploaded_at).toISOString().slice(0, 10) : "—"}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, marginLeft: 10 }}>
+                    <button style={S.miniBtn} onClick={downloadContract}>다운로드</button>
+                    <button style={S.miniBtnGhost} onClick={() => contractInputRef.current?.click()}>교체</button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div style={{ marginTop: 10 }}>
+                <div style={S.fileEmpty}>계약서 미첨부</div>
+                <button style={{ ...S.primaryBtn, marginTop: 8, width: "100%", justifyContent: "center" }} onClick={() => contractInputRef.current?.click()}>
+                  계약서 업로드
+                </button>
+              </div>
+            )}
+            <input
+              ref={contractInputRef}
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) uploadContract(f);
+                e.target.value = "";
+              }}
+            />
           </div>
 
           <div style={S.drawerCard}>
