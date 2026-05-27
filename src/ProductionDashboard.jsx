@@ -277,10 +277,8 @@ export default function ProductionDashboard() {
       <header style={S.header}>
         <div>
           <div style={S.brandRow}>
-            <div style={S.brandLogo}>VLVD</div>
             <div style={S.brandTitle}>생산 오더 입고 관리 시스템</div>
           </div>
-          <div style={S.subtitle}>VIVA LA VIDA · Production Order Lifecycle Management</div>
         </div>
         <button style={S.primaryBtn} onClick={() => setShowUpload(true)}>
           <span style={{ fontSize: 18, marginRight: 6 }}>＋</span> 작업지시서 업로드
@@ -881,7 +879,7 @@ const S = {
   wrap: { minHeight: "100vh", background: "#F8FAFC", color: "#0F172A", fontFamily: "'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', sans-serif", padding: "24px 32px 80px" },
   header: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24, gap: 24 },
   brandRow: { display: "flex", alignItems: "center", gap: 12 },
-  brandTitle: { fontSize: 24, fontWeight: 600, color: "#0F172A", letterSpacing: -0.2 },
+  brandTitle: { fontSize: 18, fontWeight: 600, color: "#0F172A", letterSpacing: -0.2 },
   subtitle: { fontSize: 12, color: "#64748B", marginTop: 6, marginLeft: 2, letterSpacing: 0.2 },
 
   primaryBtn: { background: "#0F172A", color: "white", border: "none", padding: "10px 18px", borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", transition: "all 0.15s" },
