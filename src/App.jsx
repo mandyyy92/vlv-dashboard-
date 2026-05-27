@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { sb, supabase } from "./lib/supabaseClient";
-import { Shirt, Plus, Search, Sparkles, ExternalLink, RefreshCw, Check } from "lucide-react";
+import { Shirt } from "lucide-react";
 import TrendDashboard from "./pages/TrendDashboard";
 import { useReorderData, adaptToBasic } from "./hooks/useReorderData";
 import { useReferenceItems } from "./hooks/useReferenceItems";
@@ -2357,11 +2357,6 @@ function PlanningTab(){
   const[trendData,setTrendData]=useState([]);
   const[trendError,setTrendError]=useState("");
   const[trendUpdatedAt,setTrendUpdatedAt]=useState(null);
-  const[tfCat,setTfCat]=useState("전체");      // category_main
-  const[tfSub,setTfSub]=useState("전체");      // category_sub
-  const[tfFit,setTfFit]=useState("전체");      // fit
-  const[tfMood,setTfMood]=useState("전체");    // mood (text[])
-  const[tfDetail,setTfDetail]=useState("전체");// details (text[])
 
   useEffect(()=>{(async()=>{
     setLoading(true);
@@ -2463,29 +2458,6 @@ function PlanningTab(){
   };
   useEffect(()=>{loadTrends();},[]);
 
-  // "기획 추가" → is_planned=true, planned_at=now() 업데이트 후 로컬 state 갱신
-  const markPlanned=async(item)=>{
-    const planned_at=new Date().toISOString();
-    const prev=trendData;
-    setTrendData(arr=>arr.map(x=>x.id===item.id?{...x,is_planned:true,planned_at}:x));
-    const{error}=await supabase
-      .from("musinsa_weekly_top50")
-      .update({is_planned:true,planned_at})
-      .eq("id",item.id);
-    if(error){
-      console.error("[무신사 트렌드] 기획 추가 실패:",error);
-      alert("기획 추가에 실패했습니다: "+(error.message||""));
-      setTrendData(prev);
-    }
-  };
-
-  // category_sub 동적 추출 (null 제외)
-  const trendSubOptions=useMemo(()=>{
-    const set=new Set();
-    trendData.forEach(it=>{if(it.category_sub)set.add(it.category_sub);});
-    return["전체",...Array.from(set).sort()];
-  },[trendData]);
-
   // 마지막 업데이트 라벨 (한국시간 M월 D일 HH:mm)
   const trendUpdatedLabel=useMemo(()=>{
     if(!trendUpdatedAt)return"";
@@ -2499,18 +2471,6 @@ function PlanningTab(){
   // 상품명 정리
   const cleanProductName=(name)=>String(name||"").replace(/\s*-\s*사이즈.*$/,"").replace(/\s*\|\s*무신사\s*$/,"").trim();
 
-  // 선택된 칩들 AND 필터 (클라이언트 사이드)
-  const filteredTrends=useMemo(()=>{
-    return trendData.filter(it=>{
-      if(tfCat!=="전체"&&it.category_main!==tfCat)return false;
-      if(tfSub!=="전체"&&it.category_sub!==tfSub)return false;
-      if(tfFit!=="전체"&&it.fit!==tfFit)return false;
-      if(tfMood!=="전체"&&!(Array.isArray(it.mood)&&it.mood.includes(tfMood)))return false;
-      if(tfDetail!=="전체"&&!(Array.isArray(it.details)&&it.details.includes(tfDetail)))return false;
-      return true;
-    });
-  },[trendData,tfCat,tfSub,tfFit,tfMood,tfDetail]);
-
   if(loading)return <SectionCard title="💡 아이템 기획"><div style={{textAlign:"center",padding:40,color:"#94A3B8"}}>⏳ 데이터 불러오는 중...</div></SectionCard>;
 
   return(<>
@@ -2519,32 +2479,7 @@ function PlanningTab(){
       {/* 헤더 */}
       <div className="flex justify-between items-center mb-4">
         <div className="text-2xl font-bold text-white">🔥 무신사 트렌드 — 주간 TOP</div>
-        <div className="flex items-center gap-3">
-          {trendUpdatedLabel&&<span className="text-xs text-neutral-400">마지막 업데이트: {trendUpdatedLabel}</span>}
-          <button onClick={loadTrends} className="flex items-center gap-1.5 bg-neutral-800 hover:bg-neutral-700 text-white text-xs rounded px-3 py-1.5 border-0 cursor-pointer">
-            <RefreshCw className="w-3.5 h-3.5" />새로고침
-          </button>
-        </div>
-      </div>
-
-      {/* 5단계 필터 */}
-      <div className="mb-6 flex flex-col gap-3">
-        {[
-          {label:"카테고리",value:tfCat,set:setTfCat,opts:["전체","TOP","BOTTOM","OUTER","ACC"]},
-          {label:"세부",value:tfSub,set:setTfSub,opts:trendSubOptions},
-          {label:"핏",value:tfFit,set:setTfFit,opts:["전체","오버핏","세미오버","레귤러","크롭","롱"]},
-          {label:"무드",value:tfMood,set:setTfMood,opts:["전체","미니멀","스트릿","빈티지","고프코어","아메카지","워크웨어"]},
-          {label:"디테일",value:tfDetail,set:setTfDetail,opts:["전체","피그먼트","워싱","자수","나염","절개","데미지"]},
-        ].map(group=>(
-          <div key={group.label} className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-16 shrink-0">{group.label}</span>
-            <div className="flex flex-wrap gap-1.5">
-              {group.opts.map(opt=>(
-                <button key={opt} onClick={()=>group.set(opt)} className={`text-xs rounded-full px-3 py-1 cursor-pointer transition border-0 ${group.value===opt?"bg-white text-black font-medium":"bg-neutral-800 text-neutral-400 hover:bg-neutral-700"}`}>{opt}</button>
-              ))}
-            </div>
-          </div>
-        ))}
+        {trendUpdatedLabel&&<span className="text-xs text-neutral-400">마지막 업데이트: {trendUpdatedLabel}</span>}
       </div>
 
       {/* 카드 그리드 */}
@@ -2556,14 +2491,12 @@ function PlanningTab(){
             <div key={i} className="aspect-[3/4] bg-neutral-800 animate-pulse rounded-lg" />
           ))
         ):trendData.length===0?(
-          <div className="col-span-full text-center py-12 text-neutral-500">아직 수집된 데이터가 없어요. Apps Script를 실행해주세요.</div>
-        ):filteredTrends.length===0?(
-          <div className="col-span-full text-center py-12 text-neutral-500">조건에 맞는 상품이 없어요. 필터를 조정해보세요.</div>
+          <div className="col-span-full text-center py-12 text-neutral-500">아직 수집된 데이터가 없어요</div>
         ):(
-          filteredTrends.map(it=>{
-            const onSale=it.sale_price&&it.normal_price&&it.sale_price<it.normal_price;
+          trendData.map(it=>{
+            const price=(it.sale_price&&it.normal_price&&it.sale_price<it.normal_price)?it.sale_price:it.normal_price;
             return(
-            <div key={it.id} className="aspect-[3/4] bg-neutral-900 rounded-lg overflow-hidden cursor-pointer group relative hover:ring-2 hover:ring-white/30 transition flex flex-col">
+            <div key={it.id} onClick={()=>window.open(it.product_url,"_blank")} className="aspect-[3/4] bg-neutral-900 rounded-lg overflow-hidden cursor-pointer hover:opacity-90 transition flex flex-col">
               {/* 이미지 영역 */}
               <div className="flex-1 relative bg-neutral-800 overflow-hidden">
                 {it.image_url?(
@@ -2575,36 +2508,12 @@ function PlanningTab(){
                 )}
                 {/* rank 뱃지 */}
                 <div className="absolute top-2 left-2 bg-black/70 text-white text-xs font-bold rounded px-2 py-0.5">#{it.rank}</div>
-                {/* 기획 추가됨 표시 */}
-                {it.is_planned&&(
-                  <div className="absolute top-2 left-10 bg-green-500 text-white rounded-full w-5 h-5 flex items-center justify-center">
-                    <Check className="w-3 h-3" />
-                  </div>
-                )}
-                {/* 할인율 */}
-                {it.sale_rate>0&&<div className="absolute top-2 right-2 bg-red-600 text-white text-xs font-bold rounded px-2 py-0.5">-{it.sale_rate}%</div>}
-                {/* 세부 카테고리 칩 */}
-                {it.category_sub&&<div className="absolute bottom-2 left-2 bg-white/90 text-black text-[10px] font-medium rounded px-1.5 py-0.5">{it.category_sub}</div>}
-                {/* Hover 오버레이 */}
-                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition flex flex-col items-center justify-center gap-2">
-                  <button onClick={(e)=>{e.stopPropagation();markPlanned(it);}} className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white text-xs rounded px-3 py-1.5 border-0 cursor-pointer"><Plus className="w-3.5 h-3.5" />기획 추가</button>
-                  <button onClick={(e)=>{e.stopPropagation();alert("Phase 4에서 구현 예정입니다");}} className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white text-xs rounded px-3 py-1.5 border-0 cursor-pointer"><Search className="w-3.5 h-3.5" />비슷한 상품</button>
-                  <button onClick={(e)=>{e.stopPropagation();alert("Phase 2에서 구현 예정입니다");}} className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white text-xs rounded px-3 py-1.5 border-0 cursor-pointer"><Sparkles className="w-3.5 h-3.5" />디테일 분석</button>
-                  <button onClick={(e)=>{e.stopPropagation();window.open(it.product_url,"_blank");}} className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white text-xs rounded px-3 py-1.5 border-0 cursor-pointer"><ExternalLink className="w-3.5 h-3.5" />무신사에서 보기</button>
-                </div>
               </div>
               {/* 하단 정보 */}
-              <div className="p-2.5 bg-neutral-900">
-                <div className="text-[10px] text-neutral-400 truncate">{it.brand}</div>
-                <div className="text-xs font-medium text-white line-clamp-1">{cleanProductName(it.product_name)}</div>
-                <div className="flex items-center gap-1.5 mt-1">
-                  {onSale?(<>
-                    <span className="text-sm font-bold text-white">{it.sale_price.toLocaleString("ko-KR")}원</span>
-                    <span className="text-[10px] text-neutral-500 line-through">{it.normal_price.toLocaleString("ko-KR")}원</span>
-                  </>):(
-                    <span className="text-sm font-bold text-white">{(it.normal_price??it.sale_price??0).toLocaleString("ko-KR")}원</span>
-                  )}
-                </div>
+              <div className="p-2.5">
+                <div className="text-[11px] text-neutral-400 mb-0.5 truncate">{it.brand}</div>
+                <div className="text-sm font-semibold text-white line-clamp-1 mb-1">{cleanProductName(it.product_name)}</div>
+                <div className="text-sm font-bold text-white">{(price??it.sale_price??0).toLocaleString("ko-KR")}원</div>
               </div>
             </div>
             );
