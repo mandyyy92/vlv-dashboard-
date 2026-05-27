@@ -645,27 +645,41 @@ function UploadModal({ existingOrderNos, onClose, onComplete }) {
     if (!orderNoBase.trim()) { alert("오더 번호를 입력하세요"); return; }
     setStep("uploading");
     try {
-      // 작업처별로 그룹화 -> 작업처마다 별도 오더 생성
-      const byFactory = {};
+      // 스타일별로 그룹화 -> 스타일마다 별도 오더 생성
+      const byStyle = {};
       parsed.items.forEach(it => {
-        if (!byFactory[it.factory]) byFactory[it.factory] = [];
-        byFactory[it.factory].push(it);
+        const key = it.style_no + "||" + it.factory;
+        if (!byStyle[key]) {
+          byStyle[key] = {
+            style_no: it.style_no,
+            product_name: it.product_name,
+            factory: it.factory,
+            sheet: it.sheet,
+            items: [],
+          };
+        }
+        byStyle[key].items.push(it);
       });
-      const factoryList = Object.keys(byFactory);
 
-      for (let i = 0; i < factoryList.length; i++) {
-        const factory = factoryList[i];
-        const items = byFactory[factory];
-        const subOrderNo = factoryList.length > 1 
-          ? `${orderNoBase}-${String.fromCharCode(65+i)}` 
-          : orderNoBase;
-        
-        // 1) 오더 생성
+      const styleList = Object.values(byStyle);
+
+      // 오더번호 자동 부여: PO-26SS-001, PO-26SS-002, ...
+      // orderNoBase에서 마지막 숫자 추출하여 시작점으로 사용
+      const baseMatch = orderNoBase.match(/^(.*?)(\d+)$/);
+      const prefix = baseMatch ? baseMatch[1] : orderNoBase + "-";
+      const startNum = baseMatch ? parseInt(baseMatch[2], 10) : 1;
+      const padLen = baseMatch ? baseMatch[2].length : 3;
+
+      for (let i = 0; i < styleList.length; i++) {
+        const styleGroup = styleList[i];
+        const orderNo = `${prefix}${String(startNum + i).padStart(padLen, "0")}`;
+
+        // 1) 오더 생성 (스타일별)
         const orderPayload = {
-          order_no: subOrderNo,
-          vendor_name: factory,
+          order_no: orderNo,
+          vendor_name: styleGroup.factory,
           season,
-          order_date: new Date().toISOString().slice(0,10),
+          order_date: new Date().toISOString().slice(0, 10),
           contract_date: contractDate || null,
           expected_final_date: expectedDate || null,
         };
@@ -673,7 +687,7 @@ function UploadModal({ existingOrderNos, onClose, onComplete }) {
         const orderId = createdRows[0].id;
 
         // 2) 아이템 일괄 생성
-        const itemsPayload = items.map(it => ({
+        const itemsPayload = styleGroup.items.map(it => ({
           order_id: orderId,
           style_no: it.style_no,
           product_name: it.product_name,
@@ -749,7 +763,7 @@ function UploadModal({ existingOrderNos, onClose, onComplete }) {
                 <div style={S.previewSectionTitle}>📝 오더 정보</div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                   <div>
-                    <div style={S.dimLabel}>오더 NO {parsed.factories.length > 1 && <span style={{ color: "#94A3B8" }}>(작업처별 -A, -B 자동 부여)</span>}</div>
+                    <div style={S.dimLabel}>오더 NO 시작 번호 <span style={{ color: "#94A3B8" }}>(스타일별로 자동 증가: -001, -002, ...)</span></div>
                     <input value={orderNoBase} onChange={e => setOrderNoBase(e.target.value)} style={S.formInput} />
                   </div>
                   <div>
