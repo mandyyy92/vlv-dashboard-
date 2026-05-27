@@ -881,8 +881,8 @@ const S = {
   wrap: { minHeight: "100vh", background: "#F8FAFC", color: "#0F172A", fontFamily: "'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', sans-serif", padding: "24px 32px 80px" },
   header: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24, gap: 24 },
   brandRow: { display: "flex", alignItems: "center", gap: 12 },
-  brandLogo: { background: "#0F172A", color: "#E8A87C", fontWeight: 900, fontSize: 14, padding: "6px 10px", borderRadius: 6, letterSpacing: 0.5 },
-  brandTitle: { fontSize: 24, fontWeight: 700, color: "#0F172A", letterSpacing: -0.3 },
+  brandLogo: { background: "#0F172A", color: "#E8A87C", fontWeight: 700, fontSize: 12, padding: "4px 8px", borderRadius: 4, letterSpacing: 0.3 },
+  brandTitle: { fontSize: 16, fontWeight: 600, color: "#0F172A", letterSpacing: -0.2 },
   subtitle: { fontSize: 12, color: "#64748B", marginTop: 6, marginLeft: 2, letterSpacing: 0.2 },
 
   primaryBtn: { background: "#0F172A", color: "white", border: "none", padding: "10px 18px", borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", transition: "all 0.15s" },
