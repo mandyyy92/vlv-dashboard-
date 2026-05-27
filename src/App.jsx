@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { sb } from "./lib/supabaseClient";
+import { sb, supabase } from "./lib/supabaseClient";
+import { Shirt, Plus, Search, Sparkles, ExternalLink, RefreshCw, Check } from "lucide-react";
+import TrendDashboard from "./pages/TrendDashboard";
 import { useReorderData, adaptToBasic } from "./hooks/useReorderData";
 import { useReferenceItems } from "./hooks/useReferenceItems";
 import ReferenceItemForm from "./components/ReferenceItemForm";
@@ -2324,25 +2326,6 @@ function PlanningTab(){
     setEditingRefItem(item);
     setShowRefForm(true);
   };
-  const handleAddFromTrend=async(trendItem)=>{
-    try{
-      await addRefItem({
-        name:trendItem.name||trendItem.title||trendItem.product_name||"",
-        category:trendItem.category||"기타",
-        reference_url:trendItem.url||trendItem.product_url||trendItem.link||"",
-        image_url:trendItem.image||trendItem.image_url||trendItem.thumbnail||"",
-        expected_price:trendItem.price?Number(String(trendItem.price).replace(/[^0-9]/g,""))||null:(trendItem.lprice?Number(trendItem.lprice):null),
-        expected_cost:null,
-        material:"",
-        color:"",
-        memo:`무신사 트렌드 자동 등록${trendItem.rank?` — 상위 ${trendItem.rank}위`:""}${trendItem.brand?` (${trendItem.brand})`:""}`,
-        source:"musinsa_trend",
-      });
-      alert("레퍼런스로 등록되었습니다");
-    }catch(e){
-      alert("등록 실패: "+(e?.message||e));
-    }
-  };
 
   const filteredRefItems=refFilterCategory==="전체"
     ?refItems
@@ -2369,13 +2352,16 @@ function PlanningTab(){
   const[fColors,setFColors]=useState("");
   const[fNote,setFNote]=useState("");
 
-  const[trendLoading,setTrendLoading]=useState(false);
+  // 무신사 트렌드 (Supabase: musinsa_weekly_top50 직접 조회)
+  const[trendLoading,setTrendLoading]=useState(true);
   const[trendData,setTrendData]=useState([]);
   const[trendError,setTrendError]=useState("");
-  const[trendCatFilter,setTrendCatFilter]=useState("전체");
-  const[trendSearch,setTrendSearch]=useState("");
-  const[trendAdded,setTrendAdded]=useState({});
-  const TREND_URL="https://script.google.com/macros/s/AKfycbwAqWsChdObSMX2T6rfJwiQsAB-VV1xhHcwwA-Des1CjigKnN2ZgT10I9ALkwfB6IkZfA/exec";
+  const[trendUpdatedAt,setTrendUpdatedAt]=useState(null);
+  const[tfCat,setTfCat]=useState("전체");      // category_main
+  const[tfSub,setTfSub]=useState("전체");      // category_sub
+  const[tfFit,setTfFit]=useState("전체");      // fit
+  const[tfMood,setTfMood]=useState("전체");    // mood (text[])
+  const[tfDetail,setTfDetail]=useState("전체");// details (text[])
 
   useEffect(()=>{(async()=>{
     setLoading(true);
@@ -2452,288 +2438,180 @@ function PlanningTab(){
     setActiveSeason(v);
   };
 
-  // 트렌드 데이터 로드 (Google Apps Script → 네이버 쇼핑)
+  // 무신사 트렌드 데이터 로드 (Supabase: musinsa_weekly_top50)
   const loadTrends=async()=>{
     setTrendLoading(true);setTrendError("");
-    try{
-      const res=await fetch(TREND_URL);
-      if(!res.ok)throw new Error(`HTTP ${res.status}`);
-      const data=await res.json();
-      const list=Array.isArray(data?.trends)?data.trends:Array.isArray(data)?data:[];
-      // TODO: 디버그 후 제거
-      if(list&&list.length>0){
-        console.log('[무신사 응답 첫 아이템 키]',Object.keys(list[0]));
-        console.log('[무신사 응답 첫 아이템 샘플]',list[0]);
-      }
-      setTrendData(list);
-    }catch(e){
-      console.error("Trend load error:",e);
-      setTrendError(e.message||"불러오기 실패");
-    }finally{
-      setTrendLoading(false);
-    }
-  };
-
-  // 응답 필드 정규화 헬퍼 — 한글 키(Apps Script) 우선, 영문 키 fallback
-  const parseKrPrice=(v)=>{
-    if(v==null)return 0;
-    if(typeof v==="number")return v;
-    return parseInt(String(v).replace(/[^0-9]/g,""))||0;
-  };
-  const t_image=(it)=>it["이미지"]||it["이미지URL"]||it.image||it.image_url||it.imageUrl||it.thumbnail||"";
-  const t_name=(it)=>it["상품명"]||it["제목"]||it.name||it.title||"";
-  const t_brand=(it)=>it["브랜드"]||it["판매처"]||it.brand||it.maker||it.mallName||it.seller||"";
-  const t_category=(it)=>it["카테고리"]||it["분류"]||it.category||it.category1||"";
-  const t_mall=(it)=>it["쇼핑몰"]||it.mall||it.mallName||it.shop||"";
-  const t_link=(it)=>it["링크"]||it["URL"]||it.url||it.link||it.productUrl||it.ref_url||"";
-  const t_keyword=(it)=>it["키워드"]||it["검색어"]||it.keyword||it.searchKeyword||it.searchTerm||"";
-  const t_priceMin=(it)=>{
-    for(const k of ["최저가","가격","판매가","priceMin","lprice"]){
-      const v=it[k];if(v!=null){const n=parseKrPrice(v);if(n)return n;}
-    }
-    if(it.price&&typeof it.price==="object")return parseKrPrice(it.price.min);
-    if(it.price!=null)return parseKrPrice(it.price);
-    return 0;
-  };
-  const t_priceMax=(it)=>{
-    for(const k of ["최고가","정가","priceMax","hprice"]){
-      const v=it[k];if(v!=null){const n=parseKrPrice(v);if(n)return n;}
-    }
-    if(it.price&&typeof it.price==="object")return parseKrPrice(it.price.max);
-    return 0;
-  };
-  const t_priceLabel=(it)=>{
-    const lo=t_priceMin(it),hi=t_priceMax(it);
-    if(lo&&hi&&lo!==hi)return `${lo.toLocaleString()}~${hi.toLocaleString()}원`;
-    if(lo)return `${lo.toLocaleString()}원`;
-    return "";
-  };
-
-  // 무신사 카테고리 → 8개 대분류 정규화 (item 단위, 카테고리/상품명/키워드 합쳐서 매칭)
-  const mapTrendCategory=(item)=>{
-    if(!item)return"기타";
-    const cat=String(item["카테고리"]||item["분류"]||item.category||item.category1||"").trim();
-    if(["상의","하의","아우터","신발","모자","가방","액세서리","기타"].includes(cat))return cat;
-    const text=`${cat} ${item["상품명"]||item.name||item.title||""} ${item["키워드"]||item["검색어"]||item.keyword||""}`.toLowerCase();
-    if(/후디|hood|맨투맨|스웨트|티셔츠|t-?shirt|tee\b|니트|knit|카디건|cardigan|셔츠|shirt|블라우스|blouse|크루넥|롱슬리브|폴로|polo|탑\b|상의/.test(text))return"상의";
-    if(/팬츠|pants|바지|trouser|진\b|데님|denim|jean|슬랙스|slacks|쇼츠|숏팬츠|shorts|스커트|skirt|레깅스|legging|하의/.test(text))return"하의";
-    if(/자켓|jacket|코트|coat|패딩|padding|점퍼|jumper|집업|바람막이|플리스|fleece|무톤|아우터|outer|블레이저|blazer|베스트|vest|코치/.test(text))return"아우터";
-    if(/스니커즈|sneaker|운동화|부츠|boots|로퍼|loafer|샌들|sandal|슬리퍼|slipper|구두|러닝화|신발/.test(text))return"신발";
-    if(/캡\b|cap\b|모자|hat\b|비니|beanie|버킷|bucket|베레모|페도라|fedora/.test(text))return"모자";
-    if(/백\b|bag|가방|backpack|토트|tote|크로스|cross|에코백|메신저|messenger|클러치|clutch|숄더|shoulder/.test(text))return"가방";
-    if(/목걸이|necklace|반지|ring\b|귀걸이|earring|팔찌|bracelet|시계|watch\b|안경|선글라스|sunglass|머플러|muffler|스카프|scarf|벨트|belt|키링|keyring/.test(text))return"액세서리";
-    return"기타";
-  };
-
-  // 세분류 매핑 — 키워드/상품명/카테고리 텍스트 기반
-  const mapTrendSubCategory=(item)=>{
-    const mainCat=mapTrendCategory(item);
-    if(mainCat==="기타"||!SUB_CATEGORIES[mainCat]?.length)return null;
-    const text=`${item["키워드"]||""} ${item["상품명"]||item.name||item.title||""} ${item["카테고리"]||item.category||""}`.toLowerCase();
-    if(mainCat==="상의"){
-      if(/후디|hood/i.test(text))return"후디";
-      if(/맨투맨|스웨트셔츠|sweatshirt|크루넥/i.test(text))return"맨투맨";
-      if(/반팔|반소매|short[\s-]?sleeve|링거|레글런/i.test(text))return"반팔티셔츠";
-      if(/긴팔|롱슬리브|long[\s-]?sleeve/i.test(text))return"긴팔티셔츠";
-      if(/니트|knit|코위찬/i.test(text)&&!/카디건/i.test(text))return"니트";
-      if(/카디건|cardigan/i.test(text))return"카디건";
-      if(/셔츠|블라우스|shirt/i.test(text))return"셔츠";
-      return null;
-    }
-    if(mainCat==="하의"){
-      if(/데님|진|배럴|디스트로이드|커브드|데님 팬츠/i.test(text))return"데님";
-      if(/슬랙스|핀턱|치노|울 슬랙스/i.test(text))return"슬랙스";
-      if(/카고|조거|벌룬|봄바초|와이드 팬츠/i.test(text))return"카고/조거";
-      if(/트레이닝|sweat[\s-]?pants/i.test(text))return"트레이닝";
-      if(/숏팬츠|반바지|버뮤다|숏츠|short[\s-]?pants/i.test(text))return"숏팬츠";
-      return null;
-    }
-    if(mainCat==="아우터"){
-      if(/바람막이|코치|아노락|windbreaker/i.test(text))return"바람막이/코치";
-      if(/플리스|뽀글이|쉐르파|fleece/i.test(text))return"플리스/뽀글이";
-      if(/패딩|down|구스다운|숏 패딩|롱 패딩|점퍼 베스트/i.test(text))return"패딩";
-      if(/코트|coat|발마칸|트렌치/i.test(text))return"코트";
-      if(/데님 자켓|레더 자켓|denim jacket|leather/i.test(text))return"데님/레더자켓";
-      if(/점퍼|자켓|jacket|바시티|MA-1/i.test(text))return"점퍼";
-      return null;
-    }
-    if(mainCat==="신발"){
-      if(/스니커즈|운동화|러닝화|레트로|코트|어글리|캔버스|스케이트/i.test(text))return"스니커즈";
-      if(/부츠|워커|첼시|컴뱃|레인|boots/i.test(text))return"부츠";
-      if(/로퍼|구두|페니|더비|메리 제인|loafer/i.test(text))return"로퍼/구두";
-      if(/샌들|슬라이드|버켄|클로그|sandal|slipper/i.test(text))return"샌들/슬리퍼";
-      return null;
-    }
-    if(mainCat==="모자"){
-      if(/캡|볼캡|베이스볼|cap/i.test(text))return"캡";
-      if(/버킷햇|bucket/i.test(text))return"버킷햇";
-      if(/비니|beanie|니트 비니|와플/i.test(text))return"비니";
-      return null;
-    }
-    if(mainCat==="가방"){
-      if(/크로스|cross/i.test(text))return"크로스백";
-      if(/백팩|backpack/i.test(text))return"백팩";
-      if(/토트|tote/i.test(text))return"토트백";
-      if(/에코|eco/i.test(text))return"에코백";
-      return null;
-    }
-    if(mainCat==="액세서리"){
-      if(/목걸이|반지|귀걸이|팔찌|주얼리|jewelry|necklace|ring/i.test(text))return"주얼리";
-      if(/안경|선글라스|시계|watch|glass/i.test(text))return"안경/시계";
-      if(/머플러|스카프|muffler|scarf/i.test(text))return"머플러/스카프";
-      if(/벨트|키링|서스펜더|넥타이|belt|keyring/i.test(text))return"벨트/키링";
-      return null;
-    }
-    return null;
-  };
-
-  // 필터 적용 — 카테고리(정규화, 대분류 또는 "대분류::세분류") + 검색어
-  const filteredTrends=useMemo(()=>{
-    const q=trendSearch.trim().toLowerCase();
-    return trendData.filter(it=>{
-      let catMatch=false;
-      if(trendCatFilter==="전체")catMatch=true;
-      else if(trendCatFilter.includes("::")){
-        const[mainCat,subCat]=trendCatFilter.split("::");
-        catMatch=mapTrendCategory(it)===mainCat&&mapTrendSubCategory(it)===subCat;
-      }else{
-        catMatch=mapTrendCategory(it)===trendCatFilter;
-      }
-      if(!q)return catMatch;
-      const name=String(it["상품명"]||it.name||it.title||"").toLowerCase();
-      const brand=String(it["브랜드"]||it.brand||"").toLowerCase();
-      const keyword=String(it["키워드"]||it["검색어"]||"").toLowerCase();
-      return catMatch&&(name.includes(q)||brand.includes(q)||keyword.includes(q));
-    });
-  },[trendData,trendCatFilter,trendSearch]);
-
-  // 트렌드 카드 "➕ 기획추가" 클릭 → 모달 오픈 (즉시 insert 하지 않음)
-  const[trendModal,setTrendModal]=useState(null);
-  const openTrendModal=(it,key)=>{
-    if(trendAdded[key])return;
-    setTrendModal({
-      key,
-      name:t_name(it)||"",
-      category:mapTrendCategory(it),
-      ref_url:t_link(it)||"",
-      image_url:t_image(it)||"",
-      est_price:String(t_priceMin(it)||""),
-      est_cost:"",
-      material:"",
-      colors:"",
-      note:t_brand(it)?`무신사 트렌드 · ${t_brand(it)}`:"무신사 트렌드"
-    });
-  };
-  const updateTrendModal=(field,val)=>setTrendModal(m=>m?{...m,[field]:val}:m);
-  const confirmTrendAdd=async()=>{
-    if(!trendModal)return;
-    const m=trendModal;
-    if(!m.name.trim()){alert("상품명을 입력하세요");return;}
-    const row={
-      season:activeSeason,
-      name:m.name.trim(),
-      category:m.category||"기타",
-      ref_url:m.ref_url.trim()||null,
-      image_url:m.image_url.trim()||null,
-      est_price:parseInt(m.est_price)||0,
-      est_cost:parseInt(m.est_cost)||0,
-      material:m.material.trim(),
-      colors:m.colors.trim(),
-      status:"아이디어",
-      note:m.note.trim()
-    };
-    const r=await sb.insert("planning",row);
-    if(r&&r[0]){
-      setItems(p=>[r[0],...p]);
-      setTrendAdded(prev=>({...prev,[m.key]:true}));
-      setTrendModal(null);
+    const{data,error}=await supabase
+      .from("musinsa_weekly_top50")
+      .select("*")
+      .order("rank",{ascending:true})
+      .limit(50);
+    if(error){
+      console.error("[무신사 트렌드] 조회 실패:",error);
+      setTrendError(error.message||"데이터를 불러오지 못했습니다.");
+      setTrendData([]);
     }else{
-      alert("저장 실패. Supabase planning 테이블 컬럼을 확인하세요.");
+      const list=data||[];
+      setTrendData(list);
+      const latestMs=list.reduce((acc,it)=>{
+        const t=it.collected_at?new Date(it.collected_at).getTime():0;
+        return Number.isFinite(t)&&t>acc?t:acc;
+      },0);
+      setTrendUpdatedAt(latestMs>0?new Date(latestMs):null);
+    }
+    setTrendLoading(false);
+  };
+  useEffect(()=>{loadTrends();},[]);
+
+  // "기획 추가" → is_planned=true, planned_at=now() 업데이트 후 로컬 state 갱신
+  const markPlanned=async(item)=>{
+    const planned_at=new Date().toISOString();
+    const prev=trendData;
+    setTrendData(arr=>arr.map(x=>x.id===item.id?{...x,is_planned:true,planned_at}:x));
+    const{error}=await supabase
+      .from("musinsa_weekly_top50")
+      .update({is_planned:true,planned_at})
+      .eq("id",item.id);
+    if(error){
+      console.error("[무신사 트렌드] 기획 추가 실패:",error);
+      alert("기획 추가에 실패했습니다: "+(error.message||""));
+      setTrendData(prev);
     }
   };
 
-  // 접속 시 자동 로드
-  useEffect(()=>{loadTrends();},[]);
+  // category_sub 동적 추출 (null 제외)
+  const trendSubOptions=useMemo(()=>{
+    const set=new Set();
+    trendData.forEach(it=>{if(it.category_sub)set.add(it.category_sub);});
+    return["전체",...Array.from(set).sort()];
+  },[trendData]);
+
+  // 마지막 업데이트 라벨 (한국시간 M월 D일 HH:mm)
+  const trendUpdatedLabel=useMemo(()=>{
+    if(!trendUpdatedAt)return"";
+    try{
+      const parts=new Intl.DateTimeFormat("ko-KR",{timeZone:"Asia/Seoul",month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit",hour12:false}).formatToParts(trendUpdatedAt);
+      const get=(t)=>{const f=parts.find(x=>x.type===t);return f?f.value:"";};
+      return`${get("month")}월 ${get("day")}일 ${get("hour")}:${get("minute")}`;
+    }catch(e){return"";}
+  },[trendUpdatedAt]);
+
+  // 상품명 정리
+  const cleanProductName=(name)=>String(name||"").replace(/\s*-\s*사이즈.*$/,"").replace(/\s*\|\s*무신사\s*$/,"").trim();
+
+  // 선택된 칩들 AND 필터 (클라이언트 사이드)
+  const filteredTrends=useMemo(()=>{
+    return trendData.filter(it=>{
+      if(tfCat!=="전체"&&it.category_main!==tfCat)return false;
+      if(tfSub!=="전체"&&it.category_sub!==tfSub)return false;
+      if(tfFit!=="전체"&&it.fit!==tfFit)return false;
+      if(tfMood!=="전체"&&!(Array.isArray(it.mood)&&it.mood.includes(tfMood)))return false;
+      if(tfDetail!=="전체"&&!(Array.isArray(it.details)&&it.details.includes(tfDetail)))return false;
+      return true;
+    });
+  },[trendData,tfCat,tfSub,tfFit,tfMood,tfDetail]);
 
   if(loading)return <SectionCard title="💡 아이템 기획"><div style={{textAlign:"center",padding:40,color:"#94A3B8"}}>⏳ 데이터 불러오는 중...</div></SectionCard>;
 
   return(<>
-    {/* 무신사 트렌드 (제일 상단) */}
-    <SectionCard title="🔥 무신사 트렌드" subtitle="카테고리별 인기 상품을 자동으로 불러와 카드로 표시" actions={
-      <SmallBtn primary onClick={loadTrends}>{trendLoading?"⏳ 불러오는 중...":"🔄 새로고침"}</SmallBtn>
-    }>
-      {trendLoading&&trendData.length===0&&<div style={{padding:20,textAlign:"center",color:"#64748B",fontSize:15}}>무신사에서 인기 상품을 불러오는 중...</div>}
-      {trendError&&<div style={{padding:14,background:"#FEF2F2",border:"1px solid #FCA5A5",borderRadius:8,color:"#B91C1C",fontSize:14,whiteSpace:"pre-wrap",marginBottom:10}}>❌ {trendError}</div>}
-      {!trendLoading&&!trendError&&trendData.length===0&&<div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:15}}>표시할 트렌드 데이터가 없습니다. "새로고침" 버튼을 눌러 다시 시도해주세요.</div>}
-      {trendData.length>0&&<>
-        {/* 카테고리 드롭다운 + 검색창 */}
-        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:16,flexWrap:"wrap"}}>
-          <label style={{fontSize:13,fontWeight:600,color:"#64748B"}}>카테고리:</label>
-          <select value={trendCatFilter} onChange={e=>setTrendCatFilter(e.target.value)} style={{
-            padding:"8px 32px 8px 12px",fontSize:13,border:"1px solid #E2E8F0",borderRadius:8,
-            background:"#FFF",cursor:"pointer",minWidth:220,outline:"none"
-          }}>
-            <option value="전체">전체 ({trendData.length})</option>
-            {TREND_CATEGORIES.filter(c=>c!=="전체").map(mainCat=>{
-              const mainCount=trendData.filter(it=>mapTrendCategory(it)===mainCat).length;
-              if(mainCount===0)return null;
-              const subList=SUB_CATEGORIES[mainCat]||[];
-              return(<optgroup key={mainCat} label={`━ ${mainCat} (${mainCount})`}>
-                <option value={mainCat}>{mainCat} 전체 ({mainCount})</option>
-                {subList.map(subCat=>{
-                  const subCount=trendData.filter(it=>mapTrendCategory(it)===mainCat&&mapTrendSubCategory(it)===subCat).length;
-                  if(subCount===0)return null;
-                  return(<option key={`${mainCat}::${subCat}`} value={`${mainCat}::${subCat}`}>　└ {subCat} ({subCount})</option>);
-                })}
-              </optgroup>);
-            })}
-          </select>
-          <input type="text" placeholder="상품명/브랜드 검색..." value={trendSearch} onChange={e=>setTrendSearch(e.target.value)} style={{
-            flex:1,minWidth:200,padding:"8px 12px",fontSize:13,border:"1px solid #E2E8F0",borderRadius:8,outline:"none"
-          }} />
-          <span style={{fontSize:13,color:"#94A3B8"}}>{filteredTrends.length}개 표시</span>
+    {/* 무신사 트렌드 — 주간 TOP (Supabase: musinsa_weekly_top50) */}
+    <div className="bg-neutral-950 p-6 rounded-lg mb-4">
+      {/* 헤더 */}
+      <div className="flex justify-between items-center mb-4">
+        <div className="text-2xl font-bold text-white">🔥 무신사 트렌드 — 주간 TOP</div>
+        <div className="flex items-center gap-3">
+          {trendUpdatedLabel&&<span className="text-xs text-neutral-400">마지막 업데이트: {trendUpdatedLabel}</span>}
+          <button onClick={loadTrends} className="flex items-center gap-1.5 bg-neutral-800 hover:bg-neutral-700 text-white text-xs rounded px-3 py-1.5 border-0 cursor-pointer">
+            <RefreshCw className="w-3.5 h-3.5" />새로고침
+          </button>
         </div>
-        {/* 카드 3열 그리드 */}
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}}>
-          {filteredTrends.map((it,i)=>{
-            const key=`${t_category(it)||"x"}-${i}-${t_name(it)}`;
-            const added=trendAdded[key];
-            const cat=t_category(it);
-            const fallbackIcon=PLANNING_CATEGORY_ICONS[cat]||"🛍️";
-            const img=t_image(it);
-            const link=t_link(it);
-            const brand=t_brand(it);
-            return(<div key={key} style={{background:"#FFF",borderRadius:10,border:"1px solid #E2E8F0",overflow:"hidden",display:"flex",flexDirection:"column"}}>
-              <div style={{height:120,background:"#F8FAFC",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",position:"relative"}}>
-                {img?
-                  <img src={img} alt={t_name(it)} style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{e.currentTarget.style.display="none";}} />
-                  :<div style={{fontSize:48,lineHeight:1}}>{fallbackIcon}</div>}
-                {brand&&<div style={{position:"absolute",top:6,left:6,padding:"2px 8px",borderRadius:4,background:"rgba(15,23,42,0.85)",color:"#FFF",fontSize:10,fontWeight:700,letterSpacing:0.2}}>{brand}</div>}
-              </div>
-              <div style={{padding:"10px 12px",display:"flex",flexDirection:"column",gap:4,flex:1}}>
-                <div style={{fontSize:13,fontWeight:700,color:"#0F172A",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={t_name(it)}>{t_name(it)}</div>
-                {t_priceLabel(it)&&<div style={{fontSize:13,color:"#1E293B",fontWeight:800}}>{t_priceLabel(it)}</div>}
-                {cat&&<div style={{fontSize:11,color:"#94A3B8",fontWeight:600}}>📂 {cat}</div>}
-                <div style={{display:"flex",gap:6,marginTop:"auto",paddingTop:8}}>
-                  {link&&<a href={link} target="_blank" rel="noreferrer" style={{flex:1,padding:"5px 10px",borderRadius:6,background:"#F1F5F9",color:"#1E293B",fontSize:11,fontWeight:600,textDecoration:"none",textAlign:"center",border:"1px solid #E2E8F0"}}>🔗 상품보기</a>}
-                  <button onClick={()=>openTrendModal(it,key)} disabled={added} style={{
-                    flex:1,padding:"5px 10px",borderRadius:6,fontSize:11,fontWeight:700,cursor:added?"default":"pointer",
-                    border:"1px solid "+(added?"#86EFAC":"#1E293B"),
-                    background:added?"#DCFCE7":"#1E293B",
-                    color:added?"#15803D":"#FFF"
-                  }}>{added?"✓ 추가됨":"➕ 기획추가"}</button>
+      </div>
+
+      {/* 5단계 필터 */}
+      <div className="mb-6 flex flex-col gap-3">
+        {[
+          {label:"카테고리",value:tfCat,set:setTfCat,opts:["전체","TOP","BOTTOM","OUTER","ACC"]},
+          {label:"세부",value:tfSub,set:setTfSub,opts:trendSubOptions},
+          {label:"핏",value:tfFit,set:setTfFit,opts:["전체","오버핏","세미오버","레귤러","크롭","롱"]},
+          {label:"무드",value:tfMood,set:setTfMood,opts:["전체","미니멀","스트릿","빈티지","고프코어","아메카지","워크웨어"]},
+          {label:"디테일",value:tfDetail,set:setTfDetail,opts:["전체","피그먼트","워싱","자수","나염","절개","데미지"]},
+        ].map(group=>(
+          <div key={group.label} className="flex items-center gap-2">
+            <span className="text-xs text-neutral-400 w-16 shrink-0">{group.label}</span>
+            <div className="flex flex-wrap gap-1.5">
+              {group.opts.map(opt=>(
+                <button key={opt} onClick={()=>group.set(opt)} className={`text-xs rounded-full px-3 py-1 cursor-pointer transition border-0 ${group.value===opt?"bg-white text-black font-medium":"bg-neutral-800 text-neutral-400 hover:bg-neutral-700"}`}>{opt}</button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* 카드 그리드 */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+        {trendError?(
+          <div className="col-span-full text-center py-12 text-red-400">⚠ {trendError}</div>
+        ):trendLoading?(
+          Array.from({length:10}).map((_,i)=>(
+            <div key={i} className="aspect-[3/4] bg-neutral-800 animate-pulse rounded-lg" />
+          ))
+        ):trendData.length===0?(
+          <div className="col-span-full text-center py-12 text-neutral-500">아직 수집된 데이터가 없어요. Apps Script를 실행해주세요.</div>
+        ):filteredTrends.length===0?(
+          <div className="col-span-full text-center py-12 text-neutral-500">조건에 맞는 상품이 없어요. 필터를 조정해보세요.</div>
+        ):(
+          filteredTrends.map(it=>{
+            const onSale=it.sale_price&&it.normal_price&&it.sale_price<it.normal_price;
+            return(
+            <div key={it.id} className="aspect-[3/4] bg-neutral-900 rounded-lg overflow-hidden cursor-pointer group relative hover:ring-2 hover:ring-white/30 transition flex flex-col">
+              {/* 이미지 영역 */}
+              <div className="flex-1 relative bg-neutral-800 overflow-hidden">
+                {it.image_url?(
+                  <img src={it.image_url} alt={cleanProductName(it.product_name)} className="block w-full h-full object-cover" loading="lazy" />
+                ):(
+                  <div className="w-full h-full flex items-center justify-center">
+                    <Shirt className="w-12 h-12 text-neutral-700" />
+                  </div>
+                )}
+                {/* rank 뱃지 */}
+                <div className="absolute top-2 left-2 bg-black/70 text-white text-xs font-bold rounded px-2 py-0.5">#{it.rank}</div>
+                {/* 기획 추가됨 표시 */}
+                {it.is_planned&&(
+                  <div className="absolute top-2 left-10 bg-green-500 text-white rounded-full w-5 h-5 flex items-center justify-center">
+                    <Check className="w-3 h-3" />
+                  </div>
+                )}
+                {/* 할인율 */}
+                {it.sale_rate>0&&<div className="absolute top-2 right-2 bg-red-600 text-white text-xs font-bold rounded px-2 py-0.5">-{it.sale_rate}%</div>}
+                {/* 세부 카테고리 칩 */}
+                {it.category_sub&&<div className="absolute bottom-2 left-2 bg-white/90 text-black text-[10px] font-medium rounded px-1.5 py-0.5">{it.category_sub}</div>}
+                {/* Hover 오버레이 */}
+                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition flex flex-col items-center justify-center gap-2">
+                  <button onClick={(e)=>{e.stopPropagation();markPlanned(it);}} className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white text-xs rounded px-3 py-1.5 border-0 cursor-pointer"><Plus className="w-3.5 h-3.5" />기획 추가</button>
+                  <button onClick={(e)=>{e.stopPropagation();alert("Phase 4에서 구현 예정입니다");}} className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white text-xs rounded px-3 py-1.5 border-0 cursor-pointer"><Search className="w-3.5 h-3.5" />비슷한 상품</button>
+                  <button onClick={(e)=>{e.stopPropagation();alert("Phase 2에서 구현 예정입니다");}} className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white text-xs rounded px-3 py-1.5 border-0 cursor-pointer"><Sparkles className="w-3.5 h-3.5" />디테일 분석</button>
+                  <button onClick={(e)=>{e.stopPropagation();window.open(it.product_url,"_blank");}} className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white text-xs rounded px-3 py-1.5 border-0 cursor-pointer"><ExternalLink className="w-3.5 h-3.5" />무신사에서 보기</button>
                 </div>
-                <button onClick={()=>handleAddFromTrend(it)} style={{
-                  width:"100%",padding:"6px",marginTop:6,fontSize:11,fontWeight:600,
-                  background:"#F8FAFC",border:"1px solid #CBD5E1",borderRadius:6,
-                  color:"#334155",cursor:"pointer"
-                }}>+ 레퍼런스로 등록</button>
               </div>
-            </div>);
-          })}
-        </div>
-      </>}
-    </SectionCard>
+              {/* 하단 정보 */}
+              <div className="p-2.5 bg-neutral-900">
+                <div className="text-[10px] text-neutral-400 truncate">{it.brand}</div>
+                <div className="text-xs font-medium text-white line-clamp-1">{cleanProductName(it.product_name)}</div>
+                <div className="flex items-center gap-1.5 mt-1">
+                  {onSale?(<>
+                    <span className="text-sm font-bold text-white">{it.sale_price.toLocaleString("ko-KR")}원</span>
+                    <span className="text-[10px] text-neutral-500 line-through">{it.normal_price.toLocaleString("ko-KR")}원</span>
+                  </>):(
+                    <span className="text-sm font-bold text-white">{(it.normal_price??it.sale_price??0).toLocaleString("ko-KR")}원</span>
+                  )}
+                </div>
+              </div>
+            </div>
+            );
+          })
+        )}
+      </div>
+    </div>
 
     {/* 헤더 + 시즌 탭 */}
     <div style={{background:"#FFF",borderRadius:14,padding:"20px 28px",border:"1px solid #E2E8F0",marginBottom:16}}>
@@ -2943,91 +2821,6 @@ function PlanningTab(){
       )}
     </section>
 
-    {/* 무신사 트렌드 → 기획 추가 모달 */}
-    {trendModal&&(()=>{
-      const priceN=parseInt(trendModal.est_price)||0;
-      const costN=parseInt(trendModal.est_cost)||0;
-      const margin=priceN>0?Math.round(((priceN-costN)/priceN)*100):0;
-      const marginColor=margin>=50?"#059669":margin>=30?"#F59E0B":"#94A3B8";
-      const inputStyle={width:"100%",padding:"8px 12px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:13,outline:"none",background:"#F8FAFC",boxSizing:"border-box",fontFamily:"inherit"};
-      const labelStyle={fontSize:11,fontWeight:600,color:"#64748B",marginBottom:4};
-      return(<div onClick={()=>setTrendModal(null)} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:20}}>
-        <div onClick={e=>e.stopPropagation()} style={{background:"#FFF",borderRadius:14,padding:24,width:560,maxWidth:"100%",maxHeight:"90vh",overflowY:"auto",boxShadow:"0 20px 50px rgba(0,0,0,0.25)"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-            <div style={{fontSize:16,fontWeight:700,color:"#0F172A"}}>🛍 무신사 트렌드 → 기획 추가</div>
-            <button onClick={()=>setTrendModal(null)} style={{background:"none",border:"none",fontSize:18,color:"#94A3B8",cursor:"pointer"}}>×</button>
-          </div>
-
-          {/* 이미지 + 상품명/카테고리 */}
-          <div style={{display:"flex",gap:12,marginBottom:12,alignItems:"flex-start"}}>
-            <div style={{flexShrink:0,width:96,height:96,borderRadius:8,background:"#F8FAFC",border:"1px solid #E2E8F0",overflow:"hidden",display:"flex",alignItems:"center",justifyContent:"center"}}>
-              {trendModal.image_url?
-                <img src={trendModal.image_url} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{e.currentTarget.style.display="none";}} />
-                :<span style={{fontSize:28,color:"#CBD5E1"}}>🖼️</span>}
-            </div>
-            <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:8}}>
-              <div>
-                <div style={labelStyle}>상품명</div>
-                <input value={trendModal.name} onChange={e=>updateTrendModal("name",e.target.value)} style={inputStyle} />
-              </div>
-              <div>
-                <div style={labelStyle}>카테고리</div>
-                <select value={trendModal.category} onChange={e=>updateTrendModal("category",e.target.value)} style={inputStyle}>
-                  {PLANNING_CATEGORIES.map(c=><option key={c}>{c}</option>)}
-                </select>
-              </div>
-            </div>
-          </div>
-
-          <div style={{marginBottom:10}}>
-            <div style={labelStyle}>참고 URL</div>
-            <input value={trendModal.ref_url} onChange={e=>updateTrendModal("ref_url",e.target.value)} placeholder="https://www.musinsa.com/..." style={inputStyle} />
-          </div>
-          <div style={{marginBottom:10}}>
-            <div style={labelStyle}>이미지 URL</div>
-            <input value={trendModal.image_url} onChange={e=>updateTrendModal("image_url",e.target.value)} placeholder="https://image.url/..." style={inputStyle} />
-          </div>
-
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:10}}>
-            <div>
-              <div style={labelStyle}>예상 판매가</div>
-              <input type="number" value={trendModal.est_price} onChange={e=>updateTrendModal("est_price",e.target.value)} placeholder="원" style={inputStyle} />
-            </div>
-            <div>
-              <div style={labelStyle}>예상 원가</div>
-              <input type="number" value={trendModal.est_cost} onChange={e=>updateTrendModal("est_cost",e.target.value)} placeholder="원" style={inputStyle} />
-            </div>
-            <div>
-              <div style={labelStyle}>마진율</div>
-              <div style={{padding:"8px 12px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:13,background:"#F8FAFC",fontWeight:700,color:costN>0?marginColor:"#94A3B8"}}>
-                {costN>0?`${margin}%`:"원가 입력 시 자동 계산"}
-              </div>
-            </div>
-          </div>
-
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
-            <div>
-              <div style={labelStyle}>소재</div>
-              <input value={trendModal.material} onChange={e=>updateTrendModal("material",e.target.value)} placeholder="코튼 100%, 헤비웨이트" style={inputStyle} />
-            </div>
-            <div>
-              <div style={labelStyle}>컬러</div>
-              <input value={trendModal.colors} onChange={e=>updateTrendModal("colors",e.target.value)} placeholder="멜란지, 블랙, 네이비" style={inputStyle} />
-            </div>
-          </div>
-
-          <div style={{marginBottom:14}}>
-            <div style={labelStyle}>메모</div>
-            <textarea value={trendModal.note} onChange={e=>updateTrendModal("note",e.target.value)} placeholder="무신사 상위 랭킹, 피그먼트 워싱 트렌드" rows={3} style={{...inputStyle,resize:"vertical"}} />
-          </div>
-
-          <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
-            <SmallBtn onClick={()=>setTrendModal(null)}>취소</SmallBtn>
-            <SmallBtn primary onClick={confirmTrendAdd}>저장</SmallBtn>
-          </div>
-        </div>
-      </div>);
-    })()}
   </>);
 }
 
@@ -3155,6 +2948,7 @@ export default function Dashboard(){
     {id:"schedule",label:"입고 스케줄",icon:"📅"},
     {id:"ordertrack",label:"오더 입고현황",icon:"📊"},
     {id:"planning",label:"아이템 기획",icon:"💡"},
+    {id:"trend",label:"트렌드",icon:"📊"},
     {id:"sample",label:"샘플 진행",icon:"🧪"},
     {id:"measure",label:"실측 사이즈",icon:"📐"},
     {id:"products",label:"상품 마스터",icon:"📋"},
@@ -3250,6 +3044,7 @@ export default function Dashboard(){
       <div style={{padding:"20px 16px"}}>
         {activeTab==="overview"&&renderOverview()}
         {activeTab==="planning"&&<PlanningTab />}
+        {activeTab==="trend"&&<TrendDashboard />}
         {activeTab==="products"&&<ProductMasterTab />}
         {activeTab==="packing"&&<PackingListTab />}
         {activeTab==="schedule"&&<ScheduleTab />}

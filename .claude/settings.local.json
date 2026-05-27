@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e \"require\\('@babel/parser'\\).parse\\(require\\('fs'\\).readFileSync\\('src/App.jsx','utf8'\\),{sourceType:'module',plugins:['jsx']}\\); console.log\\('OK'\\)\")",
+      "Bash(npx --yes vite build)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git -c user.email=mandy@openhan.kr -c user.name=mandy commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(git restore *)",
+      "Bash(git checkout *)",
+      "Bash(npx --no-install vite build)",
+      "Bash(git commit *)",
+      "Bash(npm run *)",
+      "Bash(git -c user.name=mandy -c user.email=mandy@openhan.kr commit -m ' *)",
+      "Bash(curl *)"
+    ]
+  }
+}

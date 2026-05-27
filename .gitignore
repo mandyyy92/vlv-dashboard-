@@ -1,0 +1,23 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+
+# Env files (keep secrets out of git)
+.env
+.env.local
+.env.*.local
+
+# Editor / OS
+.DS_Store
+.vscode
+.idea
+.venv/
+scripts/.venv/
+C:/temp/vlvd_unzip/
+
+# Local backups / scratch (do not commit)
+*.corrupted
+src/App.jsx.backup
+.app_no_blob.jsx
