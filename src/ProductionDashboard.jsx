@@ -115,6 +115,132 @@ async function updateOrder(id, patch) {
 }
 
 // ============================================================
+// 매핑 사전 (작업지시서 ↔ inventory)
+// ============================================================
+
+// 스타일NO 예외 매핑 (작업지시서 → inventory 바코드 prefix)
+const STYLE_NO_MAP = {
+  "V24ST01UA501": "V25ST006U",  // Restchill
+  "V25ST01UA501": "V25ST57U",   // Graychill
+};
+
+// 색상 매핑 (작업지시서 영문 → inventory 바코드 2글자 코드)
+const COLOR_MAP = {
+  "BLACK": "BK",
+  "WHITE": "OW",
+  "NAVY": "NV",
+  "CHARCOAL": "CO",
+  "MELANGE": "ME",
+  "WHITE MELANGE": "WM",
+  "CREAM": "CM",
+  "BURGUNDY": "BG",
+  "GRAY": "GY",
+  "GREY": "GY",
+  "BEIGE": "BE",
+  "BLUE": "BL",
+  "RED": "RE",
+  "YELLOW": "YE",
+};
+
+// 사이즈 변환 (작업지시서 → 바코드 끝 부분)
+function sizeToBarcodeSuffix(size, stylePrefix) {
+  const s = String(size).trim().toUpperCase();
+  // 12자 스타일NO (V24ST01UB400 같은 표준 패턴): "00" + 사이즈
+  const isStdPattern = stylePrefix.length >= 12;
+  if (isStdPattern) {
+    if (s === "FREE" || s === "OS") return ["00F", "FRE"]; // 두 패턴 다 시도
+    if (s === "XL" || s === "2XL") return ["0XL"];
+    if (s === "S" || s === "M" || s === "L") return [`00${s}`];
+    return [`00${s}`];
+  } else {
+    // 9자 짧은 스타일NO (V25ST006U 같은 예외 패턴): 사이즈만
+    if (s === "FREE" || s === "OS") return ["FRE", "FREE"];
+    if (s === "XL" || s === "2XL") return ["X", "XL"];
+    return [s];
+  }
+}
+
+// 작업지시서 한 라인 → 바코드 후보 리스트 생성
+function buildBarcodeCandidates(styleNo, color, size) {
+  // 1) 스타일NO 매핑 적용
+  const stylePrefix = STYLE_NO_MAP[styleNo] || styleNo;
+  
+  // 2) 색상 약자 변환
+  const colorCode = COLOR_MAP[color.toUpperCase()] || color.substring(0, 2).toUpperCase();
+  
+  // 3) 사이즈 후보들
+  const sizeSuffixes = sizeToBarcodeSuffix(size, stylePrefix);
+  
+  // 4) 조합
+  return sizeSuffixes.map(suffix => `${stylePrefix}${colorCode}${suffix}`);
+}
+
+// inventory에서 바코드들로 SKU 코드 검색 (REST API 직접 호출)
+async function lookupInventoryBySkus(barcodes) {
+  if (!barcodes || barcodes.length === 0) return {};
+  // 한글 컬럼명은 URL 인코딩 필요
+  const orFilter = barcodes.map(b => `%22%EB%B0%94%EC%BD%94%EB%93%9C%22.eq.${encodeURIComponent(b)}`).join(",");
+  const url = `${SUPABASE_URL}/rest/v1/inventory?or=(${orFilter})&select=%22%EC%83%81%ED%92%88%EC%BD%94%EB%93%9C%22,%22%EB%B0%94%EC%BD%94%EB%93%9C%22,%22%EC%83%81%ED%92%88%EB%AA%85%22,%22%EC%98%B5%EC%85%98%22`;
+  try {
+    const r = await fetch(url, { headers: sbHeaders });
+    if (!r.ok) return {};
+    const rows = await r.json();
+    // 바코드 → 상품코드 매핑 (중복 시 첫 번째)
+    const map = {};
+    for (const row of rows) {
+      const barcode = row["바코드"];
+      if (barcode && !map[barcode]) {
+        map[barcode] = {
+          sku_code: row["상품코드"],
+          name: row["상품명"],
+          option: row["옵션"],
+        };
+      }
+    }
+    return map;
+  } catch (e) {
+    console.error("inventory 조회 실패", e);
+    return {};
+  }
+}
+
+// 한 라인의 SKU 코드 찾기 (여러 바코드 후보 중 첫 매칭)
+function findSkuFromInventoryMap(invMap, styleNo, color, size) {
+  const candidates = buildBarcodeCandidates(styleNo, color, size);
+  for (const bc of candidates) {
+    if (invMap[bc]) return { ...invMap[bc], matched_barcode: bc };
+  }
+  return null;
+}
+
+// 상품코드(S21895)로 inventory 조회 → 상품명/옵션 반환
+async function lookupInventoryByProductCode(skuCodes) {
+  if (!skuCodes || skuCodes.length === 0) return {};
+  const orFilter = skuCodes.map(s => `%22%EC%83%81%ED%92%88%EC%BD%94%EB%93%9C%22.eq.${encodeURIComponent(s)}`).join(",");
+  const url = `${SUPABASE_URL}/rest/v1/inventory?or=(${orFilter})&select=%22%EC%83%81%ED%92%88%EC%BD%94%EB%93%9C%22,%22%EB%B0%94%EC%BD%94%EB%93%9C%22,%22%EC%83%81%ED%92%88%EB%AA%85%22,%22%EC%98%B5%EC%85%98%22`;
+  try {
+    const r = await fetch(url, { headers: sbHeaders });
+    if (!r.ok) return {};
+    const rows = await r.json();
+    const map = {};
+    for (const row of rows) {
+      const code = row["상품코드"];
+      if (code && !map[code]) {
+        map[code] = {
+          barcode: row["바코드"],
+          name: row["상품명"],
+          option: row["옵션"],
+        };
+      }
+    }
+    return map;
+  } catch (e) {
+    console.error("inventory 조회 실패", e);
+    return {};
+  }
+}
+
+// ============================================================
 // 엑셀 파서 (PowerShell 스크립트와 동일 로직)
 // ============================================================
 async function parseWorkorder(file) {
@@ -213,6 +339,85 @@ async function parseWorkorder(file) {
 }
 
 // ============================================================
+// 패킹리스트 파서
+// 양식: A=패킹리스트ID, B=상품코드(S21895), C=상품명(상의-링거티), 
+//       D=옵션([네이비-M]), E=수량, F=메모
+// ============================================================
+async function parsePackingList(file) {
+  const XLSX = await loadXlsx();
+  const ab = await file.arrayBuffer();
+  const wb = XLSX.read(ab, { type: "array", cellDates: true });
+  
+  const allLines = [];
+  
+  for (const sheetName of wb.SheetNames) {
+    const ws = wb.Sheets[sheetName];
+    const hidden = wb.Workbook?.Sheets?.find(s => s.name === sheetName)?.Hidden;
+    if (hidden && hidden !== 0) continue;
+    
+    const range = XLSX.utils.decode_range(ws["!ref"] || "A1:F1");
+    
+    for (let r = 1; r <= range.e.r; r++) {
+      const cell = (c) => {
+        const ref = XLSX.utils.encode_cell({ r, c: c - 1 });
+        return ws[ref] ? ws[ref].v : null;
+      };
+      
+      const plId = cell(1);    // 패킹리스트ID
+      const code = cell(2);    // 상품코드
+      const name = cell(3);    // 상품명
+      const option = cell(4);  // 옵션 [색상-사이즈]
+      const qty = cell(5);     // 수량
+      const memo = cell(6);    // 메모
+      
+      if (!code || !qty || typeof qty !== "number") continue;
+      
+      // 옵션 파싱: [네이비-M] → 색상=네이비, 사이즈=M
+      let color = "", size = String(option || "");
+      const m = String(option || "").match(/\[(.+?)-(.+?)\]/);
+      if (m) {
+        color = m[1].trim();
+        size = m[2].trim();
+      }
+      
+      allLines.push({
+        packing_list_id: String(plId || ""),
+        sku_code: String(code).trim(),
+        product_name: String(name || "").trim(),
+        color,
+        size,
+        qty: Math.round(qty),
+        memo: String(memo || "").trim(),
+      });
+    }
+  }
+  
+  // 상품명별 집계
+  const byProduct = {};
+  for (const line of allLines) {
+    if (!byProduct[line.product_name]) byProduct[line.product_name] = { qty: 0, lines: [], sku_codes: new Set() };
+    byProduct[line.product_name].qty += line.qty;
+    byProduct[line.product_name].lines.push(line);
+    byProduct[line.product_name].sku_codes.add(line.sku_code);
+  }
+  
+  const productSummary = Object.entries(byProduct).map(([name, v]) => ({
+    product_name: name,
+    qty: v.qty,
+    line_count: v.lines.length,
+    sku_count: v.sku_codes.size,
+    lines: v.lines,
+  }));
+  
+  return {
+    lines: allLines,
+    total_qty: allLines.reduce((s, l) => s + l.qty, 0),
+    line_count: allLines.length,
+    product_summary: productSummary,
+  };
+}
+
+// ============================================================
 // 메인 컴포넌트
 // ============================================================
 export default function ProductionDashboard() {
@@ -224,6 +429,7 @@ export default function ProductionDashboard() {
   const [selectedId, setSelectedId] = useState(null);
   const [showUpload, setShowUpload] = useState(false);
   const [showInbound, setShowInbound] = useState(null);
+  const [showPacking, setShowPacking] = useState(false);
 
   // 데이터 로드
   const reload = async () => {
@@ -330,6 +536,9 @@ export default function ProductionDashboard() {
         <div style={{ display: "flex", gap: 8 }}>
           <button style={S.ghostBtnRed} onClick={handleResetAll} title="전체 초기화">
             ⚠ 전체 초기화
+          </button>
+          <button style={S.secondaryBtn} onClick={() => setShowPacking(true)} disabled={orders.length === 0} title={orders.length === 0 ? "먼저 작업지시서를 업로드하세요" : ""}>
+            📦 패킹리스트 업로드
           </button>
           <button style={S.primaryBtn} onClick={() => setShowUpload(true)}>
             <span style={{ fontSize: 16, marginRight: 4 }}>＋</span> 작업지시서 업로드
@@ -458,6 +667,16 @@ export default function ProductionDashboard() {
           order={enriched.find(o => o.id === showInbound)}
           onClose={() => setShowInbound(null)}
           onSubmit={(ib) => handleAddInbound(showInbound, ib)}
+        />
+      )}
+
+      {showPacking && (
+        <PackingListModal
+          orders={enriched}
+          itemsByOrder={itemsByOrder}
+          inboundsByOrder={inboundsByOrder}
+          onClose={() => setShowPacking(false)}
+          onComplete={async () => { setShowPacking(false); await reload(); }}
         />
       )}
     </div>
@@ -711,15 +930,18 @@ function OrderDrawer({ order, onClose, onAddInbound, onDelete, onUpdate }) {
 // 업로드 모달 (실제 파싱)
 // ============================================================
 function UploadModal({ existingOrderNos, onClose, onComplete }) {
-  const [step, setStep] = useState("select"); // select | parsing | preview | uploading
+  const [step, setStep] = useState("select"); // select | parsing | matching | preview | uploading
   const [file, setFile] = useState(null);
   const [parsed, setParsed] = useState(null);
+  const [matchResult, setMatchResult] = useState(null);
   const [error, setError] = useState(null);
 
   const [season, setSeason] = useState("26SS");
   const [contractDate, setContractDate] = useState(new Date().toISOString().slice(0,10));
   const [expectedDate, setExpectedDate] = useState("");
   const [orderNoBase, setOrderNoBase] = useState("");
+  const [contractFile, setContractFile] = useState(null);
+  const contractInputRef = useRef(null);
 
   // 자동 오더번호 제안
   useEffect(() => {
@@ -739,6 +961,48 @@ function UploadModal({ existingOrderNos, onClose, onComplete }) {
         setStep("select");
         return;
       }
+      
+      // inventory 자동 매칭
+      setStep("matching");
+      const allBarcodes = [];
+      const barcodeMap = {};
+      for (const it of result.items) {
+        const candidates = buildBarcodeCandidates(it.style_no, it.color, it.size);
+        for (const bc of candidates) {
+          allBarcodes.push(bc);
+          if (!barcodeMap[bc]) barcodeMap[bc] = [];
+          barcodeMap[bc].push(it);
+        }
+      }
+      
+      // inventory 일괄 조회 (배치로 나눠서 — 한 번에 너무 많으면 URL 길이 초과)
+      const uniqueBarcodes = [...new Set(allBarcodes)];
+      const invMap = {};
+      const batchSize = 50;
+      for (let i = 0; i < uniqueBarcodes.length; i += batchSize) {
+        const batch = uniqueBarcodes.slice(i, i + batchSize);
+        const batchMap = await lookupInventoryBySkus(batch);
+        Object.assign(invMap, batchMap);
+      }
+      
+      // 매칭 결과 계산
+      let matched = 0, unmatched = 0;
+      for (const it of result.items) {
+        const found = findSkuFromInventoryMap(invMap, it.style_no, it.color, it.size);
+        if (found) {
+          it.sku_code = found.sku_code;
+          it.matched_barcode = found.matched_barcode;
+          matched++;
+        } else {
+          it.sku_code = null;
+          unmatched++;
+        }
+      }
+      
+      setMatchResult({
+        matched, unmatched,
+        match_rate: result.items.length ? (matched / result.items.length) * 100 : 0,
+      });
       setParsed(result);
       setStep("preview");
     } catch (e) {
@@ -752,6 +1016,30 @@ function UploadModal({ existingOrderNos, onClose, onComplete }) {
     if (!orderNoBase.trim()) { alert("오더 번호를 입력하세요"); return; }
     setStep("uploading");
     try {
+      // 0) 계약서 먼저 업로드 (있으면)
+      let contractUrl = null, contractName = null;
+      if (contractFile) {
+        const ext = contractFile.name.split(".").pop();
+        const safeName = `${orderNoBase}_contract_${Date.now()}.${ext}`;
+        const uploadUrl = `${SUPABASE_URL}/storage/v1/object/contracts/${safeName}`;
+        const r = await fetch(uploadUrl, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${SUPABASE_KEY}`,
+            "apikey": SUPABASE_KEY,
+            "Content-Type": contractFile.type || "application/octet-stream",
+            "x-upsert": "true",
+          },
+          body: contractFile,
+        });
+        if (!r.ok) {
+          const t = await r.text();
+          throw new Error(`계약서 업로드 실패: ${t}`);
+        }
+        contractUrl = `${SUPABASE_URL}/storage/v1/object/public/contracts/${safeName}`;
+        contractName = contractFile.name;
+      }
+      
       // 스타일별로 그룹화 -> 스타일마다 별도 오더 생성
       const byStyle = {};
       parsed.items.forEach(it => {
@@ -770,8 +1058,7 @@ function UploadModal({ existingOrderNos, onClose, onComplete }) {
 
       const styleList = Object.values(byStyle);
 
-      // 오더번호 자동 부여: PO-26SS-001, PO-26SS-002, ...
-      // orderNoBase에서 마지막 숫자 추출하여 시작점으로 사용
+      // 오더번호 자동 부여
       const baseMatch = orderNoBase.match(/^(.*?)(\d+)$/);
       const prefix = baseMatch ? baseMatch[1] : orderNoBase + "-";
       const startNum = baseMatch ? parseInt(baseMatch[2], 10) : 1;
@@ -781,7 +1068,7 @@ function UploadModal({ existingOrderNos, onClose, onComplete }) {
         const styleGroup = styleList[i];
         const orderNo = `${prefix}${String(startNum + i).padStart(padLen, "0")}`;
 
-        // 1) 오더 생성 (스타일별)
+        // 1) 오더 생성 (스타일별) — 계약서 정보 포함
         const orderPayload = {
           order_no: orderNo,
           vendor_name: styleGroup.factory,
@@ -790,10 +1077,15 @@ function UploadModal({ existingOrderNos, onClose, onComplete }) {
           contract_date: contractDate || null,
           expected_final_date: expectedDate || null,
         };
+        if (contractUrl) {
+          orderPayload.contract_file_url = contractUrl;
+          orderPayload.contract_file_name = contractName;
+          orderPayload.contract_uploaded_at = new Date().toISOString();
+        }
         const createdRows = await insertOrder(orderPayload);
         const orderId = createdRows[0].id;
 
-        // 2) 아이템 일괄 생성
+        // 2) 아이템 일괄 생성 (sku_code 포함)
         const itemsPayload = styleGroup.items.map(it => ({
           order_id: orderId,
           style_no: it.style_no,
@@ -801,6 +1093,7 @@ function UploadModal({ existingOrderNos, onClose, onComplete }) {
           color: it.color,
           size: it.size,
           order_qty: it.qty,
+          sku_code: it.sku_code || null,
         }));
         await insertItems(itemsPayload);
       }
@@ -857,6 +1150,14 @@ function UploadModal({ existingOrderNos, onClose, onComplete }) {
             </div>
           )}
 
+          {step === "matching" && (
+            <div style={S.parsing}>
+              <div style={S.spinner} />
+              <div style={S.parsingText}>inventory 매칭 중...</div>
+              <div style={S.parsingSub}>각 SKU의 상품코드를 자동 조회합니다</div>
+            </div>
+          )}
+
           {step === "preview" && parsed && (
             <div>
               <div style={S.previewKpi}>
@@ -865,6 +1166,18 @@ function UploadModal({ existingOrderNos, onClose, onComplete }) {
                 <div style={S.previewKpiBox}><div style={S.previewKpiLabel}>SKU</div><div style={S.previewKpiVal}>{parsed.sku_count}</div></div>
                 <div style={S.previewKpiBox}><div style={S.previewKpiLabel}>작업처</div><div style={{ ...S.previewKpiVal, fontSize: 14 }}>{parsed.factories.join(", ") || "—"}</div></div>
               </div>
+
+              {/* inventory 매칭 결과 */}
+              {matchResult && (
+                <div style={{ ...S.previewSection, background: matchResult.match_rate >= 80 ? "#DCFCE7" : matchResult.match_rate >= 50 ? "#FEF3C7" : "#FEE2E2", border: "1px solid #E2E8F0", padding: 12, borderRadius: 8, marginBottom: 16 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#0F172A" }}>
+                    🔗 inventory 자동 매칭: {matchResult.matched} / {parsed.sku_count} SKU ({matchResult.match_rate.toFixed(1)}%)
+                  </div>
+                  <div style={{ fontSize: 11, color: "#475569", marginTop: 4 }}>
+                    {matchResult.unmatched > 0 ? `${matchResult.unmatched}개 SKU는 inventory에 없어 패킹리스트 매칭이 안 될 수 있습니다.` : "모든 SKU가 inventory와 매칭되었습니다."}
+                  </div>
+                </div>
+              )}
 
               <div style={S.previewSection}>
                 <div style={S.previewSectionTitle}>📝 오더 정보</div>
@@ -885,6 +1198,45 @@ function UploadModal({ existingOrderNos, onClose, onComplete }) {
                     <div style={S.dimLabel}>예상 완료일 (선택)</div>
                     <input type="date" value={expectedDate} onChange={e => setExpectedDate(e.target.value)} style={S.formInput} />
                   </div>
+                </div>
+              </div>
+
+              {/* 계약서 첨부 영역 */}
+              <div style={S.previewSection}>
+                <div style={S.previewSectionTitle}>📄 계약서 첨부 (선택)</div>
+                <div style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 6, padding: 12 }}>
+                  {contractFile ? (
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 500, color: "#0F172A" }}>{contractFile.name}</div>
+                        <div style={{ fontSize: 11, color: "#64748B", marginTop: 3 }}>{(contractFile.size / 1024).toFixed(1)} KB · 모든 스타일 오더에 동일 적용</div>
+                      </div>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button style={S.miniBtnGhost} onClick={() => contractInputRef.current?.click()}>교체</button>
+                        <button style={S.miniBtnGhost} onClick={() => setContractFile(null)}>제거</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ textAlign: "center", padding: 8 }}>
+                      <button style={S.ghostBtn} onClick={() => contractInputRef.current?.click()}>
+                        📎 계약서 PDF/이미지 선택
+                      </button>
+                      <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 6 }}>
+                        업로드한 계약서는 모든 스타일 오더에 동일하게 적용됩니다
+                      </div>
+                    </div>
+                  )}
+                  <input
+                    ref={contractInputRef}
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png"
+                    style={{ display: "none" }}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) setContractFile(f);
+                      e.target.value = "";
+                    }}
+                  />
                 </div>
               </div>
 
@@ -979,6 +1331,277 @@ function InboundModal({ order, onClose, onSubmit }) {
           <button style={S.ghostBtn} onClick={onClose} disabled={submitting}>취소</button>
           <button style={S.primaryBtn} onClick={submit} disabled={submitting}>{submitting ? "저장 중..." : "등록"}</button>
         </div>
+      </div>
+    </>
+  );
+}
+
+// ============================================================
+// 패킹리스트 자동 입고 등록 모달
+// ============================================================
+function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onComplete }) {
+  const [step, setStep] = useState("select"); // select | parsing | matching | preview | uploading
+  const [file, setFile] = useState(null);
+  const [parsed, setParsed] = useState(null);
+  const [matched, setMatched] = useState(null); // 매칭 결과
+  const [error, setError] = useState(null);
+  const [inboundDate, setInboundDate] = useState(new Date().toISOString().slice(0, 10));
+  const [memo, setMemo] = useState("");
+
+  // sku_code → order_id, item_id 인덱스 만들기
+  const skuIndex = useMemo(() => {
+    const idx = {};
+    for (const ord of orders) {
+      const items = itemsByOrder[ord.id] || [];
+      for (const it of items) {
+        if (it.sku_code) {
+          idx[it.sku_code] = { order: ord, item: it };
+        }
+      }
+    }
+    return idx;
+  }, [orders, itemsByOrder]);
+
+  const handleFile = async (f) => {
+    setFile(f);
+    setStep("parsing");
+    setError(null);
+    try {
+      const result = await parsePackingList(f);
+      if (result.line_count === 0) {
+        setError("패킹리스트 데이터를 찾을 수 없습니다. 양식을 확인해주세요.");
+        setStep("select");
+        return;
+      }
+      setParsed(result);
+
+      // 매칭 분석
+      setStep("matching");
+      
+      // 각 라인을 sku_code로 매칭
+      const matchedByOrder = {}; // order_id -> { order, lines: [...], qty }
+      const unmatchedLines = [];
+      
+      for (const line of result.lines) {
+        const found = skuIndex[line.sku_code];
+        if (found) {
+          const oid = found.order.id;
+          if (!matchedByOrder[oid]) {
+            matchedByOrder[oid] = {
+              order: found.order,
+              first_item_id: found.item.id,
+              lines: [],
+              qty: 0,
+            };
+          }
+          matchedByOrder[oid].lines.push(line);
+          matchedByOrder[oid].qty += line.qty;
+        } else {
+          unmatchedLines.push(line);
+        }
+      }
+
+      // 각 매칭된 오더의 다음 차수 계산
+      const matchedOrderList = Object.values(matchedByOrder).map(m => {
+        const existing = (inboundsByOrder[m.order.id] || []).length;
+        return { ...m, next_round: existing + 1 };
+      });
+
+      setMatched({
+        matched_orders: matchedOrderList,
+        unmatched_lines: unmatchedLines,
+        matched_qty: matchedOrderList.reduce((s, m) => s + m.qty, 0),
+        unmatched_qty: unmatchedLines.reduce((s, l) => s + l.qty, 0),
+      });
+      setStep("preview");
+    } catch (e) {
+      console.error(e);
+      setError("파싱 실패: " + e.message);
+      setStep("select");
+    }
+  };
+
+  const handleConfirm = async () => {
+    if (matched.matched_orders.length === 0) {
+      alert("매칭된 오더가 없어 입고 등록을 진행할 수 없습니다.");
+      return;
+    }
+    if (!inboundDate) { alert("입고 날짜를 선택하세요"); return; }
+    setStep("uploading");
+    try {
+      // 1) 패킹리스트 파일 Storage 업로드
+      let packingUrl = null;
+      const ext = file.name.split(".").pop();
+      const safeName = `PL_${Date.now()}.${ext}`;
+      const uploadUrl = `${SUPABASE_URL}/storage/v1/object/packing-lists/${safeName}`;
+      const upR = await fetch(uploadUrl, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${SUPABASE_KEY}`,
+          "apikey": SUPABASE_KEY,
+          "Content-Type": file.type || "application/octet-stream",
+          "x-upsert": "true",
+        },
+        body: file,
+      });
+      if (upR.ok) {
+        packingUrl = `${SUPABASE_URL}/storage/v1/object/public/packing-lists/${safeName}`;
+      }
+
+      // 2) 각 오더에 차수별 입고 등록
+      for (const m of matched.matched_orders) {
+        await insertInbound({
+          order_id: m.order.id,
+          item_id: m.first_item_id,
+          inbound_round: m.next_round,
+          inbound_date: inboundDate,
+          qty: m.qty,
+          memo: memo || `패킹리스트 자동 등록 - ${file.name}`,
+          packing_list_url: packingUrl,
+          packing_list_name: file.name,
+        });
+      }
+      onComplete();
+    } catch (e) {
+      setError("입고 등록 실패: " + e.message);
+      setStep("preview");
+    }
+  };
+
+  return (
+    <>
+      <div style={S.modalBackdrop} onClick={step !== "uploading" ? onClose : undefined} />
+      <div style={S.modal}>
+        <div style={S.modalHeader}>
+          <div>
+            <div style={S.modalTitle}>📦 패킹리스트 업로드</div>
+            <div style={S.modalSubtitle}>SKU 코드로 자동 매칭하여 차수별 입고 등록</div>
+          </div>
+          <button style={S.iconBtn} onClick={onClose} disabled={step === "uploading"}>✕</button>
+        </div>
+
+        <div style={S.modalBody}>
+          {error && <div style={S.errorBox}>{error}</div>}
+
+          {step === "select" && (
+            <div style={S.dropZone}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) handleFile(f); }}>
+              <div style={S.dropIcon}>📦</div>
+              <div style={S.dropText}>패킹리스트 엑셀을 드래그하거나</div>
+              <label style={S.uploadLabel}>
+                파일 선택
+                <input type="file" accept=".xlsx,.xls" style={{ display: "none" }}
+                  onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])} />
+              </label>
+              <div style={S.dropHint}>양식: 상품코드(S21895) / 상품명 / 옵션[색상-사이즈] / 수량</div>
+            </div>
+          )}
+
+          {step === "parsing" && (
+            <div style={S.parsing}>
+              <div style={S.spinner} />
+              <div style={S.parsingText}>패킹리스트 파싱 중...</div>
+              <div style={S.parsingSub}>{file?.name}</div>
+            </div>
+          )}
+
+          {step === "matching" && (
+            <div style={S.parsing}>
+              <div style={S.spinner} />
+              <div style={S.parsingText}>SKU 매칭 중...</div>
+              <div style={S.parsingSub}>등록된 오더와 자동 연결합니다</div>
+            </div>
+          )}
+
+          {step === "uploading" && (
+            <div style={S.parsing}>
+              <div style={S.spinner} />
+              <div style={S.parsingText}>차수별 입고 등록 중...</div>
+              <div style={S.parsingSub}>{matched?.matched_orders.length}개 오더에 입고 추가</div>
+            </div>
+          )}
+
+          {step === "preview" && parsed && matched && (
+            <div>
+              <div style={S.previewKpi}>
+                <div style={S.previewKpiBox}>
+                  <div style={S.previewKpiLabel}>패킹리스트 라인</div>
+                  <div style={S.previewKpiVal}>{parsed.line_count}</div>
+                </div>
+                <div style={S.previewKpiBox}>
+                  <div style={S.previewKpiLabel}>총 수량</div>
+                  <div style={S.previewKpiVal}>{fmt(parsed.total_qty)}<span style={S.previewKpiUnit}>장</span></div>
+                </div>
+                <div style={S.previewKpiBox}>
+                  <div style={S.previewKpiLabel}>매칭된 수량</div>
+                  <div style={{ ...S.previewKpiVal, color: "#15803D" }}>{fmt(matched.matched_qty)}<span style={S.previewKpiUnit}>장</span></div>
+                </div>
+                <div style={S.previewKpiBox}>
+                  <div style={S.previewKpiLabel}>미매칭</div>
+                  <div style={{ ...S.previewKpiVal, color: matched.unmatched_qty > 0 ? "#B91C1C" : "#94A3B8" }}>{fmt(matched.unmatched_qty)}<span style={S.previewKpiUnit}>장</span></div>
+                </div>
+              </div>
+
+              {/* 입고 날짜 / 메모 */}
+              <div style={S.previewSection}>
+                <div style={S.previewSectionTitle}>📅 입고 정보</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 8 }}>
+                  <div>
+                    <div style={S.dimLabel}>입고 날짜</div>
+                    <input type="date" value={inboundDate} onChange={e => setInboundDate(e.target.value)} style={S.formInput} />
+                  </div>
+                  <div>
+                    <div style={S.dimLabel}>공통 메모 (선택)</div>
+                    <input value={memo} onChange={e => setMemo(e.target.value)} placeholder="예: 인도 1차 선적분" style={S.formInput} />
+                  </div>
+                </div>
+              </div>
+
+              {/* 매칭된 오더 리스트 */}
+              {matched.matched_orders.length > 0 && (
+                <div style={S.previewSection}>
+                  <div style={S.previewSectionTitle}>✅ 자동 입고 등록 예정 ({matched.matched_orders.length}개 오더)</div>
+                  <div style={S.previewList}>
+                    {matched.matched_orders.map((m, i) => (
+                      <div key={i} style={{ ...S.previewRow, gridTemplateColumns: "1fr 1.5fr 60px 80px" }}>
+                        <span style={S.previewSheet}>{m.order.order_no}</span>
+                        <span style={{ ...S.previewSheet, fontSize: 11, color: "#475569" }}>
+                          {m.lines[0].product_name} ({m.lines.length} SKU)
+                        </span>
+                        <span style={{ fontSize: 11, color: "#0369A1", fontWeight: 600 }}>{m.next_round}차</span>
+                        <span style={S.previewQty}>{fmt(m.qty)} 장</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 미매칭 라인 */}
+              {matched.unmatched_lines.length > 0 && (
+                <div style={S.previewSection}>
+                  <div style={S.previewSectionTitle}>⚠️ 매칭 실패 ({matched.unmatched_lines.length}개 라인 / {fmt(matched.unmatched_qty)}장)</div>
+                  <div style={S.previewSkipped}>
+                    {[...new Set(matched.unmatched_lines.map(l => `${l.sku_code} (${l.product_name})`))].slice(0, 10).join(" · ")}
+                    {matched.unmatched_lines.length > 10 && ` ... 외 ${matched.unmatched_lines.length - 10}건`}
+                    <div style={{ marginTop: 6, fontSize: 10 }}>
+                      이 SKU들은 등록된 오더에 없어 입고가 자동 등록되지 않습니다. 작업지시서 업로드를 먼저 확인해주세요.
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {step === "preview" && matched && matched.matched_orders.length > 0 && (
+          <div style={S.modalFooter}>
+            <button style={S.ghostBtn} onClick={onClose}>취소</button>
+            <button style={S.primaryBtn} onClick={handleConfirm}>
+              {matched.matched_orders.length}개 오더에 입고 등록
+            </button>
+          </div>
+        )}
       </div>
     </>
   );
@@ -1100,6 +1723,7 @@ const S = {
   brandTitle: { fontSize: 16, fontWeight: 600, color: "#0F172A", letterSpacing: -0.2 },
 
   primaryBtn: { background: "#0F172A", color: "white", border: "none", padding: "9px 16px", borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center" },
+  secondaryBtn: { background: "#0369A1", color: "white", border: "none", padding: "9px 14px", borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center" },
   ghostBtn: { background: "white", color: "#475569", border: "1px solid #E2E8F0", padding: "9px 16px", borderRadius: 6, fontSize: 13, fontWeight: 500, cursor: "pointer" },
   ghostBtnRed: { background: "white", color: "#B91C1C", border: "1px solid #FECACA", padding: "9px 14px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer" },
   miniBtn: { background: "#F1F5F9", color: "#0F172A", border: "1px solid #E2E8F0", padding: "5px 10px", borderRadius: 5, fontSize: 12, fontWeight: 500, cursor: "pointer" },
