@@ -216,17 +216,17 @@ function buildBarcodeCandidates(styleNo, color, size) {
     return sizeSuffixes.map(suffix => `${stylePrefix}${colorCode}${suffix}`);
 }
 
-// inventory에서 바코드들로 SKU 코드 검색 (REST API 직접 호출)
+// inventory에서 바코드들로 SKU 코드 검색 (RPC 함수 호출)
 async function lookupInventoryBySkus(barcodes) {
     if (!barcodes || barcodes.length === 0) return {};
-    const colBarcode = '%22%EB%B0%94%EC%BD%94%EB%93%9C%22';
-    // PostgREST in 연산자: 따옴표 없이 쉼표로 구분 (값에 특수문자가 없을 때)
-    // 바코드는 영숫자만 포함하므로 따옴표 불필요
-    const inList = barcodes.join(",");
-    const url = `${SUPABASE_URL}/rest/v1/inventory?${colBarcode}=in.(${encodeURIComponent(inList)})&select=*`;
-    console.log("[inventory 조회] URL 길이:", url.length, "샘플:", url.substring(0, 200));
+    const url = `${SUPABASE_URL}/rest/v1/rpc/lookup_inventory_by_barcodes`;
+    console.log("[inventory 조회] RPC 호출, 바코드 수:", barcodes.length);
     try {
-        const r = await fetch(url, { headers: sbHeaders });
+        const r = await fetch(url, {
+            method: "POST",
+            headers: sbHeaders,
+            body: JSON.stringify({ barcode_list: barcodes }),
+        });
         console.log("[inventory 조회] 응답 status:", r.status);
         if (!r.ok) {
             const errText = await r.text();
@@ -238,12 +238,12 @@ async function lookupInventoryBySkus(barcodes) {
         if (rows.length > 0) console.log("[inventory 조회] 첫 row:", rows[0]);
         const map = {};
         for (const row of rows) {
-            const barcode = row["바코드"];
+            const barcode = row.barcode;
             if (barcode && !map[barcode]) {
                 map[barcode] = {
-                    sku_code: row["상품코드"],
-                    name: row["상품명"],
-                    option: row["옵션"],
+                    sku_code: row.sku_code,
+                    name: row.product_name,
+                    option: row.option,
                 };
             }
         }
@@ -263,46 +263,43 @@ function findSkuFromInventoryMap(invMap, styleNo, color, size) {
     return null;
 }
 
-// 한글 상품명+옵션으로 inventory 검색 (fallback 매칭)
-// productName (영문) + color (영문) + size → inventory에서 정확히 일치하는 SKU 코드 검색
+// 한글 상품명+옵션으로 inventory 검색 (RPC 함수 fallback 매칭)
 async function lookupInventoryByNameAndOption(productNameEn, color, size) {
     const productNameKr = PRODUCT_NAME_KR_MAP[productNameEn];
     if (!productNameKr) return null;
 
     const colorKr = COLOR_KR_MAP[color.toUpperCase()] || color;
-    // 사이즈는 두 가지 표기 다 시도: M (단순) 와 95(M) (한글표기)
     const sizeSimple = size.toUpperCase();
     const sizeKr = SIZE_KR_MAP[sizeSimple] || sizeSimple;
 
-    const colName = '%22%EC%83%81%ED%92%88%EB%AA%85%22';
-    const colOption = '%22%EC%98%B5%EC%85%98%22';
-
-    // 시도할 옵션 패턴들 (단순 사이즈, 한글 사이즈)
+    // 시도할 옵션 패턴들
     const optionPatterns = [
-        `[${colorKr}-${sizeSimple}]`,   // [네이비-M]
-        `[${colorKr}-${sizeKr}]`,        // [네이비-95(M)]
+        `[${colorKr}-${sizeSimple}]`,
+        `[${colorKr}-${sizeKr}]`,
     ];
-    // 중복 제거
     const uniquePatterns = [...new Set(optionPatterns)];
 
-    for (const pattern of uniquePatterns) {
-        const url = `${SUPABASE_URL}/rest/v1/inventory?` +
-            `${colName}=ilike.${encodeURIComponent('%' + productNameKr + '%')}` +
-            `&${colOption}=eq.${encodeURIComponent(pattern)}` +
-            `&select=*` +
-            `&limit=1`;
+    const url = `${SUPABASE_URL}/rest/v1/rpc/lookup_inventory_by_name_option`;
 
+    for (const pattern of uniquePatterns) {
         try {
-            const r = await fetch(url, { headers: sbHeaders });
+            const r = await fetch(url, {
+                method: "POST",
+                headers: sbHeaders,
+                body: JSON.stringify({
+                    name_kr: productNameKr,
+                    option_pattern: pattern,
+                }),
+            });
             if (!r.ok) continue;
             const rows = await r.json();
             if (rows.length === 0) continue;
             const row = rows[0];
             return {
-                sku_code: row["상품코드"],
-                barcode: row["바코드"],
-                name: row["상품명"],
-                option: row["옵션"],
+                sku_code: row.sku_code,
+                barcode: row.barcode,
+                name: row.product_name,
+                option: row.option,
                 match_method: "name_option",
             };
         } catch (e) {
