@@ -631,7 +631,7 @@ export default function ProductionDashboard() {
             <header style={S.header}>
                 <div>
                     <div style={S.brandRow}>
-                        <div style={S.brandTitle}>생산 오더 입고 관리 시스템</div>
+                        <div style={S.brandTitle}>📊 생산 오더 입고 관리 시스템</div>
                     </div>
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
@@ -1852,7 +1852,7 @@ const S = {
     wrap: { minHeight: "100vh", background: "#F8FAFC", color: "#0F172A", fontFamily: "'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', sans-serif", padding: "24px 32px 80px" },
     header: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24, gap: 24 },
     brandRow: { display: "flex", alignItems: "center", gap: 12 },
-    brandTitle: { fontSize: 16, fontWeight: 600, color: "#0F172A", letterSpacing: -0.2 },
+    brandTitle: { fontSize: 19, fontWeight: 700, color: "#0F172A", letterSpacing: -0.2 },
 
     primaryBtn: { background: "#0F172A", color: "white", border: "none", padding: "9px 16px", borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center" },
     secondaryBtn: { background: "#0369A1", color: "white", border: "none", padding: "9px 14px", borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center" },
