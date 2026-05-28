@@ -219,20 +219,21 @@ function buildBarcodeCandidates(styleNo, color, size) {
 // inventory에서 바코드들로 SKU 코드 검색 (REST API 직접 호출)
 async function lookupInventoryBySkus(barcodes) {
     if (!barcodes || barcodes.length === 0) return {};
-    // 한글 컬럼명을 PostgREST가 인식하도록 쌍따옴표로 감싸고 인코딩
-    // 컬럼명: "바코드" -> 인코딩된 값
     const colBarcode = '%22%EB%B0%94%EC%BD%94%EB%93%9C%22';
-    // in 연산자 사용 (배열로 한 번에 조회)
     const inList = barcodes.map(b => `"${b}"`).join(",");
     const url = `${SUPABASE_URL}/rest/v1/inventory?${colBarcode}=in.(${encodeURIComponent(inList)})&select=*`;
+    console.log("[inventory 조회] URL 길이:", url.length, "샘플:", url.substring(0, 200));
     try {
         const r = await fetch(url, { headers: sbHeaders });
+        console.log("[inventory 조회] 응답 status:", r.status);
         if (!r.ok) {
             const errText = await r.text();
-            console.error("inventory 조회 실패", r.status, errText);
+            console.error("[inventory 조회] 실패", r.status, errText);
             return {};
         }
         const rows = await r.json();
+        console.log("[inventory 조회] 받은 row 수:", rows.length);
+        if (rows.length > 0) console.log("[inventory 조회] 첫 row:", rows[0]);
         const map = {};
         for (const row of rows) {
             const barcode = row["바코드"];
@@ -246,7 +247,7 @@ async function lookupInventoryBySkus(barcodes) {
         }
         return map;
     } catch (e) {
-        console.error("inventory 조회 예외", e);
+        console.error("[inventory 조회] 예외", e);
         return {};
     }
 }
@@ -1064,6 +1065,8 @@ function UploadModal({ existingOrderNos, onClose, onComplete }) {
 
             // inventory 자동 매칭 (2단계 fallback)
             setStep("matching");
+            console.log("[매칭] 시작 - 총 아이템:", result.items.length);
+
             const allBarcodes = [];
             for (const it of result.items) {
                 const candidates = buildBarcodeCandidates(it.style_no, it.color, it.size);
@@ -1071,9 +1074,12 @@ function UploadModal({ existingOrderNos, onClose, onComplete }) {
                     allBarcodes.push(bc);
                 }
             }
+            console.log("[매칭] 바코드 후보 총:", allBarcodes.length);
 
             // 1단계: 바코드 패턴으로 일괄 조회
             const uniqueBarcodes = [...new Set(allBarcodes)];
+            console.log("[매칭] 고유 바코드:", uniqueBarcodes.length, "예시:", uniqueBarcodes.slice(0, 3));
+
             const invMap = {};
             const batchSize = 50;
             for (let i = 0; i < uniqueBarcodes.length; i += batchSize) {
@@ -1081,6 +1087,8 @@ function UploadModal({ existingOrderNos, onClose, onComplete }) {
                 const batchMap = await lookupInventoryBySkus(batch);
                 Object.assign(invMap, batchMap);
             }
+            console.log("[매칭] 바코드 조회 결과 - 매칭된 바코드:", Object.keys(invMap).length);
+            console.log("[매칭] 첫 매칭 샘플:", Object.entries(invMap).slice(0, 3));
 
             // 매칭 결과 계산 (2단계 fallback 포함)
             let matched = 0, unmatched = 0;
@@ -1093,6 +1101,9 @@ function UploadModal({ existingOrderNos, onClose, onComplete }) {
                 // 2단계: 한글 상품명+옵션 fallback
                 if (!found) {
                     found = await lookupInventoryByNameAndOption(it.product_name, it.color, it.size);
+                    if (found) {
+                        console.log("[매칭] name_option 성공:", it.style_no, it.color, it.size, "→", found.sku_code);
+                    }
                 }
 
                 if (found) {
@@ -1105,8 +1116,12 @@ function UploadModal({ existingOrderNos, onClose, onComplete }) {
                     it.sku_code = null;
                     methodCount.none++;
                     unmatched++;
+                    if (unmatched <= 5) {
+                        console.log("[매칭] 실패:", it.style_no, it.color, it.size, "후보:", buildBarcodeCandidates(it.style_no, it.color, it.size));
+                    }
                 }
             }
+            console.log("[매칭] 완료 - 매칭:", matched, "/ 미매칭:", unmatched, "/ 방법별:", methodCount);
 
             setMatchResult({
                 matched, unmatched,
