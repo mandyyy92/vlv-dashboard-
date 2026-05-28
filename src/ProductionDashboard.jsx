@@ -219,14 +219,20 @@ function buildBarcodeCandidates(styleNo, color, size) {
 // inventory에서 바코드들로 SKU 코드 검색 (REST API 직접 호출)
 async function lookupInventoryBySkus(barcodes) {
     if (!barcodes || barcodes.length === 0) return {};
-    // 한글 컬럼명은 URL 인코딩 필요
-    const orFilter = barcodes.map(b => `%22%EB%B0%94%EC%BD%94%EB%93%9C%22.eq.${encodeURIComponent(b)}`).join(",");
-    const url = `${SUPABASE_URL}/rest/v1/inventory?or=(${orFilter})&select=%22%EC%83%81%ED%92%88%EC%BD%94%EB%93%9C%22,%22%EB%B0%94%EC%BD%94%EB%93%9C%22,%22%EC%83%81%ED%92%88%EB%AA%85%22,%22%EC%98%B5%EC%85%98%22`;
+    // 한글 컬럼명을 PostgREST가 인식하도록 쌍따옴표로 감싸고 인코딩
+    // 컬럼명: "바코드" -> 인코딩된 값
+    const colBarcode = '%22%EB%B0%94%EC%BD%94%EB%93%9C%22';
+    // in 연산자 사용 (배열로 한 번에 조회)
+    const inList = barcodes.map(b => `"${b}"`).join(",");
+    const url = `${SUPABASE_URL}/rest/v1/inventory?${colBarcode}=in.(${encodeURIComponent(inList)})&select=*`;
     try {
         const r = await fetch(url, { headers: sbHeaders });
-        if (!r.ok) return {};
+        if (!r.ok) {
+            const errText = await r.text();
+            console.error("inventory 조회 실패", r.status, errText);
+            return {};
+        }
         const rows = await r.json();
-        // 바코드 → 상품코드 매핑 (중복 시 첫 번째)
         const map = {};
         for (const row of rows) {
             const barcode = row["바코드"];
@@ -240,7 +246,7 @@ async function lookupInventoryBySkus(barcodes) {
         }
         return map;
     } catch (e) {
-        console.error("inventory 조회 실패", e);
+        console.error("inventory 조회 예외", e);
         return {};
     }
 }
@@ -261,45 +267,60 @@ async function lookupInventoryByNameAndOption(productNameEn, color, size) {
     if (!productNameKr) return null;
 
     const colorKr = COLOR_KR_MAP[color.toUpperCase()] || color;
-    const sizeKr = SIZE_KR_MAP[size.toUpperCase()] || size;
+    // 사이즈는 두 가지 표기 다 시도: M (단순) 와 95(M) (한글표기)
+    const sizeSimple = size.toUpperCase();
+    const sizeKr = SIZE_KR_MAP[sizeSimple] || sizeSimple;
 
-    // 옵션 패턴: [네이비-95(M)] 또는 [블랙-FREE]
-    const optionPattern = `[${colorKr}-${sizeKr}]`;
+    const colName = '%22%EC%83%81%ED%92%88%EB%AA%85%22';
+    const colOption = '%22%EC%98%B5%EC%85%98%22';
 
-    // 상품명에 한글이 포함되어 있고 옵션이 정확히 일치하는 row 검색
-    // ilike로 부분 일치, 옵션은 정확히 일치
-    const url = `${SUPABASE_URL}/rest/v1/inventory?` +
-        `%22%EC%83%81%ED%92%88%EB%AA%85%22=ilike.${encodeURIComponent('%' + productNameKr + '%')}` +
-        `&%22%EC%98%B5%EC%85%98%22=eq.${encodeURIComponent(optionPattern)}` +
-        `&select=%22%EC%83%81%ED%92%88%EC%BD%94%EB%93%9C%22,%22%EB%B0%94%EC%BD%94%EB%93%9C%22,%22%EC%83%81%ED%92%88%EB%AA%85%22,%22%EC%98%B5%EC%85%98%22` +
-        `&limit=1`;
+    // 시도할 옵션 패턴들 (단순 사이즈, 한글 사이즈)
+    const optionPatterns = [
+        `[${colorKr}-${sizeSimple}]`,   // [네이비-M]
+        `[${colorKr}-${sizeKr}]`,        // [네이비-95(M)]
+    ];
+    // 중복 제거
+    const uniquePatterns = [...new Set(optionPatterns)];
 
-    try {
-        const r = await fetch(url, { headers: sbHeaders });
-        if (!r.ok) return null;
-        const rows = await r.json();
-        if (rows.length === 0) return null;
-        const row = rows[0];
-        return {
-            sku_code: row["상품코드"],
-            barcode: row["바코드"],
-            name: row["상품명"],
-            option: row["옵션"],
-            match_method: "name_option",
-        };
-    } catch (e) {
-        return null;
+    for (const pattern of uniquePatterns) {
+        const url = `${SUPABASE_URL}/rest/v1/inventory?` +
+            `${colName}=ilike.${encodeURIComponent('%' + productNameKr + '%')}` +
+            `&${colOption}=eq.${encodeURIComponent(pattern)}` +
+            `&select=*` +
+            `&limit=1`;
+
+        try {
+            const r = await fetch(url, { headers: sbHeaders });
+            if (!r.ok) continue;
+            const rows = await r.json();
+            if (rows.length === 0) continue;
+            const row = rows[0];
+            return {
+                sku_code: row["상품코드"],
+                barcode: row["바코드"],
+                name: row["상품명"],
+                option: row["옵션"],
+                match_method: "name_option",
+            };
+        } catch (e) {
+            continue;
+        }
     }
+    return null;
 }
 
 // 상품코드(S21895)로 inventory 조회 → 상품명/옵션 반환
 async function lookupInventoryByProductCode(skuCodes) {
     if (!skuCodes || skuCodes.length === 0) return {};
-    const orFilter = skuCodes.map(s => `%22%EC%83%81%ED%92%88%EC%BD%94%EB%93%9C%22.eq.${encodeURIComponent(s)}`).join(",");
-    const url = `${SUPABASE_URL}/rest/v1/inventory?or=(${orFilter})&select=%22%EC%83%81%ED%92%88%EC%BD%94%EB%93%9C%22,%22%EB%B0%94%EC%BD%94%EB%93%9C%22,%22%EC%83%81%ED%92%88%EB%AA%85%22,%22%EC%98%B5%EC%85%98%22`;
+    const colCode = '%22%EC%83%81%ED%92%88%EC%BD%94%EB%93%9C%22';
+    const inList = skuCodes.map(s => `"${s}"`).join(",");
+    const url = `${SUPABASE_URL}/rest/v1/inventory?${colCode}=in.(${encodeURIComponent(inList)})&select=*`;
     try {
         const r = await fetch(url, { headers: sbHeaders });
-        if (!r.ok) return {};
+        if (!r.ok) {
+            console.error("inventory 조회 실패", r.status);
+            return {};
+        }
         const rows = await r.json();
         const map = {};
         for (const row of rows) {
@@ -314,7 +335,7 @@ async function lookupInventoryByProductCode(skuCodes) {
         }
         return map;
     } catch (e) {
-        console.error("inventory 조회 실패", e);
+        console.error("inventory 조회 예외", e);
         return {};
     }
 }
