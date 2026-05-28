@@ -220,7 +220,9 @@ function buildBarcodeCandidates(styleNo, color, size) {
 async function lookupInventoryBySkus(barcodes) {
     if (!barcodes || barcodes.length === 0) return {};
     const colBarcode = '%22%EB%B0%94%EC%BD%94%EB%93%9C%22';
-    const inList = barcodes.map(b => `"${b}"`).join(",");
+    // PostgREST in 연산자: 따옴표 없이 쉼표로 구분 (값에 특수문자가 없을 때)
+    // 바코드는 영숫자만 포함하므로 따옴표 불필요
+    const inList = barcodes.join(",");
     const url = `${SUPABASE_URL}/rest/v1/inventory?${colBarcode}=in.(${encodeURIComponent(inList)})&select=*`;
     console.log("[inventory 조회] URL 길이:", url.length, "샘플:", url.substring(0, 200));
     try {
@@ -314,7 +316,8 @@ async function lookupInventoryByNameAndOption(productNameEn, color, size) {
 async function lookupInventoryByProductCode(skuCodes) {
     if (!skuCodes || skuCodes.length === 0) return {};
     const colCode = '%22%EC%83%81%ED%92%88%EC%BD%94%EB%93%9C%22';
-    const inList = skuCodes.map(s => `"${s}"`).join(",");
+    // PostgREST in 연산자: 따옴표 없이 쉼표로 구분
+    const inList = skuCodes.join(",");
     const url = `${SUPABASE_URL}/rest/v1/inventory?${colCode}=in.(${encodeURIComponent(inList)})&select=*`;
     try {
         const r = await fetch(url, { headers: sbHeaders });
