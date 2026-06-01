@@ -421,13 +421,13 @@ async function parseWorkorder(file) {
     const factory = cell(5, 4);
     if (!styleNo || !String(styleNo).trim()) continue;
 
-    // COLOR 헤더 위치 탐색
+    // COLOR 헤더 위치 탐색 (시트를 위→아래 스캔. "COLOR" 뿐 아니라 "COLOR(스와치 컬러)" 등도 인식)
     const range = XLSX.utils.decode_range(ws["!ref"] || "A1:Z40");
     let colorRow = 0, colorCol = 0;
     outer: for (let r = 1; r <= range.e.r + 1; r++) {
       for (let c = 1; c <= range.e.c + 1; c++) {
         const v = cell(r, c);
-        if (v && String(v).trim() === "COLOR") {
+        if (v && String(v).trim().toUpperCase().startsWith("COLOR")) {
           colorRow = r; colorCol = c;
           break outer;
         }
@@ -450,6 +450,8 @@ async function parseWorkorder(file) {
     for (let dr = colorRow + 2; dr <= range.e.r + 1; dr++) {
       const color = cell(dr, colorCol);
       if (!color || !String(color).trim()) continue;
+      // 색상값에 붙은 괄호코드(예: "크림(114)", "블랙(33)") 제거 → 매칭은 괄호 앞부분만 사용
+      const colorClean = String(color).trim().replace(/\s*\(.*\)\s*$/, "").trim() || String(color).trim();
       for (const sz of sizes) {
         const qty = cell(dr, sz.col);
         if (typeof qty === "number" && qty > 0) {
@@ -458,7 +460,7 @@ async function parseWorkorder(file) {
             style_no: String(styleNo).trim(),
             product_name: String(productName || "").trim(),
             factory: String(factory || "").trim(),
-            color: String(color).trim(),
+            color: colorClean,
             size: sz.size,
             qty: Math.round(qty),
           });
