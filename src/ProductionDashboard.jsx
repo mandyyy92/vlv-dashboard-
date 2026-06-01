@@ -1495,13 +1495,6 @@ function UploadModal({ existingOrderNos, onClose, onComplete }) {
                 </div>
               </div>
 
-              {parsed.skipped_sheets.length > 0 && (
-                <div style={S.previewSection}>
-                  <div style={S.previewSectionTitle}>⊘ 자동 제외 (숨김 시트 {parsed.skipped_sheets.length}개)</div>
-                  <div style={S.previewSkipped}>{parsed.skipped_sheets.join(" · ")}</div>
-                </div>
-              )}
-
               {/* inventory 매칭 결과 (모달 맨 아래, 등록 버튼 바로 위) */}
               {matchResult && (
                 <div style={{ ...S.previewSection, background: matchResult.match_rate >= 80 ? "#DCFCE7" : matchResult.match_rate >= 50 ? "#FEF3C7" : "#FEE2E2", border: "1px solid #E2E8F0", padding: 12, borderRadius: 8, marginBottom: 16 }}>
