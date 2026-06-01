@@ -1007,15 +1007,7 @@ function OrderDrawer({ order, onClose, onAddInbound, onDelete, onUpdate }) {
 
           <div style={S.drawerCard}>
             <div style={S.drawerCardHead}>🎨 색상 × 사이즈 ({order.items.length}개 SKU)</div>
-            <div style={S.skuGrid}>
-              {order.items.map((it) => (
-                <div key={it.id} style={S.skuPill}>
-                  <span style={S.skuColor}>{it.color}</span>
-                  <span style={S.skuSize}>{it.size}</span>
-                  <span style={S.skuQty}>{fmt(it.order_qty)}</span>
-                </div>
-              ))}
-            </div>
+            <SkuMatrix items={order.items} />
           </div>
 
           <div style={{ marginTop: 16, padding: "0 4px" }}>
@@ -1024,6 +1016,90 @@ function OrderDrawer({ order, onClose, onAddInbound, onDelete, onUpdate }) {
         </div>
       </aside>
     </>
+  );
+}
+
+// ============================================================
+// SKU 매트릭스 (색상 행 x 사이즈 열)
+// ============================================================
+function SkuMatrix({ items }) {
+  // 색상과 사이즈 유니크 추출 (등장 순서 유지)
+  const { colors, sizes, matrix, colorTotals, sizeTotals, grandTotal } = useMemo(() => {
+    const colorSet = [];
+    const sizeSet = [];
+    const cellMap = {};
+    for (const it of items) {
+      if (!colorSet.includes(it.color)) colorSet.push(it.color);
+      if (!sizeSet.includes(it.size)) sizeSet.push(it.size);
+      const key = `${it.color}||${it.size}`;
+      cellMap[key] = (cellMap[key] || 0) + (it.order_qty || 0);
+    }
+    
+    // 사이즈 순서 정렬 (S, M, L, XL, 2XL, FREE 순)
+    const sizeOrder = { "S": 1, "M": 2, "L": 3, "XL": 4, "2XL": 5, "3XL": 6, "FREE": 99, "OS": 99 };
+    sizeSet.sort((a, b) => (sizeOrder[a] || 50) - (sizeOrder[b] || 50));
+    
+    // 행/열 합계 계산
+    const cTotals = {};
+    const sTotals = {};
+    let gTotal = 0;
+    for (const c of colorSet) {
+      cTotals[c] = 0;
+      for (const s of sizeSet) {
+        const v = cellMap[`${c}||${s}`] || 0;
+        cTotals[c] += v;
+        sTotals[s] = (sTotals[s] || 0) + v;
+        gTotal += v;
+      }
+    }
+    
+    return {
+      colors: colorSet,
+      sizes: sizeSet,
+      matrix: cellMap,
+      colorTotals: cTotals,
+      sizeTotals: sTotals,
+      grandTotal: gTotal,
+    };
+  }, [items]);
+
+  return (
+    <div style={S.skuMatrixWrap}>
+      <table style={S.skuMatrixTable}>
+        <thead>
+          <tr>
+            <th style={S.skuMatrixCornerCell}>색상 \ 사이즈</th>
+            {sizes.map(s => (
+              <th key={s} style={S.skuMatrixSizeHeader}>{s}</th>
+            ))}
+            <th style={S.skuMatrixTotalHeader}>합계</th>
+          </tr>
+        </thead>
+        <tbody>
+          {colors.map(c => (
+            <tr key={c}>
+              <td style={S.skuMatrixColorCell}>{c}</td>
+              {sizes.map(s => {
+                const v = matrix[`${c}||${s}`] || 0;
+                return (
+                  <td key={s} style={v > 0 ? S.skuMatrixCell : S.skuMatrixEmptyCell}>
+                    {v > 0 ? fmt(v) : "—"}
+                  </td>
+                );
+              })}
+              <td style={S.skuMatrixRowTotal}>{fmt(colorTotals[c])}</td>
+            </tr>
+          ))}
+          <tr style={S.skuMatrixFooterRow}>
+            <td style={S.skuMatrixFooterLabel}>합계</td>
+            {sizes.map(s => (
+              <td key={s} style={S.skuMatrixColTotal}>{fmt(sizeTotals[s] || 0)}</td>
+            ))}
+            <td style={S.skuMatrixGrandTotal}>{fmt(grandTotal)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -1926,6 +2002,21 @@ const S = {
   skuColor: { color: "#475569", fontWeight: 600 },
   skuSize: { color: "#94A3B8" },
   skuQty: { color: "#0369A1", fontWeight: 700, fontVariantNumeric: "tabular-nums" },
+
+  // 색상 × 사이즈 매트릭스 표
+  skuMatrixWrap: { marginTop: 10, overflowX: "auto", borderRadius: 8, border: "1px solid #E2E8F0", background: "white" },
+  skuMatrixTable: { width: "100%", borderCollapse: "collapse", fontSize: 13 },
+  skuMatrixCornerCell: { padding: "8px 10px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#94A3B8", background: "#F8FAFC", borderRight: "1px solid #E2E8F0", borderBottom: "1px solid #E2E8F0", textTransform: "uppercase", letterSpacing: 0.3 },
+  skuMatrixSizeHeader: { padding: "8px 12px", textAlign: "center", fontSize: 12, fontWeight: 700, color: "#0F172A", background: "#F1F5F9", borderBottom: "1px solid #E2E8F0", minWidth: 50 },
+  skuMatrixTotalHeader: { padding: "8px 12px", textAlign: "center", fontSize: 11, fontWeight: 700, color: "#0F172A", background: "#0F172A", color: "white", borderBottom: "1px solid #E2E8F0", letterSpacing: 0.3 },
+  skuMatrixColorCell: { padding: "10px 12px", textAlign: "left", fontSize: 13, fontWeight: 600, color: "#1F2937", background: "#F8FAFC", borderRight: "1px solid #E2E8F0", borderBottom: "1px solid #F1F5F9" },
+  skuMatrixCell: { padding: "10px 12px", textAlign: "right", fontSize: 13, color: "#0369A1", fontWeight: 600, fontVariantNumeric: "tabular-nums", borderBottom: "1px solid #F1F5F9" },
+  skuMatrixEmptyCell: { padding: "10px 12px", textAlign: "center", fontSize: 13, color: "#CBD5E1", borderBottom: "1px solid #F1F5F9" },
+  skuMatrixRowTotal: { padding: "10px 12px", textAlign: "right", fontSize: 13, fontWeight: 700, color: "#0F172A", background: "#F8FAFC", fontVariantNumeric: "tabular-nums", borderBottom: "1px solid #F1F5F9", borderLeft: "1px solid #E2E8F0" },
+  skuMatrixFooterRow: { background: "#F1F5F9" },
+  skuMatrixFooterLabel: { padding: "10px 12px", textAlign: "left", fontSize: 12, fontWeight: 700, color: "#475569", background: "#F1F5F9", borderRight: "1px solid #E2E8F0", borderTop: "1px solid #E2E8F0", textTransform: "uppercase", letterSpacing: 0.3 },
+  skuMatrixColTotal: { padding: "10px 12px", textAlign: "right", fontSize: 13, fontWeight: 700, color: "#0F172A", background: "#F1F5F9", fontVariantNumeric: "tabular-nums", borderTop: "1px solid #E2E8F0" },
+  skuMatrixGrandTotal: { padding: "10px 12px", textAlign: "right", fontSize: 14, fontWeight: 800, color: "white", background: "#0F172A", fontVariantNumeric: "tabular-nums", borderTop: "1px solid #E2E8F0", borderLeft: "1px solid #0F172A" },
 
   modalBackdrop: { position: "fixed", inset: 0, background: "rgba(15, 23, 42, 0.5)", zIndex: 100 },
   modal: { position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)", background: "white", borderRadius: 12, width: "90%", maxWidth: 640, maxHeight: "85vh", overflow: "hidden", display: "flex", flexDirection: "column", zIndex: 101, boxShadow: "0 25px 50px rgba(0,0,0,0.25)" },
