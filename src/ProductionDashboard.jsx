@@ -289,38 +289,60 @@ function findSkuFromInventoryMap(invMap, styleNo, color, size) {
   return null;
 }
 
+// inventory(상품마스터) 상품명 정규화: 첫 '-' 기준으로 뒤쪽만 사용.
+// 예) '하의-나일론 버뮤다 팬츠' → '나일론 버뮤다 팬츠'.  '-' 없으면 전체 그대로.
+function normalizeInventoryName(name) {
+  const s = String(name || "").trim();
+  const i = s.indexOf("-");
+  return (i === -1 ? s : s.slice(i + 1)).trim();
+}
+
 // 한글 상품명+옵션으로 inventory 검색 (RPC 함수 fallback 매칭)
+// 비교 규칙: 작업지시서 상품명(한글) vs '-' 뒤로 정규화한 inventory 상품명을 trim 후 비교.
+//           일치(=) 우선, 없으면 포함관계. (서버측 RPC SQL과 동일 로직을 클라이언트에서도 적용)
 async function lookupInventoryByNameAndOption(productNameEn, color, size) {
-  const productNameKr = PRODUCT_NAME_KR_MAP[productNameEn];
-  if (!productNameKr) return null;
-  
+  // 작업지시서 상품명은 이미 한글('나일론 버뮤다 팬츠')인 경우가 많음.
+  // 영문이면 한글로 매핑, 한글이면 그대로 사용.
+  const targetName = (PRODUCT_NAME_KR_MAP[productNameEn] || productNameEn || "").trim();
+  if (!targetName) return null;
+
+  // 옵션은 '[한글색상-사이즈]' 형식 그대로 비교. inventory 옵션이 이미 한글이라
+  // 색상 영문코드 변환(NAVY→NV 등)은 쓰지 않는다.
   const colorKr = COLOR_KR_MAP[color.toUpperCase()] || color;
   const sizeSimple = size.toUpperCase();
   const sizeKr = SIZE_KR_MAP[sizeSimple] || sizeSimple;
-  
+
   // 시도할 옵션 패턴들
   const optionPatterns = [
     `[${colorKr}-${sizeSimple}]`,
     `[${colorKr}-${sizeKr}]`,
   ];
   const uniquePatterns = [...new Set(optionPatterns)];
-  
+
   const url = `${SUPABASE_URL}/rest/v1/rpc/lookup_inventory_by_name_option`;
-  
+
   for (const pattern of uniquePatterns) {
     try {
       const r = await fetch(url, {
         method: "POST",
         headers: sbHeaders,
         body: JSON.stringify({
-          name_kr: productNameKr,
+          name_kr: targetName,
           option_pattern: pattern,
         }),
       });
       if (!r.ok) continue;
       const rows = await r.json();
-      if (rows.length === 0) continue;
-      const row = rows[0];
+      if (!rows || rows.length === 0) continue;
+
+      // inventory 상품명을 '-' 뒤로 정규화 후 비교: 일치 우선 → 없으면 포함관계 → 그래도 없으면 첫 행
+      const exact = rows.find(row => normalizeInventoryName(row.product_name) === targetName);
+      const partial = rows.find(row => {
+        const n = normalizeInventoryName(row.product_name);
+        return n.includes(targetName) || targetName.includes(n);
+      });
+      const row = exact || partial || rows[0];
+
       return {
         sku_code: row.sku_code,
         barcode: row.barcode,
