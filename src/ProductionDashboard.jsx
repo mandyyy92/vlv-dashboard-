@@ -122,6 +122,9 @@ async function updateOrder(id, patch) {
 const STYLE_NO_MAP = {
   "V24ST01UA501": "V25ST006U",  // Restchill
   "V25ST01UA501": "V25ST57U",   // Graychill
+  // 9자 짧은 스타일NO들 (자기 자신 매핑 - 9자 패턴 강제 사용)
+  "V26PS01W": "V26PS01W",       // 나일론 롱 스커트
+  "V26SP01U": "V26SP01U",       // 나일론 버뮤다 팬츠
 };
 
 // 색상 매핑 (작업지시서 영문 → inventory 바코드 2글자 코드)
@@ -138,8 +141,16 @@ const COLOR_MAP = {
   "GREY": "GY",
   "BEIGE": "BE",
   "BLUE": "BL",
+  "LIGHT BLUE": "LB",
   "RED": "RE",
   "YELLOW": "YE",
+  "KHAKI": "KA",
+  "GREEN": "GR",
+  "BROWN": "BR",
+  "PINK": "PK",
+  "ORANGE": "OR",
+  "PURPLE": "PU",
+  "IVORY": "IV",
 };
 
 // 색상 영문 → 한글 매핑 (상품명+옵션 검색용)
@@ -156,8 +167,16 @@ const COLOR_KR_MAP = {
   "GREY": "그레이",
   "BEIGE": "베이지",
   "BLUE": "블루",
+  "LIGHT BLUE": "라이트블루",
   "RED": "레드",
   "YELLOW": "옐로우",
+  "KHAKI": "카키",
+  "GREEN": "그린",
+  "BROWN": "브라운",
+  "PINK": "핑크",
+  "ORANGE": "오렌지",
+  "PURPLE": "퍼플",
+  "IVORY": "아이보리",
 };
 
 // 영문 상품명 → 한글 상품명 매핑 (작업지시서 → inventory)
@@ -170,6 +189,13 @@ const PRODUCT_NAME_KR_MAP = {
   "Women's Ringer T-shirt": "우먼 링거티",
   "Men's Crop T-shirt": "맨즈 크롭 반팔",
   "Graychill": "Graychill",
+  // 신상품 추가
+  "Layered Skirt": "레이어드 스커트",
+  "Nylon Long Skirt": "롱스커트",
+  "Nylon Bermuda Pants": "나일론 버뮤다 팬츠",
+  "Unisex Windbreaker": "공용 바람막이",
+  "Pigment T-shirt": "피그먼트",
+  "Pigment Tee": "피그먼트",
 };
 
 // 사이즈 → 한글 사이즈 표기 변환 (S → 90(S))
