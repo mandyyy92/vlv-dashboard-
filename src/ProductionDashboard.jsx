@@ -1421,34 +1421,6 @@ function UploadModal({ existingOrderNos, onClose, onComplete }) {
                 <div style={S.previewKpiBox}><div style={S.previewKpiLabel}>작업처</div><div style={{ ...S.previewKpiVal, fontSize: 14 }}>{parsed.factories.join(", ") || "—"}</div></div>
               </div>
 
-              {/* inventory 매칭 결과 */}
-              {matchResult && (
-                <div style={{ ...S.previewSection, background: matchResult.match_rate >= 80 ? "#DCFCE7" : matchResult.match_rate >= 50 ? "#FEF3C7" : "#FEE2E2", border: "1px solid #E2E8F0", padding: 12, borderRadius: 8, marginBottom: 16 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "#0F172A" }}>
-                    🔗 inventory 자동 매칭: {matchResult.matched} / {parsed.sku_count} SKU ({matchResult.match_rate.toFixed(1)}%)
-                  </div>
-                  {matchResult.method_count && (
-                    <div style={{ fontSize: 11, color: "#475569", marginTop: 6, display: "flex", gap: 12 }}>
-                      {matchResult.method_count.barcode > 0 && <span>📊 바코드 매칭: {matchResult.method_count.barcode}</span>}
-                      {matchResult.method_count.name_option > 0 && <span>🔤 상품명+옵션 매칭: {matchResult.method_count.name_option}</span>}
-                      {matchResult.method_count.none > 0 && <span style={{ color: "#B91C1C" }}>❌ 미매칭: {matchResult.method_count.none}</span>}
-                    </div>
-                  )}
-                  <div style={{ fontSize: 11, color: "#475569", marginTop: 4 }}>
-                    {matchResult.unmatched > 0 ? `${matchResult.unmatched}개 SKU는 inventory에 없어 패킹리스트 매칭이 안 될 수 있습니다.` : "모든 SKU가 inventory와 매칭되었습니다."}
-                  </div>
-                  {matchResult.unmatched_items && matchResult.unmatched_items.length > 0 && (
-                    <div style={{ marginTop: 8, maxHeight: 160, overflowY: "auto", background: "rgba(255,255,255,0.6)", border: "1px solid #FCA5A5", borderRadius: 6, padding: 8 }}>
-                      {matchResult.unmatched_items.map((u, i) => (
-                        <div key={i} style={{ fontSize: 11, color: "#7F1D1D", padding: "2px 0", borderBottom: i < matchResult.unmatched_items.length - 1 ? "1px solid #FEE2E2" : "none" }}>
-                          {(u.product_name || "—")} / {(u.color || "—")} / {(u.size || "—")} ({fmt(u.qty)}장)
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
               <div style={S.previewSection}>
                 <div style={S.previewSectionTitle}>📝 오더 정보</div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
@@ -1527,6 +1499,34 @@ function UploadModal({ existingOrderNos, onClose, onComplete }) {
                 <div style={S.previewSection}>
                   <div style={S.previewSectionTitle}>⊘ 자동 제외 (숨김 시트 {parsed.skipped_sheets.length}개)</div>
                   <div style={S.previewSkipped}>{parsed.skipped_sheets.join(" · ")}</div>
+                </div>
+              )}
+
+              {/* inventory 매칭 결과 (모달 맨 아래, 등록 버튼 바로 위) */}
+              {matchResult && (
+                <div style={{ ...S.previewSection, background: matchResult.match_rate >= 80 ? "#DCFCE7" : matchResult.match_rate >= 50 ? "#FEF3C7" : "#FEE2E2", border: "1px solid #E2E8F0", padding: 12, borderRadius: 8, marginBottom: 16 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#0F172A" }}>
+                    🔗 inventory 자동 매칭: {matchResult.matched} / {parsed.sku_count} SKU ({matchResult.match_rate.toFixed(1)}%)
+                  </div>
+                  {matchResult.method_count && (
+                    <div style={{ fontSize: 11, color: "#475569", marginTop: 6, display: "flex", gap: 12 }}>
+                      {matchResult.method_count.barcode > 0 && <span>📊 바코드 매칭: {matchResult.method_count.barcode}</span>}
+                      {matchResult.method_count.name_option > 0 && <span>🔤 상품명+옵션 매칭: {matchResult.method_count.name_option}</span>}
+                      {matchResult.method_count.none > 0 && <span style={{ color: "#B91C1C" }}>❌ 미매칭: {matchResult.method_count.none}</span>}
+                    </div>
+                  )}
+                  <div style={{ fontSize: 11, color: "#475569", marginTop: 4 }}>
+                    {matchResult.unmatched > 0 ? `${matchResult.unmatched}개 SKU는 inventory에 없어 패킹리스트 매칭이 안 될 수 있습니다.` : "모든 SKU가 inventory와 매칭되었습니다."}
+                  </div>
+                  {matchResult.unmatched_items && matchResult.unmatched_items.length > 0 && (
+                    <div style={{ marginTop: 8, maxHeight: 160, overflowY: "auto", background: "rgba(255,255,255,0.6)", border: "1px solid #FCA5A5", borderRadius: 6, padding: 8 }}>
+                      {matchResult.unmatched_items.map((u, i) => (
+                        <div key={i} style={{ fontSize: 11, color: "#7F1D1D", padding: "2px 0", borderBottom: i < matchResult.unmatched_items.length - 1 ? "1px solid #FEE2E2" : "none" }}>
+                          {(u.product_name || "—")} / {(u.color || "—")} / {(u.size || "—")} ({fmt(u.qty)}장)
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
