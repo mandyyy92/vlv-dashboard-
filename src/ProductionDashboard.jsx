@@ -491,54 +491,87 @@ async function parseWorkorder(file) {
 
 // ============================================================
 // 패킹리스트 파서
-// 양식: A=패킹리스트ID, B=상품코드(S21895), C=상품명(상의-링거티), 
-//       D=옵션([네이비-M]), E=수량, F=메모
+// 양식: 헤더 행을 '상품코드'/'수량' 등 헤더 텍스트로 스캔해 컬럼 위치를 잡음.
+//   예) 상품코드(S21766) · 상품명(하의-롱스커트) · 옵션([라이트베이지]) · 수량 · 메모(무시)
+//   SKU 매칭은 상품코드(S코드)=sku_code 로 직접 수행. 옵션의 색상/사이즈는 보조 확인용.
 // ============================================================
 async function parsePackingList(file) {
   const XLSX = await loadXlsx();
   const ab = await file.arrayBuffer();
   const wb = XLSX.read(ab, { type: "array", cellDates: true });
-  
+
   const allLines = [];
-  
+
   for (const sheetName of wb.SheetNames) {
     const ws = wb.Sheets[sheetName];
     const hidden = wb.Workbook?.Sheets?.find(s => s.name === sheetName)?.Hidden;
     if (hidden && hidden !== 0) continue;
-    
+
     const range = XLSX.utils.decode_range(ws["!ref"] || "A1:F1");
-    
-    for (let r = 1; r <= range.e.r; r++) {
-      const cell = (c) => {
-        const ref = XLSX.utils.encode_cell({ r, c: c - 1 });
-        return ws[ref] ? ws[ref].v : null;
-      };
-      
-      const plId = cell(1);    // 패킹리스트ID
-      const code = cell(2);    // 상품코드
-      const name = cell(3);    // 상품명
-      const option = cell(4);  // 옵션 [색상-사이즈]
-      const qty = cell(5);     // 수량
-      const memo = cell(6);    // 메모
-      
-      if (!code || !qty || typeof qty !== "number") continue;
-      
-      // 옵션 파싱: [네이비-M] → 색상=네이비, 사이즈=M
-      let color = "", size = String(option || "");
-      const m = String(option || "").match(/\[(.+?)-(.+?)\]/);
-      if (m) {
-        color = m[1].trim();
-        size = m[2].trim();
+    const cellAt = (r, c) => {
+      const ref = XLSX.utils.encode_cell({ r, c }); // 0-based
+      return ws[ref] ? ws[ref].v : null;
+    };
+
+    // 헤더 행 탐색: '상품코드'(코드)와 '수량' 텍스트가 같은 행에 있으면 헤더로 인식
+    let headerRow = -1;
+    const col = {}; // role -> 0-based 컬럼 인덱스
+    for (let r = range.s.r; r <= range.e.r; r++) {
+      const map = {};
+      for (let c = range.s.c; c <= range.e.c; c++) {
+        const v = cellAt(r, c);
+        if (v == null) continue;
+        const t = String(v).replace(/\s/g, "");
+        if (!t) continue;
+        if (map.code === undefined && (t === "상품코드" || t === "코드" || t.includes("상품코드"))) map.code = c;
+        else if (map.name === undefined && (t === "상품명" || t.includes("상품명") || t.includes("품명"))) map.name = c;
+        else if (map.option === undefined && (t === "옵션" || t.includes("옵션"))) map.option = c;
+        else if (map.qty === undefined && (t === "수량" || t.includes("수량") || t.toUpperCase() === "QTY" || t === "Q'TY")) map.qty = c;
+        else if (map.memo === undefined && (t === "메모" || t.includes("메모") || t.includes("비고"))) map.memo = c;
       }
-      
+      if (map.code !== undefined && map.qty !== undefined) { headerRow = r; Object.assign(col, map); break; }
+    }
+
+    // 헤더를 못 찾으면 기본 양식(A=상품코드, B=상품명, C=옵션, D=수량, E=메모)으로 가정
+    let startRow;
+    if (headerRow === -1) {
+      col.code = 0; col.name = 1; col.option = 2; col.qty = 3; col.memo = 4;
+      // 1행이 헤더면 건너뛰기: A1이 S로 시작하는 코드면 데이터 행으로 간주
+      const a1 = cellAt(range.s.r, 0);
+      startRow = (a1 && /^S\d/i.test(String(a1).trim())) ? range.s.r : range.s.r + 1;
+    } else {
+      startRow = headerRow + 1;
+    }
+
+    for (let r = startRow; r <= range.e.r; r++) {
+      const code = col.code !== undefined ? cellAt(r, col.code) : null;
+      const name = col.name !== undefined ? cellAt(r, col.name) : null;
+      const option = col.option !== undefined ? cellAt(r, col.option) : null;
+      const qtyRaw = col.qty !== undefined ? cellAt(r, col.qty) : null;
+
+      const codeStr = String(code || "").trim();
+      const qty = typeof qtyRaw === "number" ? qtyRaw : Number(String(qtyRaw ?? "").replace(/[^\d.-]/g, ""));
+      if (!codeStr || !qty || isNaN(qty) || qty <= 0) continue;
+
+      // 옵션 파싱: [색상-사이즈] 또는 [색상] (사이즈 없는 색상-only 허용)
+      let color = "", size = "";
+      const inner = String(option || "").trim().replace(/^\[/, "").replace(/\]$/, "").trim();
+      if (inner) {
+        const dash = inner.indexOf("-");
+        if (dash >= 0) {
+          color = inner.slice(0, dash).trim();
+          size = inner.slice(dash + 1).trim();
+        } else {
+          color = inner; // 색상-only
+        }
+      }
+
       allLines.push({
-        packing_list_id: String(plId || ""),
-        sku_code: String(code).trim(),
+        sku_code: codeStr,
         product_name: String(name || "").trim(),
         color,
         size,
         qty: Math.round(qty),
-        memo: String(memo || "").trim(),
       });
     }
   }
