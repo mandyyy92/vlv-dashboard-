@@ -1217,7 +1217,8 @@ function UploadModal({ existingOrderNos, onClose, onComplete }) {
       // 매칭 결과 계산 (2단계 fallback 포함)
       let matched = 0, unmatched = 0;
       let methodCount = { barcode: 0, name_option: 0, none: 0 };
-      
+      const unmatchedItems = [];
+
       for (const it of result.items) {
         // 1단계: 바코드 패턴 매칭
         let found = findSkuFromInventoryMap(invMap, it.style_no, it.color, it.size);
@@ -1240,6 +1241,7 @@ function UploadModal({ existingOrderNos, onClose, onComplete }) {
           it.sku_code = null;
           methodCount.none++;
           unmatched++;
+          unmatchedItems.push({ product_name: it.product_name, color: it.color, size: it.size, style_no: it.style_no, qty: it.qty });
           if (unmatched <= 5) {
             console.log("[매칭] 실패:", it.style_no, it.color, it.size, "후보:", buildBarcodeCandidates(it.style_no, it.color, it.size));
           }
@@ -1251,6 +1253,7 @@ function UploadModal({ existingOrderNos, onClose, onComplete }) {
         matched, unmatched,
         match_rate: result.items.length ? (matched / result.items.length) * 100 : 0,
         method_count: methodCount,
+        unmatched_items: unmatchedItems,
       });
       setParsed(result);
       setStep("preview");
@@ -1432,6 +1435,15 @@ function UploadModal({ existingOrderNos, onClose, onComplete }) {
                   <div style={{ fontSize: 11, color: "#475569", marginTop: 4 }}>
                     {matchResult.unmatched > 0 ? `${matchResult.unmatched}개 SKU는 inventory에 없어 패킹리스트 매칭이 안 될 수 있습니다.` : "모든 SKU가 inventory와 매칭되었습니다."}
                   </div>
+                  {matchResult.unmatched_items && matchResult.unmatched_items.length > 0 && (
+                    <div style={{ marginTop: 8, maxHeight: 160, overflowY: "auto", background: "rgba(255,255,255,0.6)", border: "1px solid #FCA5A5", borderRadius: 6, padding: 8 }}>
+                      {matchResult.unmatched_items.map((u, i) => (
+                        <div key={i} style={{ fontSize: 11, color: "#7F1D1D", padding: "2px 0", borderBottom: i < matchResult.unmatched_items.length - 1 ? "1px solid #FEE2E2" : "none" }}>
+                          {(u.product_name || "—")} / {(u.color || "—")} / {(u.size || "—")} ({fmt(u.qty)}장)
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
