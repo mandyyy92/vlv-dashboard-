@@ -21,22 +21,26 @@ function loadXlsx() {
 // ============================================================
 // 유틸리티
 // ============================================================
+// 오더 입고완료 판정 임계값 (입고율 ratio, 0~1). 나중에 쉽게 조정.
+const COMPLETE_THRESHOLD = 0.9;
+
+// 오더 상태 단일 판정 함수. 배지/KPI/탭/매트릭스 등 모든 곳이 이 결과를 동일하게 사용한다.
+// 우선순위: 입고완료(입고율 >= 90%, 납기 지나도 우선) → 부분입고(입고율 0% 초과) → 지연(0% + 납기경과) → 진행중.
+function determineOrderStatus(total_qty, received_qty, expected_final_date) {
+  if (total_qty <= 0) return "in_progress";
+  const ratio = received_qty / total_qty;
+  if (ratio >= COMPLETE_THRESHOLD) return "completed"; // 입고완료를 가장 먼저 판정 (지연보다 우선)
+  if (ratio > 0) return "partial";
+  const overdue = expected_final_date && new Date(expected_final_date) < new Date();
+  return overdue ? "delayed" : "in_progress";
+}
+
 function calcOrderTotals(order, items, inbounds) {
   const total_qty = items.reduce((s, it) => s + (it.order_qty || 0), 0);
   const received_qty = inbounds.reduce((s, ib) => s + (ib.qty || 0), 0);
   const remain_qty = received_qty - total_qty;
-  const today = new Date();
-  const expDate = order.expected_final_date ? new Date(order.expected_final_date) : null;
 
-  // 입고율(누적입고/총수량) 기준 우선순위로 상태 판정 (부분 입고가 '지연'보다 우선)
-  const rate = total_qty > 0 ? (received_qty / total_qty) * 100 : 0;
-  const overdue = expDate && expDate < today;
-  let status;
-  if (total_qty === 0) status = "in_progress";
-  else if (rate >= 100) status = "completed";
-  else if (rate >= 0.1) status = "partial";       // 납기일 지났어도 부분 입고 우선
-  else if (overdue) status = "delayed";            // 입고율 < 0.1% 이고 납기일 지남
-  else status = "in_progress";
+  const status = determineOrderStatus(total_qty, received_qty, order.expected_final_date);
 
   // 수동 저장된 실제 완료일이 있으면 우선 사용, 없으면 완납 시 마지막 입고일로 추정
   let actual_final_date = order.actual_final_date || null;
