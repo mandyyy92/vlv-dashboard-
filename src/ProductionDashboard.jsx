@@ -393,18 +393,26 @@ async function lookupInventoryByNameAndOption(productNameEn, color, size) {
 
   // 옵션은 '[한글색상-사이즈]' 형식 그대로 비교. inventory 옵션이 이미 한글이라
   // 색상 영문코드 변환(NAVY→NV 등)은 쓰지 않는다.
-  const colorKr = COLOR_KR_MAP[color.toUpperCase()] || color;
-  const sizeSimple = size.toUpperCase();
+  const colorKr = COLOR_KR_MAP[String(color || "").toUpperCase()] || color;
+  const sizeSimple = String(size || "").toUpperCase().trim();
   const sizeKr = SIZE_KR_MAP[sizeSimple] || sizeSimple;
 
-  // 시도할 옵션 패턴들
-  const optionPatterns = [
-    `[${colorKr}-${sizeSimple}]`,
-    `[${colorKr}-${sizeKr}]`,
-  ];
-  // 사이즈가 FREE/F/빈값일 때 색상만 패턴도 추가 (inventory는 FREE 상품을 '[멜란지]'처럼 사이즈 없이 저장)
-  const s = sizeSimple;
-  if (!s || ["FREE", "F", "없음", "-"].includes(s)) optionPatterns.push(`[${colorKr}]`);
+  // 원사이즈(FREE/F/OS/없음/'-'/빈값): inventory가 [색상-OS]·[색상-FREE] 등 어떤 사이즈 토큰으로
+  // 저장돼도 잡히도록 LIKE 와일드카드 패턴 사용. (Postgres LIKE에서 %만 와일드카드, []는 리터럴)
+  const isFreeSize = ["", "FREE", "F", "OS", "없음", "-"].includes(sizeSimple);
+  let optionPatterns;
+  if (isFreeSize) {
+    optionPatterns = [
+      `[${colorKr}-%]`,   // [베이지-OS], [베이지-FREE] 등 그 색상의 어떤 사이즈든 매칭
+      `[${colorKr}]`,     // 사이즈 없이 색상만 저장한 경우
+    ];
+  } else {
+    // 일반 사이즈(S/M/L 등)는 기존 [색상-사이즈] 패턴 그대로
+    optionPatterns = [
+      `[${colorKr}-${sizeSimple}]`,
+      `[${colorKr}-${sizeKr}]`,
+    ];
+  }
   const uniquePatterns = [...new Set(optionPatterns)];
 
   const url = `${SUPABASE_URL}/rest/v1/rpc/lookup_inventory_by_name_option`;
