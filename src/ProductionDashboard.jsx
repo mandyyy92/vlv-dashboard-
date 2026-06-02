@@ -1085,7 +1085,26 @@ function OrderDrawer({ order, onClose, onAddInbound, onDelete, onUpdate, onDelet
           <div style={S.drawerCard}>
             <div style={{ ...S.drawerCardHead, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span>📦 입고 이력 ({order.inbounds.length}회)</span>
-              <button style={S.miniBtn} onClick={onAddInbound}>+ 입고 등록</button>
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <button style={S.miniBtn} onClick={onAddInbound}>+ 입고 등록</button>
+                {order.inbounds.length > 0 && (() => {
+                  const lastIb = [...order.inbounds].sort((a, b) => a.inbound_round - b.inbound_round).slice(-1)[0];
+                  return (
+                    <button
+                      style={S.inboundDeleteBtn}
+                      title={`최근 입고(${lastIb.inbound_round}차) 삭제`}
+                      disabled={deletingInbound === lastIb.id}
+                      onClick={async () => {
+                        if (!confirm("이 입고 기록을 삭제할까요?")) return;
+                        setDeletingInbound(lastIb.id);
+                        try { await onDeleteInbound(lastIb.id); }
+                        catch (e) { alert("삭제 실패: " + e.message); }
+                        finally { setDeletingInbound(null); }
+                      }}
+                    >🗑</button>
+                  );
+                })()}
+              </div>
             </div>
             {order.inbounds.length === 0 ? (
               <div style={{ ...S.fileEmpty, marginTop: 10 }}>아직 입고가 없습니다</div>
@@ -1101,18 +1120,6 @@ function OrderDrawer({ order, onClose, onAddInbound, onDelete, onUpdate, onDelet
                       </div>
                       <div style={S.timelineMemo}>{ib.memo || "—"}</div>
                     </div>
-                    <button
-                      style={S.inboundDeleteBtn}
-                      title="이 입고 기록 삭제"
-                      disabled={deletingInbound === ib.id}
-                      onClick={async () => {
-                        if (!confirm("이 입고 기록을 삭제할까요?")) return;
-                        setDeletingInbound(ib.id);
-                        try { await onDeleteInbound(ib.id); }
-                        catch (e) { alert("삭제 실패: " + e.message); }
-                        finally { setDeletingInbound(null); }
-                      }}
-                    >🗑</button>
                   </li>
                 ))}
               </ol>
