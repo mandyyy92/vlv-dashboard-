@@ -24,7 +24,7 @@ function loadXlsx() {
 function calcOrderTotals(order, items, inbounds) {
   const total_qty = items.reduce((s, it) => s + (it.order_qty || 0), 0);
   const received_qty = inbounds.reduce((s, ib) => s + (ib.qty || 0), 0);
-  const remain_qty = total_qty - received_qty;
+  const remain_qty = received_qty - total_qty;
   const today = new Date();
   const expDate = order.expected_final_date ? new Date(order.expected_final_date) : null;
 
@@ -654,7 +654,7 @@ export default function ProductionDashboard() {
   const kpi = useMemo(() => {
     const total = enriched.reduce((s, o) => s + o.total_qty, 0);
     const received = enriched.reduce((s, o) => s + o.received_qty, 0);
-    const remain = total - received;
+    const remain = received - total;
     const delayed = enriched.filter(o => o.status === "delayed").length;
     const partial = enriched.filter(o => o.status === "partial").length;
     const completed = enriched.filter(o => o.status === "completed").length;
