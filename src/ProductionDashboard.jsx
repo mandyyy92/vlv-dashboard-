@@ -1299,7 +1299,15 @@ function OrderDrawer({ order, onClose, onAddInbound, onDelete, onUpdate, onDelet
             {/* 일정 (가로 타임라인) */}
             <div style={{ ...S.detailSection, ...S.detailDivider }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div style={S.drawerCardHead}>⏱ 일정</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={S.drawerCardHead}>⏱ 일정</div>
+                  {!editing && delay != null && delay > 0 && (
+                    <span style={{ ...S.delayBadge, color: "#B91C1C", background: "#FEE2E2" }}>납기 대비 {delay}일 지연</span>
+                  )}
+                  {!editing && (
+                    <span style={S.leadtimeInline}>리드타임 <strong style={{ color: "#0369A1" }}>{order.leadtime_days != null ? `${order.leadtime_days}일` : "미완료"}</strong></span>
+                  )}
+                </div>
                 {!editing && <button style={S.miniBtnGhost} onClick={() => setEditing(true)}>편집</button>}
               </div>
               {editing ? (
@@ -1345,12 +1353,6 @@ function OrderDrawer({ order, onClose, onAddInbound, onDelete, onUpdate, onDelet
                         : [<div key={`l${i}`} style={{ ...S.htlLine, background: n.date ? "#0369A1" : "#E2E8F0" }} />, node];
                     })}
                   </div>
-                  {delay != null && (
-                    delay > 0
-                      ? <div style={{ ...S.delayBadge, color: "#B91C1C", background: "#FEE2E2", marginTop: 12 }}>납기 대비 {delay}일 지연</div>
-                      : <div style={{ ...S.delayBadge, color: "#15803D", background: "#DCFCE7", marginTop: 12 }}>납기 준수</div>
-                  )}
-                  <div style={S.leadtimeLine}>리드타임 <strong style={{ color: "#0369A1" }}>{order.leadtime_days != null ? `${order.leadtime_days}일` : "미완료"}</strong></div>
                 </>
               )}
             </div>
@@ -2562,6 +2564,7 @@ const S = {
   htlDate: { fontSize: 12, fontWeight: 600, color: "#1F2937", fontVariantNumeric: "tabular-nums" },
   delayBadge: { display: "inline-block", fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 999 },
   leadtimeLine: { fontSize: 12, color: "#475569", marginTop: 10 },
+  leadtimeInline: { fontSize: 12, color: "#475569" },
   iconBtnSm: { width: 30, height: 30, borderRadius: 6, border: "1px solid #E2E8F0", background: "white", cursor: "pointer", fontSize: 14, lineHeight: 1, display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#475569" },
   // 컴팩트 입고 차수 행
   inRow: { display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderTop: "0.5px solid #F1F5F9" },
