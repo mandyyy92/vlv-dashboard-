@@ -816,8 +816,9 @@ export default function ProductionDashboard() {
       const key = `${seasonOf(o)}||${productOf(o)}`;
       (byGroup[key] = byGroup[key] || []).push(o);
     });
-    // 표시 base = 저장용 오더NO에서 'PO-' 접두어만 제거 (PO-26SS-025 → 26SS-025), 없으면 시즌.
-    const stripPo = (o) => String(o.order_no || "").replace(/^PO-/i, "").trim() || seasonOf(o);
+    // 표시 형식: 저장NO에서 끝 숫자만 뽑아 {시즌}-{숫자3자리}-{N}차 로 깨끗하게 조합.
+    // (저장NO에 'PO-'·'차' 등 오염이 있어도 시즌(컬럼 우선)+끝숫자로 항상 정상 표시)
+    const num3 = (o) => { const m = String(o.order_no || "").match(/(\d+)\s*$/); return m ? m[1].padStart(3, "0") : "000"; };
     const map = {};
     Object.entries(byGroup).forEach(([key, list]) => {
       [...list]
@@ -825,7 +826,7 @@ export default function ProductionDashboard() {
           if (a.created_at && b.created_at) { const d = new Date(a.created_at) - new Date(b.created_at); if (d) return d; }
           return (a.id || 0) - (b.id || 0);
         })
-        .forEach((o, i) => { map[o.id] = `${stripPo(o)}-${i + 1}차`; });
+        .forEach((o, i) => { map[o.id] = `${seasonOf(o)}-${num3(o)}-${i + 1}차`; });
     });
     return map;
   }, [orders, itemsByOrder]);
@@ -1890,15 +1891,18 @@ function UploadModal({ existingOrderNos, onClose, onComplete }) {
 
       const styleList = Object.values(byStyle);
 
-      // 오더번호 자동 부여
-      const baseMatch = orderNoBase.match(/^(.*?)(\d+)$/);
-      const prefix = baseMatch ? baseMatch[1] : orderNoBase + "-";
-      const startNum = baseMatch ? parseInt(baseMatch[2], 10) : 1;
-      const padLen = baseMatch ? baseMatch[2].length : 3;
+      // 오더번호 자동 부여 — ★항상 PO-{season}-{NNN} 형식으로만 생성★ (orderNoBase 오염/'차' 무시).
+      // 같은 시즌의 기존 PO-{season}-NNN 중 최대 번호 +1 부터 순차 (충돌·'차' 방지).
+      const prefix = `PO-${season}-`;
+      const seasonRe = new RegExp(`^PO-${season}-(\\d+)$`);
+      const usedNums = (existingOrderNos || [])
+        .map(no => { const m = String(no || "").match(seasonRe); return m ? parseInt(m[1], 10) : null; })
+        .filter(n => n != null);
+      const startNum = (usedNums.length ? Math.max(...usedNums) : 0) + 1;
 
       for (let i = 0; i < styleList.length; i++) {
         const styleGroup = styleList[i];
-        const orderNo = `${prefix}${String(startNum + i).padStart(padLen, "0")}`;
+        const orderNo = `${prefix}${String(startNum + i).padStart(3, "0")}`;
 
         // 1) 오더 생성 (스타일별) — 계약서 정보 포함
         const orderPayload = {
