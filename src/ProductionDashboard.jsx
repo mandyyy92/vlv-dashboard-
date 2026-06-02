@@ -112,6 +112,10 @@ async function updateOrder(id, patch) {
   const r = await fetch(`${PO_API}/production_orders?id=eq.${id}`, { method: "PATCH", headers: sbHeaders, body: JSON.stringify(patch) });
   return r.ok ? r.json() : null;
 }
+async function deleteInbound(id) {
+  const r = await fetch(`${PO_API}/inbound_history?id=eq.${id}`, { method: "DELETE", headers: sbHeaders });
+  if (!r.ok) throw new Error("입고 기록 삭제 실패");
+}
 
 // ============================================================
 // 매핑 사전 (작업지시서 ↔ inventory)
@@ -834,6 +838,7 @@ export default function ProductionDashboard() {
           onAddInbound={() => setShowInbound(selected.id)}
           onDelete={() => handleDelete(selected.id)}
           onUpdate={async (patch) => { await updateOrder(selected.id, patch); await reload(); }}
+          onDeleteInbound={async (id) => { await deleteInbound(id); await reload(); }}
         />
       )}
 
@@ -888,8 +893,9 @@ function KpiCard({ label, value, unit, accent, progress }) {
 // ============================================================
 // Drawer
 // ============================================================
-function OrderDrawer({ order, onClose, onAddInbound, onDelete, onUpdate }) {
+function OrderDrawer({ order, onClose, onAddInbound, onDelete, onUpdate, onDeleteInbound }) {
   const [editing, setEditing] = useState(false);
+  const [deletingInbound, setDeletingInbound] = useState(null);
   const [contractDate, setContractDate] = useState(order.contract_date || "");
   const [expectedDate, setExpectedDate] = useState(order.expected_final_date || "");
   const [actualDate, setActualDate] = useState(order.actual_final_date || "");
@@ -1095,6 +1101,18 @@ function OrderDrawer({ order, onClose, onAddInbound, onDelete, onUpdate }) {
                       </div>
                       <div style={S.timelineMemo}>{ib.memo || "—"}</div>
                     </div>
+                    <button
+                      style={S.inboundDeleteBtn}
+                      title="이 입고 기록 삭제"
+                      disabled={deletingInbound === ib.id}
+                      onClick={async () => {
+                        if (!confirm("이 입고 기록을 삭제할까요?")) return;
+                        setDeletingInbound(ib.id);
+                        try { await onDeleteInbound(ib.id); }
+                        catch (e) { alert("삭제 실패: " + e.message); }
+                        finally { setDeletingInbound(null); }
+                      }}
+                    >🗑</button>
                   </li>
                 ))}
               </ol>
@@ -2104,6 +2122,7 @@ const S = {
 
   timeline: { listStyle: "none", padding: 0, margin: "12px 0 0" },
   timelineItem: { display: "flex", gap: 12, padding: "10px 0", borderBottom: "1px solid #E2E8F0" },
+  inboundDeleteBtn: { alignSelf: "center", flexShrink: 0, background: "white", color: "#B91C1C", border: "1px solid #FCA5A5", width: 30, height: 30, borderRadius: 6, fontSize: 14, lineHeight: 1, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" },
   timelineDot: { width: 38, height: 38, borderRadius: 19, background: "#0F172A", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, flexShrink: 0 },
   timelineHeader: { display: "flex", justifyContent: "space-between", alignItems: "center" },
   timelineDate: { fontSize: 14, color: "#1F2937", fontWeight: 600 },
