@@ -2265,6 +2265,8 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
   const [seasonSel, setSeasonSel] = useState("all"); // 후보 오더 시즌 한정
   const [vendorSel, setVendorSel] = useState("all");  // 후보 오더 업체 한정
   const [lineAssign, setLineAssign] = useState({});   // lineIdx → order_id ("" = 미배정)
+  const [checkedLines, setCheckedLines] = useState({}); // lineIdx → true (일괄 적용 선택)
+  const [bulkOrder, setBulkOrder] = useState("");       // 일괄 적용 대상 오더 id
 
   const baseStyle = (s) => String(s || "").replace(/\s*-\s*\d+\s*$/, "").trim();
   const seasonOf = (o) => (o.season || String(o.order_no || "").split("-")[1] || "").trim() || "미지정";
@@ -2430,6 +2432,34 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
   const targetOrderCount = new Set(lineInfos.map(li => lineAssign[li.idx]).filter(Boolean)).size;
   const assignedQty = lineInfos.filter(li => lineAssign[li.idx]).reduce((s, li) => s + li.line.qty, 0);
 
+  // 일괄 적용: 후보 오더 풀 / 체크 상태 / 전체선택 / 적용
+  const bulkOrderOptions = useMemo(() => {
+    const m = {};
+    for (const li of lineInfos) for (const c of li.cands) m[c.order.id] = c.order;
+    return Object.values(m).sort((a, b) => String(a.display_no || a.order_no).localeCompare(String(b.display_no || b.order_no), "ko"));
+  }, [lineInfos]);
+  const selectableLines = lineInfos.filter(li => li.cands.length > 0);
+  const checkedCount = selectableLines.filter(li => checkedLines[li.idx]).length;
+  const allChecked = selectableLines.length > 0 && checkedCount === selectableLines.length;
+  const toggleAllLines = () => {
+    if (allChecked) { setCheckedLines({}); return; }
+    const m = {}; selectableLines.forEach(li => { m[li.idx] = true; }); setCheckedLines(m);
+  };
+  const toggleLine = (idx) => setCheckedLines(prev => ({ ...prev, [idx]: !prev[idx] }));
+  const applyBulkOrder = () => {
+    if (!bulkOrder) { alert("적용할 오더(차수)를 선택하세요."); return; }
+    if (checkedCount === 0) { alert("적용할 라인을 체크하세요."); return; }
+    setLineAssign(prev => {
+      const next = { ...prev };
+      for (const li of lineInfos) {
+        if (!checkedLines[li.idx]) continue;
+        // 그 라인의 후보에 선택 오더가 있을 때만 적용(매칭 불가 라인은 건너뜀)
+        if (li.cands.some(c => String(c.order.id) === String(bulkOrder))) next[li.idx] = bulkOrder;
+      }
+      return next;
+    });
+  };
+
   return (
     <>
       <div style={S.modalBackdrop} onClick={step !== "uploading" ? onClose : undefined} />
@@ -2537,6 +2567,26 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
               {/* 라인별 대상 오더 선택 */}
               <div style={S.previewSection}>
                 <div style={S.previewSectionTitle}>🔗 라인별 대상 오더 ({assignedCount}/{lineInfos.length} 배정 · {targetOrderCount}개 오더)</div>
+
+                {/* 일괄 적용 바: 체크한 라인들의 대상 오더를 한 번에 설정 */}
+                <div style={S.plBulkBar}>
+                  <select style={{ ...S.plSelect, maxWidth: 260 }} value={bulkOrder} onChange={e => setBulkOrder(e.target.value)}>
+                    <option value="">오더(차수) 선택…</option>
+                    {bulkOrderOptions.map(o => (
+                      <option key={o.id} value={o.id}>{(o.display_no || o.order_no)} · {o.vendor_name || "—"}</option>
+                    ))}
+                  </select>
+                  <button style={S.miniBtn} onClick={applyBulkOrder} disabled={!bulkOrder || checkedCount === 0}>
+                    선택 라인에 적용 ({checkedCount})
+                  </button>
+                </div>
+
+                {/* 전체 선택 */}
+                <label style={S.plSelectAll}>
+                  <input type="checkbox" style={S.inCheckbox} checked={allChecked} onChange={toggleAllLines} />
+                  <span>전체 선택 ({checkedCount}/{selectableLines.length})</span>
+                </label>
+
                 <div style={{ ...S.previewList, maxHeight: 280 }}>
                   {lineInfos.map(li => {
                     const ambiguous = li.cands.length > 1;
@@ -2544,7 +2594,14 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
                     const opt = (li.line.color || "") + (li.line.size ? `-${li.line.size}` : "");
                     return (
                       <div key={li.idx} style={{ ...S.plLineRow, ...(none ? S.plLineNone : ambiguous ? S.plLineAmbiguous : {}) }}>
-                        <div style={{ minWidth: 0 }}>
+                        <input
+                          type="checkbox"
+                          style={S.inCheckbox}
+                          checked={!!checkedLines[li.idx]}
+                          disabled={none}
+                          onChange={() => toggleLine(li.idx)}
+                        />
+                        <div style={{ minWidth: 0, flex: 1 }}>
                           <div style={{ fontSize: 12, fontWeight: 600, color: "#1F2937", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{li.line.product_name || "—"}</div>
                           <div style={{ fontSize: 11, color: "#64748B" }}>{li.line.sku_code} · {opt || "—"} · {fmt(li.line.qty)}장{ambiguous ? ` · 후보 ${li.cands.length}` : ""}</div>
                         </div>
@@ -2909,6 +2966,8 @@ const S = {
   plLineAmbiguous: { background: "#FEF9C3" }, // 후보 여러 개(모호) 강조
   plLineNone: { background: "#FEE2E2" },      // 후보 없음
   plSelect: { padding: "6px 8px", border: "1px solid #CBD5E1", borderRadius: 6, fontSize: 12, color: "#0F172A", background: "white", fontFamily: "inherit", cursor: "pointer", maxWidth: 220, flexShrink: 0 },
+  plBulkBar: { display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", background: "#F1F5F9", border: "1px solid #E2E8F0", borderRadius: 8, marginBottom: 8 },
+  plSelectAll: { display: "flex", alignItems: "center", gap: 8, padding: "4px 2px 8px", fontSize: 12, color: "#475569", fontWeight: 500, cursor: "pointer" },
   previewSheet: { color: "#1F2937", fontWeight: 500 },
   previewStyle: { color: "#64748B", fontFamily: "'JetBrains Mono', monospace", fontSize: 12 },
   previewQty: { textAlign: "right", color: "#0369A1", fontWeight: 600, fontVariantNumeric: "tabular-nums" },
