@@ -2152,19 +2152,6 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
   const [memo, setMemo] = useState("");
 
   // sku_code → order_id, item_id 인덱스 만들기
-  const skuIndex = useMemo(() => {
-    const idx = {};
-    for (const ord of orders) {
-      const items = itemsByOrder[ord.id] || [];
-      for (const it of items) {
-        if (it.sku_code) {
-          idx[it.sku_code] = { order: ord, item: it };
-        }
-      }
-    }
-    return idx;
-  }, [orders, itemsByOrder]);
-
   const handleFile = async (f) => {
     setFile(f);
     // 파일명 앞쪽 6자리(YYMMDD)에서 입고일/실제 완료일 자동 추출 (예: 260212_… → 2026-02-12)
@@ -2190,32 +2177,75 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
       // 매칭 분석
       setStep("matching");
       
-      // 각 라인을 sku_code로 매칭
+      // 각 라인을 sku_code로 매칭하되, 같은 상품(스타일NO 기준)의 라인은 같은 오더로 모은다.
+      // (버그: 같은 sku_code가 여러 오더에 중복 등록되면 사이즈별로 다른 오더에 흩어짐)
       const matchedByOrder = {}; // order_id -> { order, lines: [...], qty }
       const unmatchedLines = [];
-      
+
+      // 1) sku_code → 후보 {order, item} 목록 전체 (덮어쓰지 않고 모두 보관)
+      const skuToCands = {};
+      for (const ord of orders) {
+        for (const it of (itemsByOrder[ord.id] || [])) {
+          if (!it.sku_code) continue;
+          (skuToCands[it.sku_code] = skuToCands[it.sku_code] || []).push({ order: ord, item: it });
+        }
+      }
+      // 스타일NO 기준 그룹키: 끝의 ' - N' 접미사 제거 (예: 'V25FT01UB500 - 2' → 'V25FT01UB500')
+      const baseStyle = (s) => String(s || "").replace(/\s*-\s*\d+\s*$/, "").trim();
+
+      // 2) 라인별 후보 수집 + 스타일 그룹키 결정
+      const lineEntries = []; // { line, groupKey }
       for (const line of result.lines) {
-        const found = skuIndex[line.sku_code];
-        if (found) {
-          const oid = found.order.id;
-          if (!matchedByOrder[oid]) {
-            matchedByOrder[oid] = {
-              order: found.order,
-              first_item_id: found.item.id,
-              lines: [],
-              qty: 0,
-            };
-          }
+        const cands = skuToCands[line.sku_code] || [];
+        if (cands.length === 0) { unmatchedLines.push(line); continue; }
+        const groupKey = baseStyle(cands[0].item.style_no) || `__sku_${line.sku_code}`;
+        lineEntries.push({ line, groupKey });
+      }
+
+      // 3) 스타일 그룹별로 단일 오더 선택 → 그룹의 모든 라인을 그 오더에 할당
+      const byGroup = {};
+      for (const e of lineEntries) (byGroup[e.groupKey] = byGroup[e.groupKey] || []).push(e);
+
+      for (const [gkey, entries] of Object.entries(byGroup)) {
+        // 후보 오더 풀: 그룹 라인들의 모든 후보 오더
+        const orderPool = {};
+        for (const e of entries) for (const c of (skuToCands[e.line.sku_code] || [])) orderPool[c.order.id] = c.order;
+
+        // 점수: (그룹 라인을 sku로 커버하는 수) 우선 → (그 스타일 발주수량 합) → 오더 NO
+        const scoreOf = (ord) => {
+          const items = itemsByOrder[ord.id] || [];
+          const skuSet = new Set(items.map(it => it.sku_code));
+          const covered = entries.filter(e => skuSet.has(e.line.sku_code)).length;
+          const styleQty = items.filter(it => baseStyle(it.style_no) === gkey).reduce((s, it) => s + (it.order_qty || 0), 0);
+          return { covered, styleQty };
+        };
+        const chosen = Object.values(orderPool).sort((a, b) => {
+          const sa = scoreOf(a), sb = scoreOf(b);
+          if (sb.covered !== sa.covered) return sb.covered - sa.covered;   // 더 많은 사이즈 커버 우선
+          if (sb.styleQty !== sa.styleQty) return sb.styleQty - sa.styleQty; // 그 스타일 발주량 큰 오더 우선
+          return String(a.order_no || "").localeCompare(String(b.order_no || ""));
+        })[0];
+
+        const chosenItems = itemsByOrder[chosen.id] || [];
+        // 선택 오더 내에서 라인에 대응하는 아이템: 정확 sku → 같은 스타일+사이즈 → 첫 아이템
+        const findItem = (line) =>
+          chosenItems.find(x => x.sku_code === line.sku_code)
+          || chosenItems.find(x => baseStyle(x.style_no) === gkey && normalizeSizeKey(x.size) === normalizeSizeKey(line.size))
+          || chosenItems[0];
+
+        if (!matchedByOrder[chosen.id]) {
+          matchedByOrder[chosen.id] = { order: chosen, first_item_id: chosenItems[0]?.id, lines: [], qty: 0 };
+        }
+        for (const e of entries) {
+          const it = findItem(e.line);
           // 매칭된 오더 아이템의 색상/사이즈를 함께 보관 → 매트릭스 셀 키(it.color||it.size)와 정확히 일치
-          matchedByOrder[oid].lines.push({
-            ...line,
-            item_id: found.item.id,
-            item_color: found.item.color,
-            item_size: found.item.size,
+          matchedByOrder[chosen.id].lines.push({
+            ...e.line,
+            item_id: it?.id,
+            item_color: it?.color,
+            item_size: it?.size,
           });
-          matchedByOrder[oid].qty += line.qty;
-        } else {
-          unmatchedLines.push(line);
+          matchedByOrder[chosen.id].qty += e.line.qty;
         }
       }
 
