@@ -61,6 +61,11 @@ const STATUS_LABEL = {
 
 const fmt = (n) => (n ?? 0).toLocaleString();
 const pct = (n) => `${(n ?? 0).toFixed(1)}%`;
+// 두 날짜의 일수 차이 (to - from). 둘 중 하나라도 없으면 null
+const dayDiff = (from, to) => {
+  if (!from || !to) return null;
+  return Math.round((new Date(to) - new Date(from)) / 86400000);
+};
 
 // ============================================================
 // Supabase 헬퍼 (production 전용)
@@ -938,10 +943,15 @@ function OrderDrawer({ order, onClose, onAddInbound, onDelete, onUpdate, onDelet
   const contractInputRef = useRef(null);
   const [contractUploading, setContractUploading] = useState(false);
 
-  // 실제 완료일 − 계약일 (편집 중 실시간 리드타임)
+  // 최종 입고일 − 계약일 (편집 중 실시간 리드타임)
   const editLeadtime = actualDate && contractDate
     ? Math.round((new Date(actualDate) - new Date(contractDate)) / 86400000)
     : null;
+
+  // 상태별 강조색 (진행바 채움 / 입고율)
+  const barColor = order.status === "delayed" ? "#B91C1C" : order.status === "completed" ? "#15803D" : "#0369A1";
+  // 납기 대비 지연 일수 (납기일 또는 최종입고일 없으면 null)
+  const delay = dayDiff(order.expected_final_date, order.actual_final_date);
 
   const saveDate = async () => {
     await onUpdate({ contract_date: contractDate || null, expected_final_date: expectedDate || null, actual_final_date: actualDate || null });
@@ -1023,143 +1033,163 @@ function OrderDrawer({ order, onClose, onAddInbound, onDelete, onUpdate, onDelet
         </div>
 
         <div style={S.drawerBody}>
-          <div style={S.drawerCard}>
-            <div style={S.drawerCardHead}>현재 상태</div>
-            <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 8 }}>
-              <span style={{ ...S.badge, ...S.badgeBig, color: STATUS_LABEL[order.status].color, background: STATUS_LABEL[order.status].bg }}>
-                {STATUS_LABEL[order.status].ko}
-              </span>
-              <div style={S.drawerStat}>{fmt(order.received_qty)} / {fmt(order.total_qty)} 장 ({pct(order.receive_rate)})</div>
-            </div>
-            <div style={{ ...S.progBar, marginTop: 12, height: 8, width: "100%" }}>
-              <div style={{ ...S.progFill, width: `${order.receive_rate}%`, background: order.status === "delayed" ? "#B91C1C" : order.status === "completed" ? "#15803D" : "#0369A1" }} />
-            </div>
-          </div>
-
-          {/* 계약서 카드 */}
-          <div style={S.drawerCard}>
-            <div style={S.drawerCardHead}>📄 계약서</div>
-            {contractUploading ? (
-              <div style={{ marginTop: 10, textAlign: "center", padding: 20 }}>
-                <div style={{ ...S.spinner, width: 24, height: 24, borderWidth: 2 }} />
-                <div style={{ fontSize: 12, color: "#64748B", marginTop: 8 }}>업로드 중...</div>
+          <div style={S.detailCard}>
+            {/* 현재 상태 (hero) */}
+            <div style={S.detailSection}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={S.drawerCardHead}>현재 상태</div>
+                <span style={{ ...S.badge, color: STATUS_LABEL[order.status].color, background: STATUS_LABEL[order.status].bg }}>
+                  {STATUS_LABEL[order.status].ko}
+                </span>
               </div>
-            ) : order.contract_file_url ? (
-              <div style={{ marginTop: 10 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "white", padding: "10px 12px", borderRadius: 6, border: "1px solid #E2E8F0" }}>
+              <div style={{ display: "flex", alignItems: "baseline", marginTop: 10 }}>
+                <span style={S.heroNum}>{fmt(order.received_qty)}<span style={S.heroNumUnit}> / {fmt(order.total_qty)} 장</span></span>
+                <span style={{ ...S.heroRate, marginLeft: "auto", color: barColor }}>{pct(order.receive_rate)}</span>
+              </div>
+              <div style={{ ...S.progBar, marginTop: 10, height: 8, width: "100%" }}>
+                <div style={{ ...S.progFill, width: `${order.receive_rate}%`, background: barColor }} />
+              </div>
+            </div>
+
+            {/* 일정 (가로 타임라인) */}
+            <div style={{ ...S.detailSection, ...S.detailDivider }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={S.drawerCardHead}>⏱ 일정</div>
+                {!editing && <button style={S.miniBtnGhost} onClick={() => setEditing(true)}>편집</button>}
+              </div>
+              {editing ? (
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={S.dimLabel}>계약일</div>
+                    <input type="date" value={contractDate} onChange={e => setContractDate(e.target.value)} style={S.formInput} />
+                  </div>
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={S.dimLabel}>납기일</div>
+                    <input type="date" value={expectedDate} onChange={e => setExpectedDate(e.target.value)} style={S.formInput} />
+                  </div>
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={S.dimLabel}>최종 입고일</div>
+                    <input type="date" value={actualDate} onChange={e => setActualDate(e.target.value)} style={S.formInput} />
+                  </div>
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={S.dimLabel}>리드타임 (최종 입고일 − 계약일)</div>
+                    <div style={{ ...S.dimValue, fontWeight: 700, color: "#0369A1" }}>{editLeadtime != null ? `${editLeadtime}일` : "미완료"}</div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button style={S.primaryBtn} onClick={saveDate}>저장</button>
+                    <button style={S.ghostBtn} onClick={() => setEditing(false)}>취소</button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div style={S.htlWrap}>
+                    {[
+                      { label: "계약일", date: order.contract_date },
+                      { label: "납기일", date: order.expected_final_date },
+                      { label: "최종 입고일", date: order.actual_final_date },
+                    ].flatMap((n, i) => {
+                      const node = (
+                        <div key={`n${i}`} style={S.htlNode}>
+                          <div style={{ ...S.htlDot, borderColor: n.date ? "#0369A1" : "#CBD5E1", background: n.date ? "#0369A1" : "white" }} />
+                          <div style={S.htlLabel}>{n.label}</div>
+                          <div style={S.htlDate}>{n.date ?? "—"}</div>
+                        </div>
+                      );
+                      return i === 0
+                        ? [node]
+                        : [<div key={`l${i}`} style={{ ...S.htlLine, background: n.date ? "#0369A1" : "#E2E8F0" }} />, node];
+                    })}
+                  </div>
+                  {delay != null && (
+                    delay > 0
+                      ? <div style={{ ...S.delayBadge, color: "#B91C1C", background: "#FEE2E2", marginTop: 12 }}>납기 대비 {delay}일 지연</div>
+                      : <div style={{ ...S.delayBadge, color: "#15803D", background: "#DCFCE7", marginTop: 12 }}>납기 준수</div>
+                  )}
+                  <div style={S.leadtimeLine}>리드타임 <strong style={{ color: "#0369A1" }}>{order.leadtime_days != null ? `${order.leadtime_days}일` : "미완료"}</strong></div>
+                </>
+              )}
+            </div>
+
+            {/* 계약서 */}
+            <div style={{ ...S.detailSection, ...S.detailDivider }}>
+              <div style={S.drawerCardHead}>📄 계약서</div>
+              {contractUploading ? (
+                <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ ...S.spinner, width: 18, height: 18, borderWidth: 2, margin: 0 }} />
+                  <div style={{ fontSize: 12, color: "#64748B" }}>업로드 중...</div>
+                </div>
+              ) : order.contract_file_url ? (
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, gap: 10 }}>
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontSize: 13, color: "#1F2937", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{order.contract_file_name || "계약서"}</div>
-                    <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 3 }}>
+                    <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 2 }}>
                       업로드: {order.contract_uploaded_at ? new Date(order.contract_uploaded_at).toISOString().slice(0, 10) : "—"}
                     </div>
                   </div>
-                  <div style={{ display: "flex", gap: 6, marginLeft: 10 }}>
-                    <button style={S.miniBtn} onClick={downloadContract}>다운로드</button>
-                    <button style={S.miniBtnGhost} onClick={() => contractInputRef.current?.click()}>교체</button>
+                  <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                    <button style={S.iconBtnSm} title="다운로드" onClick={downloadContract}>⬇</button>
+                    <button style={S.iconBtnSm} title="교체" onClick={() => contractInputRef.current?.click()}>🔄</button>
                   </div>
                 </div>
-              </div>
-            ) : (
-              <div style={{ marginTop: 10 }}>
-                <div style={S.fileEmpty}>계약서 미첨부</div>
-                <button style={{ ...S.primaryBtn, marginTop: 8, width: "100%", justifyContent: "center" }} onClick={() => contractInputRef.current?.click()}>
-                  계약서 업로드
-                </button>
-              </div>
-            )}
-            <input
-              ref={contractInputRef}
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls"
-              style={{ display: "none" }}
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) uploadContract(f);
-                e.target.value = "";
-              }}
-            />
-          </div>
-
-          <div style={S.drawerCard}>
-            <div style={{ ...S.drawerCardHead, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span>⏱ 리드타임 / 날짜</span>
-              {!editing && <button style={S.miniBtnGhost} onClick={() => setEditing(true)}>편집</button>}
+              ) : (
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, gap: 10 }}>
+                  <span style={{ fontSize: 13, color: "#94A3B8" }}>계약서 미첨부</span>
+                  <button style={S.miniBtn} onClick={() => contractInputRef.current?.click()}>업로드</button>
+                </div>
+              )}
+              <input
+                ref={contractInputRef}
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) uploadContract(f);
+                  e.target.value = "";
+                }}
+              />
             </div>
-            {editing ? (
-              <div style={{ marginTop: 10 }}>
-                <div style={{ marginBottom: 8 }}>
-                  <div style={S.dimLabel}>계약일</div>
-                  <input type="date" value={contractDate} onChange={e => setContractDate(e.target.value)} style={S.formInput} />
-                </div>
-                <div style={{ marginBottom: 8 }}>
-                  <div style={S.dimLabel}>납기일</div>
-                  <input type="date" value={expectedDate} onChange={e => setExpectedDate(e.target.value)} style={S.formInput} />
-                </div>
-                <div style={{ marginBottom: 8 }}>
-                  <div style={S.dimLabel}>실제 완료일</div>
-                  <input type="date" value={actualDate} onChange={e => setActualDate(e.target.value)} style={S.formInput} />
-                </div>
-                <div style={{ marginBottom: 8 }}>
-                  <div style={S.dimLabel}>리드타임 (실제 완료일 − 계약일)</div>
-                  <div style={{ ...S.dimValue, fontWeight: 700, color: "#0369A1" }}>{editLeadtime != null ? `${editLeadtime}일` : "미완료"}</div>
-                </div>
-                <div style={{ display: "flex", gap: 6 }}>
-                  <button style={S.primaryBtn} onClick={saveDate}>저장</button>
-                  <button style={S.ghostBtn} onClick={() => setEditing(false)}>취소</button>
-                </div>
-              </div>
-            ) : (
-              <div style={S.drawerGrid2}>
-                <div><div style={S.dimLabel}>계약일</div><div style={S.dimValue}>{order.contract_date ?? "—"}</div></div>
-                <div><div style={S.dimLabel}>납기일</div><div style={S.dimValue}>{order.expected_final_date ?? "—"}</div></div>
-                <div><div style={S.dimLabel}>실제 완료일</div><div style={S.dimValue}>{order.actual_final_date ?? "—"}</div></div>
-                <div><div style={S.dimLabel}>리드타임</div><div style={{ ...S.dimValue, fontWeight: 700, color: "#0369A1" }}>{order.leadtime_days != null ? `${order.leadtime_days}일` : "미완료"}</div></div>
-              </div>
-            )}
-          </div>
 
-          <div style={S.drawerCard}>
-            <div style={{ ...S.drawerCardHead, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span>📦 입고 이력 ({order.inbounds.length}회)</span>
-              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                <button style={S.miniBtn} onClick={onAddInbound}>+ 입고 등록</button>
-                {order.inbounds.length > 0 && (() => {
-                  const lastIb = [...order.inbounds].sort((a, b) => a.inbound_round - b.inbound_round).slice(-1)[0];
-                  return (
-                    <button
-                      style={S.inboundDeleteBtn}
-                      title={`최근 입고(${lastIb.inbound_round}차) 삭제`}
-                      disabled={deletingInbound === lastIb.id}
-                      onClick={async () => {
-                        if (!confirm("이 입고 기록을 삭제할까요?")) return;
-                        setDeletingInbound(lastIb.id);
-                        try { await onDeleteInbound(lastIb.id); }
-                        catch (e) { alert("삭제 실패: " + e.message); }
-                        finally { setDeletingInbound(null); }
-                      }}
-                    >🗑</button>
-                  );
-                })()}
+            {/* 입고 이력 */}
+            <div style={{ ...S.detailSection, ...S.detailDivider }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={S.drawerCardHead}>📦 입고 이력 ({order.inbounds.length}회)</div>
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <button style={S.miniBtn} onClick={onAddInbound}>+ 입고 등록</button>
+                  {order.inbounds.length > 0 && (() => {
+                    const lastIb = [...order.inbounds].sort((a, b) => a.inbound_round - b.inbound_round).slice(-1)[0];
+                    return (
+                      <button
+                        style={S.inboundDeleteBtn}
+                        title={`최근 입고(${lastIb.inbound_round}차) 삭제`}
+                        disabled={deletingInbound === lastIb.id}
+                        onClick={async () => {
+                          if (!confirm("이 입고 기록을 삭제할까요?")) return;
+                          setDeletingInbound(lastIb.id);
+                          try { await onDeleteInbound(lastIb.id); }
+                          catch (e) { alert("삭제 실패: " + e.message); }
+                          finally { setDeletingInbound(null); }
+                        }}
+                      >🗑</button>
+                    );
+                  })()}
+                </div>
               </div>
-            </div>
-            {order.inbounds.length === 0 ? (
-              <div style={{ ...S.fileEmpty, marginTop: 10 }}>아직 입고가 없습니다</div>
-            ) : (
-              <ol style={S.timeline}>
-                {[...order.inbounds].sort((a,b)=>a.inbound_round-b.inbound_round).map((ib) => (
-                  <li key={ib.id} style={S.timelineItem}>
-                    <div style={S.timelineDot}>{ib.inbound_round}차</div>
-                    <div style={{ flex: 1 }}>
-                      <div style={S.timelineHeader}>
-                        <span style={S.timelineDate}>{ib.inbound_date}</span>
-                        <span style={S.timelineQty}>{fmt(ib.qty)} 장</span>
-                      </div>
-                      <div style={S.timelineMemo}>{ib.memo || "—"}</div>
+              {order.inbounds.length === 0 ? (
+                <div style={{ fontSize: 12, color: "#94A3B8", marginTop: 8 }}>아직 입고가 없습니다</div>
+              ) : (
+                <div style={{ marginTop: 6 }}>
+                  {[...order.inbounds].sort((a, b) => a.inbound_round - b.inbound_round).map((ib) => (
+                    <div key={ib.id} style={S.inRow}>
+                      <span style={S.inRound}>{ib.inbound_round}차</span>
+                      <span style={S.inDate}>{ib.inbound_date}</span>
+                      {ib.memo && <span style={S.inMemo}>{ib.memo}</span>}
+                      <span style={S.inQty}>{fmt(ib.qty)} 장</span>
                     </div>
-                  </li>
-                ))}
-              </ol>
-            )}
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           <div style={S.drawerCard}>
@@ -1929,7 +1959,7 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
                 <div style={S.previewSectionTitle}>📅 입고 정보</div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 8 }}>
                   <div>
-                    <div style={S.dimLabel}>실제 완료일 (입고일)</div>
+                    <div style={S.dimLabel}>최종 입고일</div>
                     <input type="date" value={inboundDate} onChange={e => setInboundDate(e.target.value)} style={S.formInput} />
                     <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 3 }}>미입력 시 오늘 날짜로 등록됩니다</div>
                   </div>
@@ -2160,6 +2190,30 @@ const S = {
   drawerGrid2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 10 },
   dimLabel: { fontSize: 11, color: "#94A3B8", textTransform: "uppercase", letterSpacing: 0.3, marginBottom: 4 },
   dimValue: { fontSize: 14, color: "#1F2937", fontVariantNumeric: "tabular-nums" },
+
+  // 오더 상세 통합 카드 (외곽 1개 + border-top 구분선)
+  detailCard: { background: "white", border: "1px solid #E2E8F0", borderRadius: 10, marginBottom: 10, overflow: "hidden" },
+  detailSection: { padding: 14 },
+  detailDivider: { borderTop: "0.5px solid #E2E8F0" },
+  heroNum: { fontSize: 22, fontWeight: 700, color: "#0F172A", fontVariantNumeric: "tabular-nums" },
+  heroNumUnit: { fontSize: 14, fontWeight: 500, color: "#94A3B8" },
+  heroRate: { fontSize: 22, fontWeight: 700, fontVariantNumeric: "tabular-nums" },
+  // 가로 타임라인
+  htlWrap: { display: "flex", alignItems: "flex-start", marginTop: 14 },
+  htlNode: { display: "flex", flexDirection: "column", alignItems: "center", gap: 4, flex: "0 0 auto", minWidth: 72 },
+  htlLine: { flex: 1, height: 2, marginTop: 5, borderRadius: 1 },
+  htlDot: { width: 12, height: 12, borderRadius: 6, border: "2px solid", boxSizing: "border-box" },
+  htlLabel: { fontSize: 11, color: "#94A3B8" },
+  htlDate: { fontSize: 12, fontWeight: 600, color: "#1F2937", fontVariantNumeric: "tabular-nums" },
+  delayBadge: { display: "inline-block", fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 999 },
+  leadtimeLine: { fontSize: 12, color: "#475569", marginTop: 10 },
+  iconBtnSm: { width: 30, height: 30, borderRadius: 6, border: "1px solid #E2E8F0", background: "white", cursor: "pointer", fontSize: 14, lineHeight: 1, display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#475569" },
+  // 컴팩트 입고 차수 행
+  inRow: { display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderTop: "0.5px solid #F1F5F9" },
+  inRound: { fontSize: 11, fontWeight: 700, color: "#0369A1", background: "#E0F2FE", borderRadius: 4, padding: "2px 6px", flexShrink: 0 },
+  inDate: { fontSize: 12, color: "#1F2937", fontVariantNumeric: "tabular-nums", flexShrink: 0 },
+  inMemo: { fontSize: 11, color: "#94A3B8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 },
+  inQty: { fontSize: 12, fontWeight: 700, color: "#0369A1", marginLeft: "auto", fontVariantNumeric: "tabular-nums", flexShrink: 0 },
 
   fileEmpty: { fontSize: 13, color: "#94A3B8", padding: "10px 0", textAlign: "center", background: "white", borderRadius: 6, border: "1px dashed #E2E8F0" },
 
