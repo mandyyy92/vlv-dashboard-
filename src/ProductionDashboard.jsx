@@ -202,6 +202,8 @@ const STYLE_NO_MAP = {
   "V26PS01W": "V26PS01W",       // 나일론 롱 스커트
   "V26SP01U": "V26SP01U",       // 나일론 버뮤다 팬츠
 };
+// 역방향 매핑 (inventory 스타일 → 작업지시서 스타일). 예: V25ST006U → V24ST01UA501.
+const STYLE_NO_MAP_REV = Object.entries(STYLE_NO_MAP).reduce((acc, [k, v]) => { if (!acc[v]) acc[v] = k; return acc; }, {});
 
 // 색상 매핑 (작업지시서 영문 → inventory 바코드 2글자 코드)
 const COLOR_MAP = {
@@ -2278,14 +2280,17 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
   const seasonOptions = useMemo(() => [...new Set(orders.map(seasonOf))].sort((a, b) => a.localeCompare(b, "ko")), [orders]);
   const vendorOptions = useMemo(() => [...new Set(orders.map(o => o.vendor_name || "미지정"))].sort((a, b) => a.localeCompare(b, "ko")), [orders]);
 
-  // 오더 아이템 인덱스: inventory STYLE NO(STYLE_NO_MAP 적용) + 정규화 옵션 미리 계산
+  // 오더 아이템 인덱스: STYLE NO 예외 매핑을 ★양방향★ 적용한 후보 스타일 + 정규화 옵션 미리 계산.
+  // styleVariants = [원본, 정방향(STYLE_NO_MAP), 역방향(STYLE_NO_MAP_REV)] → 라인 바코드가 이 중 하나로 시작하면 매칭.
   const orderItemIndex = useMemo(() => {
     const list = [];
     for (const ord of orders) {
       for (const it of (itemsByOrder[ord.id] || [])) {
         const s0 = baseStyle(it.style_no);
-        const invStyle = STYLE_NO_MAP[s0] || s0; // 작업지시서 스타일 → inventory 바코드 prefix
-        list.push({ order: ord, item: it, invStyle, ncolor: normalizeColorKey(it.color), nsize: normalizeSizeKey(it.size) });
+        const variants = [s0];
+        if (STYLE_NO_MAP[s0]) variants.push(STYLE_NO_MAP[s0]);
+        if (STYLE_NO_MAP_REV[s0]) variants.push(STYLE_NO_MAP_REV[s0]);
+        list.push({ order: ord, item: it, styleVariants: [...new Set(variants.filter(Boolean))], ncolor: normalizeColorKey(it.color), nsize: normalizeSizeKey(it.size) });
       }
     }
     return list;
@@ -2305,7 +2310,8 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
       for (const oi of orderItemIndex) {
         if (!inScope(oi.order)) continue;
         const skuMatch = line.sku_code && oi.item.sku_code === line.sku_code;
-        const styleOptMatch = lbar && oi.invStyle && lbar.startsWith(oi.invStyle) && lncolor === oi.ncolor && lnsize === oi.nsize;
+        const styleMatch = lbar && oi.styleVariants.some(v => lbar.startsWith(v));
+        const styleOptMatch = styleMatch && lncolor === oi.ncolor && lnsize === oi.nsize;
         if (!(skuMatch || styleOptMatch)) continue;
         if (!seen.has(oi.order.id)) { seen.add(oi.order.id); cands.push({ order: oi.order, item: oi.item }); }
       }
@@ -2369,6 +2375,8 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
         const skuCodes = [...new Set(result.lines.map(l => l.sku_code).filter(Boolean))];
         const invMap = await lookupInventoryByProductCode(skuCodes);
         result.lines.forEach(l => { l.inv_barcode = invMap[l.sku_code]?.barcode || null; });
+        const withBar = result.lines.filter(l => l.inv_barcode).length;
+        console.log(`[패킹] inventory 바코드 매핑: ${withBar}/${result.lines.length} 라인 (예: ${result.lines.find(l => l.inv_barcode)?.inv_barcode || "—"})`);
       } catch (e) {
         console.warn("[패킹] inventory 바코드 조회 실패(스타일 매칭 제한):", e);
       }
