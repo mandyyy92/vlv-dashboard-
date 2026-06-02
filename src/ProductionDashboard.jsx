@@ -951,11 +951,11 @@ export default function ProductionDashboard() {
                   <th style={S.thR}>총 수량</th>
                   <th style={S.thR}>누적 입고</th>
                   <th style={S.thR}>잔여</th>
-                  <th style={S.th}>입고율</th>
+                  <th style={S.thC}>입고율</th>
                   <th style={S.th}>입고일</th>
                   <th style={S.thR}>리드타임</th>
-                  <th style={S.th}>상태</th>
-                  <th style={S.thR}>액션</th>
+                  <th style={S.thC}>상태</th>
+                  <th style={S.thC}>액션</th>
                 </tr>
               </thead>
               <tbody>
@@ -987,7 +987,7 @@ export default function ProductionDashboard() {
                             <td style={S.tdR}>{fmt(o.total_qty)}</td>
                             <td style={{ ...S.tdR, color: "#0369A1" }}>{fmt(o.received_qty)}</td>
                             <td style={{ ...S.tdR, color: o.remain_qty > 0 ? "#1F2937" : "#9CA3AF" }}>{fmt(o.remain_qty)}</td>
-                            <td style={S.td}>
+                            <td style={S.tdC}>
                               <div style={S.progBar}>
                                 <div style={{ ...S.progFill, width: `${o.receive_rate}%`, background: o.status === "delayed" ? "#B91C1C" : o.status === "completed" ? "#15803D" : "#0369A1" }} />
                               </div>
@@ -995,12 +995,12 @@ export default function ProductionDashboard() {
                             </td>
                             <td style={S.td}>{o.actual_final_date ?? "—"}</td>
                             <td style={S.tdR}>{o.leadtime_days != null ? `${o.leadtime_days}일` : "—"}</td>
-                            <td style={S.td}>
+                            <td style={S.tdC}>
                               <span style={{ ...S.badge, color: STATUS_LABEL[o.status].color, background: STATUS_LABEL[o.status].bg }}>
                                 {STATUS_LABEL[o.status].ko}
                               </span>
                             </td>
-                            <td style={S.tdR}>
+                            <td style={S.tdC}>
                               <button style={S.miniBtn} onClick={(e) => { e.stopPropagation(); setShowInbound(o.id); }}>입고 등록</button>
                             </td>
                           </tr>
@@ -2422,10 +2422,10 @@ const S = {
   filterClear: { background: "white", color: "#64748B", border: "1px solid #E2E8F0", padding: "7px 12px", borderRadius: 6, fontSize: 12, fontWeight: 500, cursor: "pointer" },
 
   // 상품 썸네일
-  thThumb: { padding: "12px 12px", width: 36 },
-  tdThumb: { padding: "8px 12px", width: 36 },
-  thumbImg: { width: 36, height: 36, borderRadius: 8, objectFit: "cover", display: "block", background: "#F1F5F9" },
-  thumbPlaceholder: { width: 36, height: 36, borderRadius: 8, background: "#F1F5F9", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, color: "#CBD5E1" },
+  thThumb: { padding: "12px 12px", width: 36, textAlign: "center", verticalAlign: "middle" },
+  tdThumb: { padding: "12px 12px", width: 36, textAlign: "center", verticalAlign: "middle" },
+  thumbImg: { width: 36, height: 36, borderRadius: 8, objectFit: "cover", display: "inline-block", verticalAlign: "middle", background: "#F1F5F9" },
+  thumbPlaceholder: { width: 36, height: 36, borderRadius: 8, background: "#F1F5F9", display: "inline-flex", verticalAlign: "middle", alignItems: "center", justifyContent: "center", fontSize: 16, color: "#CBD5E1" },
 
   // 업체 그룹 헤더 행
   groupRow: { background: "#F1F5F9", borderBottom: "1px solid #E2E8F0", cursor: "pointer" },
@@ -2439,14 +2439,16 @@ const S = {
   tableWrap: { background: "white", borderRadius: 10, border: "1px solid #E2E8F0", overflow: "hidden" },
   table: { width: "100%", borderCollapse: "collapse", fontSize: 14 },
   theadRow: { background: "#F8FAFC", borderBottom: "1px solid #E2E8F0" },
-  th: { padding: "12px 12px", textAlign: "left", fontSize: 12, fontWeight: 600, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.3 },
-  thR: { padding: "12px 12px", textAlign: "right", fontSize: 12, fontWeight: 600, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.3 },
+  th: { padding: "12px 12px", textAlign: "left", verticalAlign: "middle", fontSize: 12, fontWeight: 600, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.3 },
+  thR: { padding: "12px 12px", textAlign: "right", verticalAlign: "middle", fontSize: 12, fontWeight: 600, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.3 },
+  thC: { padding: "12px 12px", textAlign: "center", verticalAlign: "middle", fontSize: 12, fontWeight: 600, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.3 },
   tr: { borderBottom: "1px solid #F1F5F9", cursor: "pointer" },
   trSelected: { background: "#EFF6FF" },
-  td: { padding: "12px 12px", color: "#1F2937" },
-  tdR: { padding: "12px 12px", color: "#1F2937", textAlign: "right", fontVariantNumeric: "tabular-nums" },
-  tdMono: { padding: "12px 12px", color: "#475569", fontFamily: "'JetBrains Mono', monospace", fontSize: 13 },
-  tdBold: { padding: "12px 12px", color: "#0F172A", fontWeight: 600 },
+  td: { padding: "12px 12px", color: "#1F2937", verticalAlign: "middle" },
+  tdR: { padding: "12px 12px", color: "#1F2937", textAlign: "right", verticalAlign: "middle", fontVariantNumeric: "tabular-nums" },
+  tdC: { padding: "12px 12px", color: "#1F2937", textAlign: "center", verticalAlign: "middle" },
+  tdMono: { padding: "12px 12px", color: "#475569", verticalAlign: "middle", fontFamily: "'JetBrains Mono', monospace", fontSize: 13 },
+  tdBold: { padding: "12px 12px", color: "#0F172A", verticalAlign: "middle", fontWeight: 600 },
   empty: { padding: 60, textAlign: "center", color: "#94A3B8", fontSize: 14 },
 
   badge: { display: "inline-block", padding: "4px 11px", borderRadius: 12, fontSize: 12, fontWeight: 600 },
