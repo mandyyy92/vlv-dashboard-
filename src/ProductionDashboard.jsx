@@ -1673,6 +1673,15 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
 
   const handleFile = async (f) => {
     setFile(f);
+    // 파일명 앞쪽 6자리(YYMMDD)에서 입고일/실제 완료일 자동 추출 (예: 260212_… → 2026-02-12)
+    const dm = String(f.name).match(/(\d{6})/);
+    if (dm) {
+      const yy = dm[1].slice(0, 2), mm = dm[1].slice(2, 4), dd = dm[1].slice(4, 6);
+      const mi = parseInt(mm, 10), di = parseInt(dd, 10);
+      if (mi >= 1 && mi <= 12 && di >= 1 && di <= 31) {
+        setInboundDate(`20${yy}-${mm}-${dd}`);
+      }
+    }
     setStep("parsing");
     setError(null);
     try {
