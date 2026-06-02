@@ -816,15 +816,16 @@ export default function ProductionDashboard() {
       const key = `${seasonOf(o)}||${productOf(o)}`;
       (byGroup[key] = byGroup[key] || []).push(o);
     });
+    // 표시 base = 저장용 오더NO에서 'PO-' 접두어만 제거 (PO-26SS-025 → 26SS-025), 없으면 시즌.
+    const stripPo = (o) => String(o.order_no || "").replace(/^PO-/i, "").trim() || seasonOf(o);
     const map = {};
     Object.entries(byGroup).forEach(([key, list]) => {
-      const season = key.split("||")[0];
       [...list]
         .sort((a, b) => {
           if (a.created_at && b.created_at) { const d = new Date(a.created_at) - new Date(b.created_at); if (d) return d; }
           return (a.id || 0) - (b.id || 0);
         })
-        .forEach((o, i) => { map[o.id] = `${season}-${i + 1}차`; });
+        .forEach((o, i) => { map[o.id] = `${stripPo(o)}-${i + 1}차`; });
     });
     return map;
   }, [orders, itemsByOrder]);
