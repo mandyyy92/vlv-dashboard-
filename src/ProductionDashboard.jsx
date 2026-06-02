@@ -1869,9 +1869,26 @@ function UploadModal({ existingOrderNos, onClose, onComplete }) {
             console.log("[매칭] 실패:", it.style_no, it.color, it.size, "후보:", buildBarcodeCandidates(it.style_no, it.color, it.size));
           }
         }
+
+        // 상품명 한글화(영문 작업지시서 대응). 매칭은 위에서 영문명으로 이미 끝났으므로 여기서 덮어씀.
+        // 우선순위: 1) 매칭 inventory 상품명(카테고리 접두어 제거) 2) PRODUCT_NAME_KR_MAP 3) 영문 유지+warn
+        const enName = it.product_name;
+        let krName = null;
+        if (found && found.name) {
+          const n = normalizeInventoryName(found.name);
+          if (n) krName = n;
+        }
+        if (!krName && PRODUCT_NAME_KR_MAP[enName]) krName = PRODUCT_NAME_KR_MAP[enName];
+        if (!krName) { console.warn(`상품명 한글매핑 없음: ${enName}`); krName = enName; }
+        it.product_name = krName;
       }
       console.log("[매칭] 완료 - 매칭:", matched, "/ 미매칭:", unmatched, "/ 방법별:", methodCount);
-      
+
+      // '등록 예정' 목록(sheets_summary)의 상품명도 한글화된 값으로 갱신 (스타일별 첫 아이템 기준)
+      const styleToKr = {};
+      for (const it of result.items) { if (!styleToKr[it.style_no]) styleToKr[it.style_no] = it.product_name; }
+      result.sheets_summary.forEach(s => { if (styleToKr[s.style]) s.product = styleToKr[s.style]; });
+
       setMatchResult({
         matched, unmatched,
         match_rate: result.items.length ? (matched / result.items.length) * 100 : 0,
