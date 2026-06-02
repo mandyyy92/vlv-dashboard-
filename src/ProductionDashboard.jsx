@@ -603,16 +603,33 @@ async function parseWorkorder(file) {
     if (!styleNo || !String(styleNo).trim()) continue;
 
     // COLOR 헤더 위치 탐색 (위→아래 스캔). 영문 'COLOR'/'Color'(+ "COLOR(스와치 컬러)") 및 한글 '색상'/'컬러' 인식.
+    // ★단, 자재 섹션의 'Color' 열을 잡지 않도록 '진짜 수량 그리드 헤더'만 인정★:
+    //   (a) 같은 행에 Q'TY/QTY/수량 또는 Size/사이즈가 있거나, (b) 바로 다음 행에 사이즈 토큰(S/M/L/XL/FREE/OS)이 있는 경우만.
+    const sizeTokenRe = /^(S|M|L|XL|2XL|3XL|XXL|FREE|OS|F)$/i;
+    const normHdr = (x) => String(x ?? "").trim().toUpperCase().replace(/[^A-Z0-9가-힣]/g, ""); // "Q'TY"→"QTY"
     let colorRow = 0, colorCol = 0;
     outer: for (let r = 1; r <= range.e.r + 1; r++) {
       for (let c = 1; c <= range.e.c + 1; c++) {
         const v = cell(r, c);
         if (!v) continue;
         const t = String(v).trim();
-        if (t.toUpperCase().startsWith("COLOR") || t.startsWith("색상") || t.startsWith("컬러")) {
-          colorRow = r; colorCol = c;
-          break outer;
+        const isColorHdr = t.toUpperCase().startsWith("COLOR") || t.startsWith("색상") || t.startsWith("컬러");
+        if (!isColorHdr) continue;
+        // (a) 같은 행 오른쪽에 수량/사이즈 헤더가 있는가
+        let sameRowOk = false;
+        for (let cc = c + 1; cc <= range.e.c + 1; cc++) {
+          const h = normHdr(cell(r, cc));
+          if (!h) continue;
+          if (h === "QTY" || h.includes("수량") || h === "SIZE" || h.includes("사이즈")) { sameRowOk = true; break; }
         }
+        // (b) 바로 다음 행에 사이즈 토큰이 있는가
+        let nextRowOk = false;
+        for (let cc = c + 1; cc <= range.e.c + 1; cc++) {
+          const nv = cell(r + 1, cc);
+          if (nv && sizeTokenRe.test(String(nv).trim())) { nextRowOk = true; break; }
+        }
+        if (sameRowOk || nextRowOk) { colorRow = r; colorCol = c; break outer; }
+        // 조건 불충족 → 자재 색상 열로 보고 건너뛰고 계속 탐색
       }
     }
     if (colorRow === 0) continue;
