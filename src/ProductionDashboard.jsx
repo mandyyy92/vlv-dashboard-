@@ -784,7 +784,7 @@ export default function ProductionDashboard() {
                 <th style={S.thR}>잔여</th>
                 <th style={S.th}>입고율</th>
                 <th style={S.th}>계약일</th>
-                <th style={S.th}>예상 완료</th>
+                <th style={S.th}>납기일</th>
                 <th style={S.th}>실제 완료</th>
                 <th style={S.thR}>리드타임</th>
                 <th style={S.th}>상태</th>
@@ -1056,7 +1056,7 @@ function OrderDrawer({ order, onClose, onAddInbound, onDelete, onUpdate, onDelet
                   <input type="date" value={contractDate} onChange={e => setContractDate(e.target.value)} style={S.formInput} />
                 </div>
                 <div style={{ marginBottom: 8 }}>
-                  <div style={S.dimLabel}>예상 완료일</div>
+                  <div style={S.dimLabel}>납기일</div>
                   <input type="date" value={expectedDate} onChange={e => setExpectedDate(e.target.value)} style={S.formInput} />
                 </div>
                 <div style={{ marginBottom: 8 }}>
@@ -1075,7 +1075,7 @@ function OrderDrawer({ order, onClose, onAddInbound, onDelete, onUpdate, onDelet
             ) : (
               <div style={S.drawerGrid2}>
                 <div><div style={S.dimLabel}>계약일</div><div style={S.dimValue}>{order.contract_date ?? "—"}</div></div>
-                <div><div style={S.dimLabel}>예상 완료일</div><div style={S.dimValue}>{order.expected_final_date ?? "—"}</div></div>
+                <div><div style={S.dimLabel}>납기일</div><div style={S.dimValue}>{order.expected_final_date ?? "—"}</div></div>
                 <div><div style={S.dimLabel}>실제 완료일</div><div style={S.dimValue}>{order.actual_final_date ?? "—"}</div></div>
                 <div><div style={S.dimLabel}>리드타임</div><div style={{ ...S.dimValue, fontWeight: 700, color: "#0369A1" }}>{order.leadtime_days != null ? `${order.leadtime_days}일` : "미완료"}</div></div>
               </div>
@@ -1508,7 +1508,7 @@ function UploadModal({ existingOrderNos, onClose, onComplete }) {
                     <input type="date" value={contractDate} onChange={e => setContractDate(e.target.value)} style={S.formInput} />
                   </div>
                   <div>
-                    <div style={S.dimLabel}>예상 완료일 (선택)</div>
+                    <div style={S.dimLabel}>납기일 (선택)</div>
                     <input type="date" value={expectedDate} onChange={e => setExpectedDate(e.target.value)} style={S.formInput} />
                   </div>
                 </div>
