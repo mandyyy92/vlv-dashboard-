@@ -106,6 +106,12 @@ async function insertInboundLines(lines) {
   if (!r.ok) throw new Error("입고 라인 저장 실패");
   return r.json();
 }
+// 특정 오더의 입고 차수(round)에 해당하는 라인 삭제. order_id/round 둘 다 영문/숫자 컬럼이라 in() 정상.
+async function deleteInboundLinesByRounds(orderId, rounds) {
+  const rs = [...new Set((rounds || []).filter(v => v != null))];
+  if (orderId == null || rs.length === 0) return;
+  await fetch(`${PO_API}/inbound_lines?order_id=eq.${orderId}&round=in.(${rs.join(",")})`, { method: "DELETE", headers: sbHeaders });
+}
 async function insertOrder(payload) {
   const r = await fetch(`${PO_API}/production_orders`, { method: "POST", headers: sbHeaders, body: JSON.stringify(payload) });
   if (!r.ok) throw new Error("오더 생성 실패");
@@ -1073,8 +1079,19 @@ export default function ProductionDashboard() {
           onAddInbound={() => setShowInbound(selected.id)}
           onDelete={() => handleDelete(selected.id)}
           onUpdate={async (patch) => { await updateOrder(selected.id, patch); await reload(); }}
-          onDeleteInbound={async (id) => { await deleteInbound(id); await reload(); }}
-          onDeleteInbounds={async (ids) => { const n = await deleteInbounds(ids); await reload(); return n; }}
+          onDeleteInbound={async (id) => {
+            const rounds = (selected?.inbounds || []).filter(ib => ib.id === id).map(ib => ib.inbound_round);
+            await deleteInbound(id);
+            await deleteInboundLinesByRounds(selected?.id, rounds); // 같은 order_id+round 의 옵션별 라인도 정리
+            await reload();
+          }}
+          onDeleteInbounds={async (ids) => {
+            const rounds = (selected?.inbounds || []).filter(ib => ids.includes(ib.id)).map(ib => ib.inbound_round);
+            const n = await deleteInbounds(ids);
+            await deleteInboundLinesByRounds(selected?.id, rounds); // 삭제 차수의 옵션별 라인도 함께 제거
+            await reload();
+            return n;
+          }}
         />
       )}
 
@@ -2187,7 +2204,7 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
       // 2) 각 오더에 차수별 입고 등록 + 실제 완료일(입고일)을 오더에 반영
       for (const m of matched.matched_orders) {
         // 2-1) 기존 차수 총량 입고 (누적입고/입고율 계산 로직은 그대로 inbound_history 사용)
-        const createdInbound = await insertInbound({
+        await insertInbound({
           order_id: m.order.id,
           item_id: m.first_item_id,
           inbound_round: m.next_round,
@@ -2198,18 +2215,14 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
           packing_list_name: file.name,
         });
         // 2-2) 옵션(색상×사이즈)별 입고 라인을 inbound_lines 에 병행 적재 (매트릭스 표시용)
-        const inboundId = Array.isArray(createdInbound) ? createdInbound[0]?.id : createdInbound?.id;
+        // 실제 테이블 스키마(전부 영문 컬럼): order_id, round, inbound_date, color, size, qty
         const lineRows = m.lines.map(l => ({
-          inbound_id: inboundId ?? null,
           order_id: m.order.id,
-          item_id: l.item_id ?? null,
-          inbound_round: m.next_round,
+          round: m.next_round,
           inbound_date: finalDate,
           // 매트릭스 발주 키와 동일 표현(한글 색상/표준 사이즈)으로 정규화해 저장
           color: normalizeColorKey(l.item_color ?? l.color),
           size: normalizeSizeKey(l.item_size ?? l.size),
-          option: l.color ? `[${l.color}${l.size ? "-" + l.size : ""}]` : null,
-          sku_code: l.sku_code ?? null,
           qty: l.qty,
         }));
         try {
