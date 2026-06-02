@@ -420,9 +420,40 @@ async function parseWorkorder(file) {
       return v ? v.v : null;
     };
 
-    const styleNo = cell(5, 2);
-    const productName = cell(5, 3);
-    const factory = cell(5, 4);
+    // 'STYLE NO' 헤더를 찾아 그 블록에서 스타일NO·상품명·작업처 값을 읽는다.
+    // 상품명은 시트 탭 이름이 아니라 'STYLE NO 값 오른쪽의 상품명 셀'(보통 C5)을 사용.
+    let styleNo = null, productName = null, factory = null;
+    {
+      let sr = 0, sc = 0;
+      outerS: for (let r = 1; r <= Math.min(range.e.r + 1, 20); r++) {
+        for (let c = 1; c <= range.e.c + 1; c++) {
+          const v = cell(r, c);
+          if (v && String(v).replace(/\s/g, "").toUpperCase().includes("STYLENO")) {
+            sr = r; sc = c; break outerS;
+          }
+        }
+      }
+      if (sr > 0) {
+        // 같은 행 오른쪽 셀이 값이면 인라인 라벨, 비었거나 헤더 텍스트면 컬럼 헤더(값은 다음 행)
+        const rightVal = cell(sr, sc + 1);
+        const rightTrim = rightVal == null ? "" : String(rightVal).replace(/\s/g, "");
+        const isHeaderRow = rightTrim === "" || ["상품명", "품명", "작업처", "작업장", "공장"].includes(rightTrim);
+        if (isHeaderRow) {
+          styleNo = cell(sr + 1, sc);
+          productName = cell(sr + 1, sc + 1);
+          factory = cell(sr + 1, sc + 2);
+        } else {
+          styleNo = cell(sr, sc + 1);
+          productName = cell(sr, sc + 2);
+          factory = cell(sr, sc + 3);
+        }
+      } else {
+        // 'STYLE NO'를 못 찾으면 기존 고정 위치(B5/C5/D5)로 fallback
+        styleNo = cell(5, 2);
+        productName = cell(5, 3);
+        factory = cell(5, 4);
+      }
+    }
     if (!styleNo || !String(styleNo).trim()) continue;
 
     // COLOR 헤더 위치 탐색 (시트를 위→아래 스캔. "COLOR" 뿐 아니라 "COLOR(스와치 컬러)" 등도 인식)
