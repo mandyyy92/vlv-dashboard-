@@ -1594,7 +1594,7 @@ function UploadModal({ existingOrderNos, onClose, onComplete }) {
                 <div style={S.previewList}>
                   {parsed.sheets_summary.map((s, i) => (
                     <div key={i} style={S.previewRow}>
-                      <span style={S.previewSheet}>{s.name}</span>
+                      <span style={S.previewSheet}>{s.product || s.name}</span>
                       <span style={S.previewStyle}>{s.style}</span>
                       <span style={S.previewQty}>{fmt(s.qty)} 장</span>
                     </div>
