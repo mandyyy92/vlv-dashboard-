@@ -774,6 +774,7 @@ export default function ProductionDashboard() {
   const [showPacking, setShowPacking] = useState(false);
   const [imageMap, setImageMap] = useState({});            // { name_key: image_url }
   const [vendorFilter, setVendorFilter] = useState("all"); // 'all' | 업체명
+  const [seasonFilter, setSeasonFilter] = useState("all"); // 'all' | 시즌(26SS 등)
   const [collapsedVendors, setCollapsedVendors] = useState({}); // { 업체명: true=접힘 }
 
   // 데이터 로드
@@ -823,19 +824,34 @@ export default function ProductionDashboard() {
     return () => { cancelled = true; };
   }, [enriched]);
 
-  // 업체 목록 (드롭다운 필터용)
-  const vendorList = useMemo(
-    () => [...new Set(enriched.map(o => o.vendor_name || "미지정"))].sort((a, b) => a.localeCompare(b, "ko")),
+  // 시즌 추출: season 컬럼 우선, 없으면 오더 NO에서 파싱(PO-26SS-024 → 26SS)
+  const seasonOf = (o) => (o.season || String(o.order_no || "").split("-")[1] || "").trim() || "미지정";
+
+  // 시즌 목록 (드롭다운 필터용)
+  const seasonList = useMemo(
+    () => [...new Set(enriched.map(seasonOf))].sort((a, b) => a.localeCompare(b, "ko")),
     [enriched]
   );
 
-  // 상태 탭 AND 업체 필터 적용
+  // 시즌 스코프: 선택 시즌으로 전체 대시보드 데이터를 먼저 한정 → KPI/탭/업체목록/표가 모두 이 위에서 재계산
+  const scoped = useMemo(
+    () => seasonFilter === "all" ? enriched : enriched.filter(o => seasonOf(o) === seasonFilter),
+    [enriched, seasonFilter]
+  );
+
+  // 업체 목록 (드롭다운 필터용) — 현재 시즌 스코프 기준
+  const vendorList = useMemo(
+    () => [...new Set(scoped.map(o => o.vendor_name || "미지정"))].sort((a, b) => a.localeCompare(b, "ko")),
+    [scoped]
+  );
+
+  // 시즌 AND 상태 탭 AND 업체 필터 적용
   const filtered = useMemo(() => {
-    let list = enriched;
+    let list = scoped;
     if (tab !== "all" && tab !== "analytics") list = list.filter(o => o.status === tab);
     if (vendorFilter !== "all") list = list.filter(o => (o.vendor_name || "미지정") === vendorFilter);
     return list;
-  }, [enriched, tab, vendorFilter]);
+  }, [scoped, tab, vendorFilter]);
 
   // 등록 순(오름차순) 비교: created_at → 없으면 id → 없으면 오더 NO 끝 숫자(PO-26SS-NNN)
   const byRegistrationAsc = (a, b) => {
@@ -879,18 +895,18 @@ export default function ProductionDashboard() {
     setCollapsedVendors(prev => ({ ...prev, [vendor]: !prev[vendor] }));
 
   const kpi = useMemo(() => {
-    const total = enriched.reduce((s, o) => s + o.total_qty, 0);
-    const received = enriched.reduce((s, o) => s + o.received_qty, 0);
+    const total = scoped.reduce((s, o) => s + o.total_qty, 0);
+    const received = scoped.reduce((s, o) => s + o.received_qty, 0);
     const remain = received - total;
     const unreceived = Math.max(0, total - received); // 미입고 수량(양수)
-    const delayed = enriched.filter(o => o.status === "delayed").length;
-    const partial = enriched.filter(o => o.status === "partial").length;
-    const completed = enriched.filter(o => o.status === "completed").length;
-    const inProgress = enriched.filter(o => o.status === "in_progress").length;
-    const leadtimes = enriched.filter(o => o.leadtime_days != null).map(o => o.leadtime_days);
+    const delayed = scoped.filter(o => o.status === "delayed").length;
+    const partial = scoped.filter(o => o.status === "partial").length;
+    const completed = scoped.filter(o => o.status === "completed").length;
+    const inProgress = scoped.filter(o => o.status === "in_progress").length;
+    const leadtimes = scoped.filter(o => o.leadtime_days != null).map(o => o.leadtime_days);
     const avgLeadtime = leadtimes.length ? Math.round(leadtimes.reduce((a, b) => a + b, 0) / leadtimes.length) : null;
     return { total, received, remain, unreceived, delayed, partial, completed, inProgress, avgLeadtime, rate: total ? (received / total) * 100 : 0 };
-  }, [enriched]);
+  }, [scoped]);
 
   const selected = enriched.find(o => o.id === selectedId);
 
@@ -958,6 +974,18 @@ export default function ProductionDashboard() {
         </div>
       </header>
 
+      {/* 시즌 필터 (대시보드 전체 데이터를 해당 시즌으로 한정) */}
+      <div style={S.seasonBar}>
+        <label style={S.filterLabel}>시즌</label>
+        <select style={S.filterSelect} value={seasonFilter} onChange={(e) => setSeasonFilter(e.target.value)}>
+          <option value="all">전체 시즌</option>
+          {seasonList.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        {seasonFilter !== "all" && (
+          <button style={S.filterClear} onClick={() => setSeasonFilter("all")}>전체 시즌 ✕</button>
+        )}
+      </div>
+
       {/* KPI 영역: 상단 2열(입고율 hero + 상태 스택바) + 하단 4열 메트릭 */}
       <section style={S.kpiTop}>
         {/* 좌: 전체 입고율 hero */}
@@ -987,8 +1015,8 @@ export default function ProductionDashboard() {
       {/* 탭 */}
       <nav style={S.tabBar}>
         {[
-          { k: "all", label: "전체 오더", count: enriched.length },
-          { k: "in_progress", label: "진행중", count: enriched.filter(o => o.status === "in_progress").length },
+          { k: "all", label: "전체 오더", count: scoped.length },
+          { k: "in_progress", label: "진행중", count: kpi.inProgress },
           { k: "partial", label: "부분 입고", count: kpi.partial },
           { k: "completed", label: "입고 완료", count: kpi.completed },
           { k: "delayed", label: "지연", count: kpi.delayed },
@@ -1008,7 +1036,7 @@ export default function ProductionDashboard() {
           <div style={{ marginTop: 16, color: "#64748B", fontSize: 13 }}>데이터 로드 중...</div>
         </div>
       ) : tab === "analytics" ? (
-        <AnalyticsPanel orders={enriched} kpi={kpi} />
+        <AnalyticsPanel orders={scoped} kpi={kpi} />
       ) : (
         <>
           {/* 업체 드롭다운 필터 */}
@@ -2574,6 +2602,8 @@ const S = {
   tabActive: { background: "#0F172A", color: "white" },
   tabCount: { background: "rgba(0,0,0,0.08)", padding: "1px 7px", borderRadius: 8, fontSize: 12, fontWeight: 600 },
 
+  // 시즌 필터 바 (KPI 위, 전체 대시보드 스코프)
+  seasonBar: { display: "flex", alignItems: "center", gap: 10, marginBottom: 16 },
   // 업체 드롭다운 필터 바
   filterBar: { display: "flex", alignItems: "center", gap: 10, marginBottom: 12 },
   filterLabel: { fontSize: 12, fontWeight: 600, color: "#64748B", letterSpacing: 0.2 },
