@@ -28,14 +28,15 @@ function calcOrderTotals(order, items, inbounds) {
   const today = new Date();
   const expDate = order.expected_final_date ? new Date(order.expected_final_date) : null;
 
+  // 입고율(누적입고/총수량) 기준 우선순위로 상태 판정 (부분 입고가 '지연'보다 우선)
+  const rate = total_qty > 0 ? (received_qty / total_qty) * 100 : 0;
+  const overdue = expDate && expDate < today;
   let status;
   if (total_qty === 0) status = "in_progress";
-  else if (received_qty >= total_qty) status = "completed";
-  else if (received_qty === 0) {
-    status = expDate && expDate < today ? "delayed" : "in_progress";
-  } else {
-    status = expDate && expDate < today ? "delayed" : "partial";
-  }
+  else if (rate >= 100) status = "completed";
+  else if (rate >= 0.1) status = "partial";       // 납기일 지났어도 부분 입고 우선
+  else if (overdue) status = "delayed";            // 입고율 < 0.1% 이고 납기일 지남
+  else status = "in_progress";
 
   // 수동 저장된 실제 완료일이 있으면 우선 사용, 없으면 완납 시 마지막 입고일로 추정
   let actual_final_date = order.actual_final_date || null;
