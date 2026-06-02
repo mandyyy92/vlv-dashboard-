@@ -837,7 +837,15 @@ export default function ProductionDashboard() {
     return list;
   }, [enriched, tab, vendorFilter]);
 
-  // 업체별 그룹핑 (그룹 헤더용 합계 포함)
+  // 등록 순(오름차순) 비교: created_at → 없으면 id → 없으면 오더 NO 끝 숫자(PO-26SS-NNN)
+  const byRegistrationAsc = (a, b) => {
+    if (a.created_at && b.created_at) return new Date(a.created_at) - new Date(b.created_at);
+    if (a.id != null && b.id != null) return a.id - b.id;
+    const tail = (no) => parseInt(String(no || "").match(/(\d+)\s*$/)?.[1] ?? "0", 10);
+    return tail(a.order_no) - tail(b.order_no);
+  };
+
+  // 업체별 그룹핑 (그룹 헤더용 합계 포함). 각 그룹 안에서는 등록 순 오름차순.
   const grouped = useMemo(() => {
     const map = {};
     filtered.forEach(o => {
@@ -846,9 +854,10 @@ export default function ProductionDashboard() {
     });
     return Object.entries(map)
       .map(([vendor, list]) => {
-        const total = list.reduce((s, o) => s + o.total_qty, 0);
-        const received = list.reduce((s, o) => s + o.received_qty, 0);
-        return { vendor, list, total, received, rate: total ? (received / total) * 100 : 0 };
+        const sortedList = [...list].sort(byRegistrationAsc);
+        const total = sortedList.reduce((s, o) => s + o.total_qty, 0);
+        const received = sortedList.reduce((s, o) => s + o.received_qty, 0);
+        return { vendor, list: sortedList, total, received, rate: total ? (received / total) * 100 : 0 };
       })
       .sort((a, b) => a.vendor.localeCompare(b.vendor, "ko"));
   }, [filtered]);
