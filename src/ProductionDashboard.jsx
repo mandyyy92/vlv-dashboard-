@@ -226,6 +226,34 @@ const COLOR_KR_MAP = {
   "IVORY": "아이보리",
 };
 
+// 색상 2글자 코드(NV/BK/CO…) → 한글 매핑. COLOR_MAP(영문→코드)와 COLOR_KR_MAP(영문→한글)을 결합해 자동 생성.
+const COLOR_CODE_KR_MAP = Object.keys(COLOR_MAP).reduce((acc, en) => {
+  const code = COLOR_MAP[en];
+  const kr = COLOR_KR_MAP[en];
+  if (code && kr && !acc[code]) acc[code] = kr;
+  return acc;
+}, {});
+
+// 색상 정규화: 코드(NV)·영문(NAVY) → 한글(네이비)로 통일. 이미 한글이거나 매핑 없으면 원본.
+// 발주(오더 아이템)·입고(inbound_lines) 양쪽 키를 같은 표현으로 맞추기 위함.
+function normalizeColorKey(c) {
+  const raw = String(c || "").trim().replace(/\s*\(.*\)\s*$/, "").trim(); // "크림(114)" → "크림"
+  if (!raw) return "";
+  const up = raw.toUpperCase();
+  if (COLOR_KR_MAP[up]) return COLOR_KR_MAP[up];        // 영문 색상명
+  if (COLOR_CODE_KR_MAP[up]) return COLOR_CODE_KR_MAP[up]; // 2글자 색상코드
+  return raw;                                            // 이미 한글 등
+}
+
+// 사이즈 정규화: "90(S)"→"S", "OS"→"FREE", 그 외 대문자 표준화(M/L/XL…).
+function normalizeSizeKey(s) {
+  const raw = String(s || "").trim();
+  if (!raw) return "";
+  const m = raw.match(/\(([^)]+)\)/);          // "90(S)" → "S"
+  const base = (m ? m[1] : raw).trim().toUpperCase();
+  return base === "OS" ? "FREE" : base;
+}
+
 // 영문 상품명 → 한글 상품명 매핑 (작업지시서 → inventory)
 const PRODUCT_NAME_KR_MAP = {
   "Essential": "에센셜",
@@ -1476,15 +1504,18 @@ function SkuMatrix({ items, inboundLines = [] }) {
     const sizeSet = [];
     const cellMap = {};   // 발주수량
     const inCellMap = {}; // 입고수량
+    // 발주: 색상/사이즈를 정규화(한글 색상·표준 사이즈)한 키로 집계. 표시도 정규화 값 사용.
     for (const it of items) {
-      if (!colorSet.includes(it.color)) colorSet.push(it.color);
-      if (!sizeSet.includes(it.size)) sizeSet.push(it.size);
-      const key = `${it.color}||${it.size}`;
+      const c = normalizeColorKey(it.color);
+      const s = normalizeSizeKey(it.size);
+      if (!colorSet.includes(c)) colorSet.push(c);
+      if (!sizeSet.includes(s)) sizeSet.push(s);
+      const key = `${c}||${s}`;
       cellMap[key] = (cellMap[key] || 0) + (it.order_qty || 0);
     }
-    // 입고 라인(옵션별)을 색상||사이즈 기준으로 합산. 라인의 color/size 는 매칭된 오더 아이템 값이라 셀 키와 정확히 일치.
+    // 입고: inbound_lines 를 동일하게 정규화한 (색상,사이즈) 키로 group by 합산 → 발주 키와 정확히 매칭.
     for (const ln of inboundLines) {
-      const key = `${ln.color}||${ln.size}`;
+      const key = `${normalizeColorKey(ln.color)}||${normalizeSizeKey(ln.size)}`;
       inCellMap[key] = (inCellMap[key] || 0) + (ln.qty || 0);
     }
 
@@ -2174,8 +2205,9 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
           item_id: l.item_id ?? null,
           inbound_round: m.next_round,
           inbound_date: finalDate,
-          color: l.item_color ?? l.color ?? null,
-          size: l.item_size ?? l.size ?? null,
+          // 매트릭스 발주 키와 동일 표현(한글 색상/표준 사이즈)으로 정규화해 저장
+          color: normalizeColorKey(l.item_color ?? l.color),
+          size: normalizeSizeKey(l.item_size ?? l.size),
           option: l.color ? `[${l.color}${l.size ? "-" + l.size : ""}]` : null,
           sku_code: l.sku_code ?? null,
           qty: l.qty,
