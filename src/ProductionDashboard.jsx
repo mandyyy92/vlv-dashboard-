@@ -95,6 +95,17 @@ async function fetchAllInbounds() {
   const r = await fetch(`${PO_API}/inbound_history?select=*`, { headers: sbHeaders });
   return r.ok ? r.json() : [];
 }
+// 입고 라인(옵션별). inbound_history 와 별개로 색상×사이즈 단위 입고수량을 담는다.
+async function fetchAllInboundLines() {
+  const r = await fetch(`${PO_API}/inbound_lines?select=*`, { headers: sbHeaders });
+  return r.ok ? r.json() : [];
+}
+async function insertInboundLines(lines) {
+  if (!lines || lines.length === 0) return [];
+  const r = await fetch(`${PO_API}/inbound_lines`, { method: "POST", headers: sbHeaders, body: JSON.stringify(lines) });
+  if (!r.ok) throw new Error("입고 라인 저장 실패");
+  return r.json();
+}
 async function insertOrder(payload) {
   const r = await fetch(`${PO_API}/production_orders`, { method: "POST", headers: sbHeaders, body: JSON.stringify(payload) });
   if (!r.ok) throw new Error("오더 생성 실패");
@@ -708,6 +719,7 @@ export default function ProductionDashboard() {
   const [orders, setOrders] = useState([]);
   const [itemsByOrder, setItemsByOrder] = useState({});
   const [inboundsByOrder, setInboundsByOrder] = useState({});
+  const [inboundLinesByOrder, setInboundLinesByOrder] = useState({}); // 옵션별 입고 라인
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("all");
   const [selectedId, setSelectedId] = useState(null);
@@ -725,12 +737,15 @@ export default function ProductionDashboard() {
       const ordersData = await fetchOrders();
       const itemsData = await fetchAllItems();
       const inboundsData = await fetchAllInbounds();
-      const im = {}, ibm = {};
+      const linesData = await fetchAllInboundLines();
+      const im = {}, ibm = {}, ilm = {};
       itemsData.forEach(it => { (im[it.order_id] = im[it.order_id] || []).push(it); });
       inboundsData.forEach(ib => { (ibm[ib.order_id] = ibm[ib.order_id] || []).push(ib); });
+      linesData.forEach(ln => { (ilm[ln.order_id] = ilm[ln.order_id] || []).push(ln); });
       setOrders(ordersData || []);
       setItemsByOrder(im);
       setInboundsByOrder(ibm);
+      setInboundLinesByOrder(ilm);
     } catch (e) {
       console.error(e);
       alert("데이터 로드 실패: " + e.message);
@@ -745,10 +760,11 @@ export default function ProductionDashboard() {
     return orders.map(o => {
       const items = itemsByOrder[o.id] || [];
       const inbounds = inboundsByOrder[o.id] || [];
+      const inboundLines = inboundLinesByOrder[o.id] || [];
       const calc = calcOrderTotals(o, items, inbounds);
-      return { ...o, ...calc, items, inbounds };
+      return { ...o, ...calc, items, inbounds, inboundLines };
     });
-  }, [orders, itemsByOrder, inboundsByOrder]);
+  }, [orders, itemsByOrder, inboundsByOrder, inboundLinesByOrder]);
 
   // 표시되는 오더들의 상품명(공백제거) → 썸네일 일괄 조회
   useEffect(() => {
@@ -1434,7 +1450,7 @@ function OrderDrawer({ order, onClose, onAddInbound, onDelete, onUpdate, onDelet
 
           <div style={S.drawerCard}>
             <div style={S.drawerCardHead}>🎨 색상 × 사이즈 ({order.items.length}개 SKU)</div>
-            <SkuMatrix items={order.items} />
+            <SkuMatrix items={order.items} inboundLines={order.inboundLines} />
           </div>
 
           <div style={{ marginTop: 16, padding: "0 4px" }}>
@@ -1449,83 +1465,112 @@ function OrderDrawer({ order, onClose, onAddInbound, onDelete, onUpdate, onDelet
 // ============================================================
 // SKU 매트릭스 (색상 행 x 사이즈 열)
 // ============================================================
-function SkuMatrix({ items }) {
-  // 색상과 사이즈 유니크 추출 (등장 순서 유지)
-  const { colors, sizes, matrix, colorTotals, sizeTotals, grandTotal } = useMemo(() => {
+function SkuMatrix({ items, inboundLines = [] }) {
+  // 색상과 사이즈 유니크 추출 (등장 순서 유지). 발주(order)·입고(inbound) 두 맵을 각각 집계.
+  const { colors, sizes, matrix, inMatrix, colorTotals, sizeTotals, grandTotal, inColorTotals, inSizeTotals, inGrandTotal } = useMemo(() => {
     const colorSet = [];
     const sizeSet = [];
-    const cellMap = {};
+    const cellMap = {};   // 발주수량
+    const inCellMap = {}; // 입고수량
     for (const it of items) {
       if (!colorSet.includes(it.color)) colorSet.push(it.color);
       if (!sizeSet.includes(it.size)) sizeSet.push(it.size);
       const key = `${it.color}||${it.size}`;
       cellMap[key] = (cellMap[key] || 0) + (it.order_qty || 0);
     }
-    
+    // 입고 라인(옵션별)을 색상||사이즈 기준으로 합산. 라인의 color/size 는 매칭된 오더 아이템 값이라 셀 키와 정확히 일치.
+    for (const ln of inboundLines) {
+      const key = `${ln.color}||${ln.size}`;
+      inCellMap[key] = (inCellMap[key] || 0) + (ln.qty || 0);
+    }
+
     // 사이즈 순서 정렬 (S, M, L, XL, 2XL, FREE 순)
     const sizeOrder = { "S": 1, "M": 2, "L": 3, "XL": 4, "2XL": 5, "3XL": 6, "FREE": 99, "OS": 99 };
     sizeSet.sort((a, b) => (sizeOrder[a] || 50) - (sizeOrder[b] || 50));
-    
-    // 행/열 합계 계산
-    const cTotals = {};
-    const sTotals = {};
-    let gTotal = 0;
+
+    // 행/열 합계 계산 (발주·입고 각각)
+    const cTotals = {}, sTotals = {}, inCTotals = {}, inSTotals = {};
+    let gTotal = 0, inGTotal = 0;
     for (const c of colorSet) {
-      cTotals[c] = 0;
+      cTotals[c] = 0; inCTotals[c] = 0;
       for (const s of sizeSet) {
         const v = cellMap[`${c}||${s}`] || 0;
+        const iv = inCellMap[`${c}||${s}`] || 0;
         cTotals[c] += v;
         sTotals[s] = (sTotals[s] || 0) + v;
         gTotal += v;
+        inCTotals[c] += iv;
+        inSTotals[s] = (inSTotals[s] || 0) + iv;
+        inGTotal += iv;
       }
     }
-    
+
     return {
       colors: colorSet,
       sizes: sizeSet,
       matrix: cellMap,
+      inMatrix: inCellMap,
       colorTotals: cTotals,
       sizeTotals: sTotals,
       grandTotal: gTotal,
+      inColorTotals: inCTotals,
+      inSizeTotals: inSTotals,
+      inGrandTotal: inGTotal,
     };
-  }, [items]);
+  }, [items, inboundLines]);
+
+  // 한 칸/합계 셀의 발주·입고 2줄 렌더 (top: 발주 회색, bottom: 입고 파랑 굵게)
+  const dual = (order, inb, dark = false) => (
+    <>
+      <div style={dark ? S.skuCellOrderDark : S.skuCellOrder}>{order > 0 ? fmt(order) : "—"}</div>
+      <div style={inb > 0 ? (dark ? S.skuCellInboundDark : S.skuCellInbound) : S.skuCellInboundZero}>{inb > 0 ? fmt(inb) : "—"}</div>
+    </>
+  );
 
   return (
-    <div style={S.skuMatrixWrap}>
-      <table style={S.skuMatrixTable}>
-        <thead>
-          <tr>
-            <th style={S.skuMatrixCornerCell}>색상 \ 사이즈</th>
-            {sizes.map(s => (
-              <th key={s} style={S.skuMatrixSizeHeader}>{s}</th>
-            ))}
-            <th style={S.skuMatrixTotalHeader}>합계</th>
-          </tr>
-        </thead>
-        <tbody>
-          {colors.map(c => (
-            <tr key={c}>
-              <td style={S.skuMatrixColorCell}>{c}</td>
-              {sizes.map(s => {
-                const v = matrix[`${c}||${s}`] || 0;
-                return (
-                  <td key={s} style={v > 0 ? S.skuMatrixCell : S.skuMatrixEmptyCell}>
-                    {v > 0 ? fmt(v) : "—"}
-                  </td>
-                );
-              })}
-              <td style={S.skuMatrixRowTotal}>{fmt(colorTotals[c])}</td>
+    <div>
+      {/* 범례: 발주(회색) / 입고(파랑) */}
+      <div style={S.skuLegend}>
+        <span style={S.skuLegendItem}><span style={{ ...S.skuLegendDot, background: "#94A3B8" }} />발주</span>
+        <span style={S.skuLegendItem}><span style={{ ...S.skuLegendDot, background: "#0369A1" }} />입고</span>
+      </div>
+      <div style={S.skuMatrixWrap}>
+        <table style={S.skuMatrixTable}>
+          <thead>
+            <tr>
+              <th style={S.skuMatrixCornerCell}>색상 \ 사이즈</th>
+              {sizes.map(s => (
+                <th key={s} style={S.skuMatrixSizeHeader}>{s}</th>
+              ))}
+              <th style={S.skuMatrixTotalHeader}>합계</th>
             </tr>
-          ))}
-          <tr style={S.skuMatrixFooterRow}>
-            <td style={S.skuMatrixFooterLabel}>합계</td>
-            {sizes.map(s => (
-              <td key={s} style={S.skuMatrixColTotal}>{fmt(sizeTotals[s] || 0)}</td>
+          </thead>
+          <tbody>
+            {colors.map(c => (
+              <tr key={c}>
+                <td style={S.skuMatrixColorCell}>{c}</td>
+                {sizes.map(s => {
+                  const v = matrix[`${c}||${s}`] || 0;
+                  const iv = inMatrix[`${c}||${s}`] || 0;
+                  return (
+                    <td key={s} style={(v > 0 || iv > 0) ? S.skuMatrixCell : S.skuMatrixEmptyCell}>
+                      {(v > 0 || iv > 0) ? dual(v, iv) : "—"}
+                    </td>
+                  );
+                })}
+                <td style={S.skuMatrixRowTotal}>{dual(colorTotals[c], inColorTotals[c])}</td>
+              </tr>
             ))}
-            <td style={S.skuMatrixGrandTotal}>{fmt(grandTotal)}</td>
-          </tr>
-        </tbody>
-      </table>
+            <tr style={S.skuMatrixFooterRow}>
+              <td style={S.skuMatrixFooterLabel}>합계</td>
+              {sizes.map(s => (
+                <td key={s} style={S.skuMatrixColTotal}>{dual(sizeTotals[s] || 0, inSizeTotals[s] || 0)}</td>
+              ))}
+              <td style={S.skuMatrixGrandTotal}>{dual(grandTotal, inGrandTotal, true)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -2043,7 +2088,13 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
               qty: 0,
             };
           }
-          matchedByOrder[oid].lines.push(line);
+          // 매칭된 오더 아이템의 색상/사이즈를 함께 보관 → 매트릭스 셀 키(it.color||it.size)와 정확히 일치
+          matchedByOrder[oid].lines.push({
+            ...line,
+            item_id: found.item.id,
+            item_color: found.item.color,
+            item_size: found.item.size,
+          });
           matchedByOrder[oid].qty += line.qty;
         } else {
           unmatchedLines.push(line);
@@ -2100,7 +2151,8 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
 
       // 2) 각 오더에 차수별 입고 등록 + 실제 완료일(입고일)을 오더에 반영
       for (const m of matched.matched_orders) {
-        await insertInbound({
+        // 2-1) 기존 차수 총량 입고 (누적입고/입고율 계산 로직은 그대로 inbound_history 사용)
+        const createdInbound = await insertInbound({
           order_id: m.order.id,
           item_id: m.first_item_id,
           inbound_round: m.next_round,
@@ -2110,6 +2162,26 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
           packing_list_url: packingUrl,
           packing_list_name: file.name,
         });
+        // 2-2) 옵션(색상×사이즈)별 입고 라인을 inbound_lines 에 병행 적재 (매트릭스 표시용)
+        const inboundId = Array.isArray(createdInbound) ? createdInbound[0]?.id : createdInbound?.id;
+        const lineRows = m.lines.map(l => ({
+          inbound_id: inboundId ?? null,
+          order_id: m.order.id,
+          item_id: l.item_id ?? null,
+          inbound_round: m.next_round,
+          inbound_date: finalDate,
+          color: l.item_color ?? l.color ?? null,
+          size: l.item_size ?? l.size ?? null,
+          option: l.color ? `[${l.color}${l.size ? "-" + l.size : ""}]` : null,
+          sku_code: l.sku_code ?? null,
+          qty: l.qty,
+        }));
+        try {
+          await insertInboundLines(lineRows);
+        } catch (e) {
+          // 라인 적재 실패해도 차수 총량 입고는 유효하므로 진행 (콘솔에만 기록)
+          console.error("[입고 라인 적재 실패]", e);
+        }
         await updateOrder(m.order.id, { actual_final_date: finalDate });
       }
       onComplete();
@@ -2517,7 +2589,16 @@ const S = {
   skuQty: { color: "#0369A1", fontWeight: 700, fontVariantNumeric: "tabular-nums" },
 
   // 색상 × 사이즈 매트릭스 표
-  skuMatrixWrap: { marginTop: 10, overflowX: "auto", borderRadius: 8, border: "1px solid #E2E8F0", background: "white" },
+  skuLegend: { display: "flex", gap: 14, marginTop: 10, marginBottom: 2 },
+  skuLegendItem: { display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: "#64748B" },
+  skuLegendDot: { width: 9, height: 9, borderRadius: 3, display: "inline-block" },
+  // 한 칸 안 발주/입고 2줄
+  skuCellOrder: { fontSize: 13, color: "#94A3B8", fontWeight: 500, lineHeight: 1.35, fontVariantNumeric: "tabular-nums" },
+  skuCellInbound: { fontSize: 13, color: "#0369A1", fontWeight: 700, lineHeight: 1.35, fontVariantNumeric: "tabular-nums" },
+  skuCellInboundZero: { fontSize: 13, color: "#CBD5E1", fontWeight: 500, lineHeight: 1.35, fontVariantNumeric: "tabular-nums" },
+  skuCellOrderDark: { fontSize: 13, color: "#CBD5E1", fontWeight: 500, lineHeight: 1.35, fontVariantNumeric: "tabular-nums" },
+  skuCellInboundDark: { fontSize: 14, color: "#7DD3FC", fontWeight: 800, lineHeight: 1.35, fontVariantNumeric: "tabular-nums" },
+  skuMatrixWrap: { marginTop: 6, overflowX: "auto", borderRadius: 8, border: "1px solid #E2E8F0", background: "white" },
   skuMatrixTable: { width: "100%", borderCollapse: "collapse", fontSize: 13 },
   skuMatrixCornerCell: { padding: "8px 10px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#94A3B8", background: "#F8FAFC", borderRight: "1px solid #E2E8F0", borderBottom: "1px solid #E2E8F0", textTransform: "uppercase", letterSpacing: 0.3 },
   skuMatrixSizeHeader: { padding: "8px 12px", textAlign: "center", fontSize: 12, fontWeight: 700, color: "#0F172A", background: "#F1F5F9", borderBottom: "1px solid #E2E8F0", minWidth: 50 },
