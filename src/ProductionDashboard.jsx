@@ -802,6 +802,26 @@ export default function ProductionDashboard() {
 
   useEffect(() => { reload(); }, []);
 
+  // 시즌 추출: season 컬럼 우선, 없으면 오더 NO에서 파싱(PO-26SS-024 → 26SS)
+  const seasonOf = (o) => (o.season || String(o.order_no || "").split("-")[1] || "").trim() || "미지정";
+
+  // 표시 번호 맵: { orderId: '26SS-N차' }. 시즌별로 업로드(created_at) 오름차순 순위(1부터), 동률은 id.
+  // ★동적 계산(저장 X)★ — 삭제 시 자동으로 뒤 차수가 당겨짐. 내부 id/오더NO는 그대로 유지.
+  const displayNoMap = useMemo(() => {
+    const bySeason = {};
+    orders.forEach(o => { (bySeason[seasonOf(o)] = bySeason[seasonOf(o)] || []).push(o); });
+    const map = {};
+    Object.entries(bySeason).forEach(([s, list]) => {
+      [...list]
+        .sort((a, b) => {
+          if (a.created_at && b.created_at) { const d = new Date(a.created_at) - new Date(b.created_at); if (d) return d; }
+          return (a.id || 0) - (b.id || 0);
+        })
+        .forEach((o, i) => { map[o.id] = `${s}-${i + 1}차`; });
+    });
+    return map;
+  }, [orders]);
+
   // 집계
   const enriched = useMemo(() => {
     return orders.map(o => {
@@ -809,9 +829,9 @@ export default function ProductionDashboard() {
       const inbounds = inboundsByOrder[o.id] || [];
       const inboundLines = inboundLinesByOrder[o.id] || [];
       const calc = calcOrderTotals(o, items, inbounds);
-      return { ...o, ...calc, items, inbounds, inboundLines };
+      return { ...o, ...calc, items, inbounds, inboundLines, display_no: displayNoMap[o.id] || o.order_no };
     });
-  }, [orders, itemsByOrder, inboundsByOrder, inboundLinesByOrder]);
+  }, [orders, itemsByOrder, inboundsByOrder, inboundLinesByOrder, displayNoMap]);
 
   // 표시되는 오더들의 상품명(공백제거) → 썸네일 일괄 조회
   useEffect(() => {
@@ -823,9 +843,6 @@ export default function ProductionDashboard() {
     lookupImagesByNames(keys).then(m => { if (!cancelled) setImageMap(m); });
     return () => { cancelled = true; };
   }, [enriched]);
-
-  // 시즌 추출: season 컬럼 우선, 없으면 오더 NO에서 파싱(PO-26SS-024 → 26SS)
-  const seasonOf = (o) => (o.season || String(o.order_no || "").split("-")[1] || "").trim() || "미지정";
 
   // 시즌 목록 (드롭다운 필터용)
   const seasonList = useMemo(
@@ -1096,7 +1113,7 @@ export default function ProductionDashboard() {
                         return (
                           <tr key={o.id} style={{ ...S.tr, ...(isClusterStart ? S.clusterStart : {}), ...(selectedId === o.id ? S.trSelected : {}) }} onClick={() => setSelectedId(o.id)}>
                             <td style={S.tdThumb}><ProductThumb url={imgUrl} /></td>
-                            <td style={S.tdMono}>{o.order_no}</td>
+                            <td style={S.tdMono}>{o.display_no}</td>
                             <td style={S.tdMono}>{o.items[0]?.style_no || "—"}</td>
                             <td style={S.tdBold}>{o.items[0]?.product_name || "—"}</td>
                             <td style={S.td}>{o.vendor_name || "—"}</td>
@@ -1381,7 +1398,7 @@ function OrderDrawer({ order, onClose, onAddInbound, onDelete, onUpdate, onDelet
       <aside style={S.drawer}>
         <div style={S.drawerHeader}>
           <div>
-            <div style={S.drawerStyleNo}>{order.order_no}</div>
+            <div style={S.drawerStyleNo}>{order.display_no || order.order_no}</div>
             <div style={S.drawerTitle}>{order.items[0]?.product_name || "—"}</div>
             <div style={S.drawerVendor}>{order.vendor_name} · {order.season || "—"}</div>
           </div>
@@ -2106,7 +2123,7 @@ function InboundModal({ order, onClose, onSubmit }) {
         <div style={S.modalHeader}>
           <div>
             <div style={S.modalTitle}>📦 {round}차 입고 등록</div>
-            <div style={S.modalSubtitle}>{order.items[0]?.product_name} · {order.order_no}</div>
+            <div style={S.modalSubtitle}>{order.items[0]?.product_name} · {order.display_no || order.order_no}</div>
           </div>
           <button style={S.iconBtn} onClick={onClose}>✕</button>
         </div>
@@ -2442,7 +2459,7 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
                             <option value="">미등록</option>
                             {li.cands.map(c => (
                               <option key={c.order.id} value={c.order.id}>
-                                {c.order.order_no} · {c.order.vendor_name || "—"}
+                                {(c.order.display_no || c.order.order_no)} · {c.order.vendor_name || "—"}
                               </option>
                             ))}
                           </select>
@@ -2526,7 +2543,7 @@ function AnalyticsPanel({ orders, kpi }) {
             {orders.map(o => (
               <div key={o.id} style={S.orderProgRow}>
                 <div style={S.orderProgLabel}>
-                  <span style={S.orderProgName}>{o.items[0]?.product_name || o.order_no}</span>
+                  <span style={S.orderProgName}>{o.items[0]?.product_name || o.display_no || o.order_no}</span>
                   <span style={S.orderProgQty}>{fmt(o.received_qty)} / {fmt(o.total_qty)}</span>
                 </div>
                 <div style={{ ...S.progBar, width: "100%" }}>
@@ -2568,7 +2585,7 @@ function AnalyticsPanel({ orders, kpi }) {
             {[...orders].sort((a, b) => b.total_qty - a.total_qty).slice(0, 5).map((o, i) => (
               <div key={o.id} style={S.topRow}>
                 <span style={S.topRank}>{i + 1}</span>
-                <span style={S.topName}>{o.items[0]?.product_name || o.order_no}</span>
+                <span style={S.topName}>{o.items[0]?.product_name || o.display_no || o.order_no}</span>
                 <span style={S.topQty}>{fmt(o.total_qty)}장</span>
                 <div style={{ ...S.topBar, width: `${(o.total_qty / maxQty) * 100}%` }} />
               </div>
