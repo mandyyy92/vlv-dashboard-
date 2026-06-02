@@ -806,22 +806,28 @@ export default function ProductionDashboard() {
   // 시즌 추출: season 컬럼 우선, 없으면 오더 NO에서 파싱(PO-26SS-024 → 26SS)
   const seasonOf = (o) => (o.season || String(o.order_no || "").split("-")[1] || "").trim() || "미지정";
 
-  // 표시 번호 맵: { orderId: '26SS-N차' }. 시즌별로 업로드(created_at) 오름차순 순위(1부터), 동률은 id.
-  // ★동적 계산(저장 X)★ — 삭제 시 자동으로 뒤 차수가 당겨짐. 내부 id/오더NO는 그대로 유지.
+  // 표시 번호 맵: { orderId: '26SS-N차' }. 같은 (시즌, 상품명) 오더들끼리 묶어 업로드(created_at)
+  // 오름차순 순위(1부터), 동률은 id. 스타일 달라도 상품명 같으면 합산.
+  // ★동적 계산(저장 X)★ — 삭제 시 같은 상품 내 뒤 차수가 자동으로 당겨짐. 내부 id/오더NO는 그대로 유지.
   const displayNoMap = useMemo(() => {
-    const bySeason = {};
-    orders.forEach(o => { (bySeason[seasonOf(o)] = bySeason[seasonOf(o)] || []).push(o); });
+    const productOf = (o) => (itemsByOrder[o.id]?.[0]?.product_name || "").trim() || "미지정";
+    const byGroup = {}; // `${시즌}||${상품명}` → 오더[]
+    orders.forEach(o => {
+      const key = `${seasonOf(o)}||${productOf(o)}`;
+      (byGroup[key] = byGroup[key] || []).push(o);
+    });
     const map = {};
-    Object.entries(bySeason).forEach(([s, list]) => {
+    Object.entries(byGroup).forEach(([key, list]) => {
+      const season = key.split("||")[0];
       [...list]
         .sort((a, b) => {
           if (a.created_at && b.created_at) { const d = new Date(a.created_at) - new Date(b.created_at); if (d) return d; }
           return (a.id || 0) - (b.id || 0);
         })
-        .forEach((o, i) => { map[o.id] = `${s}-${i + 1}차`; });
+        .forEach((o, i) => { map[o.id] = `${season}-${i + 1}차`; });
     });
     return map;
-  }, [orders]);
+  }, [orders, itemsByOrder]);
 
   // 집계
   const enriched = useMemo(() => {
