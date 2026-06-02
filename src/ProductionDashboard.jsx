@@ -2278,27 +2278,41 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
   const seasonOptions = useMemo(() => [...new Set(orders.map(seasonOf))].sort((a, b) => a.localeCompare(b, "ko")), [orders]);
   const vendorOptions = useMemo(() => [...new Set(orders.map(o => o.vendor_name || "미지정"))].sort((a, b) => a.localeCompare(b, "ko")), [orders]);
 
-  // sku_code → 후보 {order, item} 전체
-  const skuToCands = useMemo(() => {
-    const m = {};
+  // 오더 아이템 인덱스: inventory STYLE NO(STYLE_NO_MAP 적용) + 정규화 옵션 미리 계산
+  const orderItemIndex = useMemo(() => {
+    const list = [];
     for (const ord of orders) {
       for (const it of (itemsByOrder[ord.id] || [])) {
-        if (!it.sku_code) continue;
-        (m[it.sku_code] = m[it.sku_code] || []).push({ order: ord, item: it });
+        const s0 = baseStyle(it.style_no);
+        const invStyle = STYLE_NO_MAP[s0] || s0; // 작업지시서 스타일 → inventory 바코드 prefix
+        list.push({ order: ord, item: it, invStyle, ncolor: normalizeColorKey(it.color), nsize: normalizeSizeKey(it.size) });
       }
     }
-    return m;
+    return list;
   }, [orders, itemsByOrder]);
 
-  // 라인별: 시즌·업체 스코프 내 후보 오더 + 스타일 그룹키
+  // 라인별 후보 오더(시즌·업체 스코프 내). 매칭 기준:
+  //   1) 정확 sku_code 일치, 또는
+  //   2) ★STYLE NO 일치(라인 inventory 바코드가 오더아이템 invStyle로 시작) + 옵션(색상·사이즈) 정규화 일치★
   const lineInfos = useMemo(() => {
     if (!parsed) return [];
     return parsed.lines.map((line, idx) => {
-      const cands = (skuToCands[line.sku_code] || []).filter(c => inScope(c.order));
+      const lncolor = normalizeColorKey(line.color);
+      const lnsize = normalizeSizeKey(line.size);
+      const lbar = String(line.inv_barcode || "");
+      const seen = new Set();
+      const cands = [];
+      for (const oi of orderItemIndex) {
+        if (!inScope(oi.order)) continue;
+        const skuMatch = line.sku_code && oi.item.sku_code === line.sku_code;
+        const styleOptMatch = lbar && oi.invStyle && lbar.startsWith(oi.invStyle) && lncolor === oi.ncolor && lnsize === oi.nsize;
+        if (!(skuMatch || styleOptMatch)) continue;
+        if (!seen.has(oi.order.id)) { seen.add(oi.order.id); cands.push({ order: oi.order, item: oi.item }); }
+      }
       const groupKey = cands.length ? (baseStyle(cands[0].item.style_no) || `__sku_${line.sku_code}`) : `__none_${idx}`;
       return { idx, line, cands, groupKey };
     });
-  }, [parsed, skuToCands, seasonSel, vendorSel]);
+  }, [parsed, orderItemIndex, seasonSel, vendorSel]);
 
   // 기본 배정: 같은 스타일 그룹은 사이즈를 가장 많이 커버하는 단일 오더로(쪼개짐 방지). 스코프 바뀌면 재계산.
   useEffect(() => {
@@ -2313,8 +2327,8 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
       if (poolArr.length === 0) { infos.forEach(li => { assign[li.idx] = ""; }); continue; }
       const scoreOf = (ord) => {
         const items = itemsByOrder[ord.id] || [];
-        const skuSet = new Set(items.map(it => it.sku_code));
-        const covered = infos.filter(li => skuSet.has(li.line.sku_code)).length;
+        // 이 오더가 그룹 라인 중 몇 개의 후보인지(STYLE/sku 매칭 결과 반영)
+        const covered = infos.filter(li => li.cands.some(c => c.order.id === ord.id)).length;
         const styleQty = items.filter(it => baseStyle(it.style_no) === gkey).reduce((s, it) => s + (it.order_qty || 0), 0);
         return { covered, styleQty };
       };
@@ -2350,6 +2364,14 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
         setStep("select");
         return;
       }
+      // 각 라인의 inventory 바코드 조회(상품코드→바코드) → STYLE NO 기준 후보 매칭에 사용
+      try {
+        const skuCodes = [...new Set(result.lines.map(l => l.sku_code).filter(Boolean))];
+        const invMap = await lookupInventoryByProductCode(skuCodes);
+        result.lines.forEach(l => { l.inv_barcode = invMap[l.sku_code]?.barcode || null; });
+      } catch (e) {
+        console.warn("[패킹] inventory 바코드 조회 실패(스타일 매칭 제한):", e);
+      }
       setParsed(result);
       setStep("preview");
     } catch (e) {
@@ -2368,8 +2390,12 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
       const ord = (li.cands.find(c => String(c.order.id) === String(oid)) || {}).order || orders.find(o => String(o.id) === String(oid));
       if (!ord) continue;
       const items = itemsByOrder[ord.id] || [];
+      const lncolor = normalizeColorKey(li.line.color), lnsize = normalizeSizeKey(li.line.size);
       const item = items.find(x => x.sku_code === li.line.sku_code)
-        || items.find(x => baseStyle(x.style_no) === li.groupKey && normalizeSizeKey(x.size) === normalizeSizeKey(li.line.size))
+        // 같은 스타일 + 색상 + 사이즈 (옵션 정확 매칭 우선)
+        || items.find(x => baseStyle(x.style_no) === li.groupKey && normalizeColorKey(x.color) === lncolor && normalizeSizeKey(x.size) === lnsize)
+        // 색상 정보가 부족하면 사이즈만으로
+        || items.find(x => baseStyle(x.style_no) === li.groupKey && normalizeSizeKey(x.size) === lnsize)
         || items[0];
       if (!byOrder[ord.id]) byOrder[ord.id] = { order: ord, lines: [], qty: 0 };
       byOrder[ord.id].lines.push({ ...li.line, item_id: item?.id, item_color: item?.color, item_size: item?.size, first_item_id: items[0]?.id });
