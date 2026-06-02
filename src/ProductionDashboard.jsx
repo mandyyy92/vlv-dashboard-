@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef, useEffect, Fragment } from "react";
 import { sb, SUPABASE_URL, SUPABASE_KEY, sbHeaders } from "./lib/supabaseClient";
 
 // ============================================================
@@ -61,6 +61,8 @@ const STATUS_LABEL = {
 
 const fmt = (n) => (n ?? 0).toLocaleString();
 const pct = (n) => `${(n ?? 0).toFixed(1)}%`;
+// 상품명 공백제거(매칭 키). RPC name_key와 동일 규칙.
+const stripSpaces = (s) => String(s || "").replace(/\s/g, "");
 // 두 날짜의 일수 차이 (to - from). 둘 중 하나라도 없으면 null
 const dayDiff = (from, to) => {
   if (!from || !to) return null;
@@ -401,6 +403,35 @@ async function lookupInventoryByProductCode(skuCodes) {
   }
 }
 
+// 상품명(공백제거 키)으로 상품 썸네일 일괄 조회 (RPC lookup_image_by_name)
+// 입력: 공백제거한 상품명 배열. 반환: { name_key: image_url } 맵.
+async function lookupImagesByNames(nameKeys) {
+  if (!nameKeys || nameKeys.length === 0) return {};
+  const url = `${SUPABASE_URL}/rest/v1/rpc/lookup_image_by_name`;
+  try {
+    const r = await fetch(url, {
+      method: "POST",
+      headers: sbHeaders,
+      body: JSON.stringify({ p_names: nameKeys }),
+    });
+    if (!r.ok) {
+      console.error("[이미지 조회] 실패", r.status, await r.text());
+      return {};
+    }
+    const rows = await r.json();
+    const map = {};
+    for (const row of rows || []) {
+      if (row.name_key && row.image_url && !map[row.name_key]) {
+        map[row.name_key] = row.image_url;
+      }
+    }
+    return map;
+  } catch (e) {
+    console.error("[이미지 조회] 예외", e);
+    return {};
+  }
+}
+
 // ============================================================
 // 엑셀 파서 (PowerShell 스크립트와 동일 로직)
 // ============================================================
@@ -658,6 +689,9 @@ export default function ProductionDashboard() {
   const [showUpload, setShowUpload] = useState(false);
   const [showInbound, setShowInbound] = useState(null);
   const [showPacking, setShowPacking] = useState(false);
+  const [imageMap, setImageMap] = useState({});            // { name_key: image_url }
+  const [vendorFilter, setVendorFilter] = useState("all"); // 'all' | 업체명
+  const [collapsedVendors, setCollapsedVendors] = useState({}); // { 업체명: true=접힘 }
 
   // 데이터 로드
   const reload = async () => {
@@ -691,10 +725,49 @@ export default function ProductionDashboard() {
     });
   }, [orders, itemsByOrder, inboundsByOrder]);
 
+  // 표시되는 오더들의 상품명(공백제거) → 썸네일 일괄 조회
+  useEffect(() => {
+    const keys = [...new Set(
+      enriched.map(o => stripSpaces(o.items[0]?.product_name)).filter(Boolean)
+    )];
+    if (keys.length === 0) { setImageMap({}); return; }
+    let cancelled = false;
+    lookupImagesByNames(keys).then(m => { if (!cancelled) setImageMap(m); });
+    return () => { cancelled = true; };
+  }, [enriched]);
+
+  // 업체 목록 (드롭다운 필터용)
+  const vendorList = useMemo(
+    () => [...new Set(enriched.map(o => o.vendor_name || "미지정"))].sort((a, b) => a.localeCompare(b, "ko")),
+    [enriched]
+  );
+
+  // 상태 탭 AND 업체 필터 적용
   const filtered = useMemo(() => {
-    if (tab === "all" || tab === "analytics") return enriched;
-    return enriched.filter(o => o.status === tab);
-  }, [enriched, tab]);
+    let list = enriched;
+    if (tab !== "all" && tab !== "analytics") list = list.filter(o => o.status === tab);
+    if (vendorFilter !== "all") list = list.filter(o => (o.vendor_name || "미지정") === vendorFilter);
+    return list;
+  }, [enriched, tab, vendorFilter]);
+
+  // 업체별 그룹핑 (그룹 헤더용 합계 포함)
+  const grouped = useMemo(() => {
+    const map = {};
+    filtered.forEach(o => {
+      const key = o.vendor_name || "미지정";
+      (map[key] = map[key] || []).push(o);
+    });
+    return Object.entries(map)
+      .map(([vendor, list]) => {
+        const total = list.reduce((s, o) => s + o.total_qty, 0);
+        const received = list.reduce((s, o) => s + o.received_qty, 0);
+        return { vendor, list, total, received, rate: total ? (received / total) * 100 : 0 };
+      })
+      .sort((a, b) => a.vendor.localeCompare(b.vendor, "ko"));
+  }, [filtered]);
+
+  const toggleVendor = (vendor) =>
+    setCollapsedVendors(prev => ({ ...prev, [vendor]: !prev[vendor] }));
 
   const kpi = useMemo(() => {
     const total = enriched.reduce((s, o) => s + o.total_qty, 0);
@@ -812,64 +885,104 @@ export default function ProductionDashboard() {
       ) : tab === "analytics" ? (
         <AnalyticsPanel orders={enriched} kpi={kpi} />
       ) : (
-        <div style={S.tableWrap}>
-          <table style={S.table}>
-            <thead>
-              <tr style={S.theadRow}>
-                <th style={S.th}>오더 NO</th>
-                <th style={S.th}>스타일 NO</th>
-                <th style={S.th}>상품명</th>
-                <th style={S.th}>업체</th>
-                <th style={S.thR}>총 수량</th>
-                <th style={S.thR}>누적 입고</th>
-                <th style={S.thR}>잔여</th>
-                <th style={S.th}>입고율</th>
-                <th style={S.th}>계약일</th>
-                <th style={S.th}>납기일</th>
-                <th style={S.th}>실제 완료</th>
-                <th style={S.thR}>리드타임</th>
-                <th style={S.th}>상태</th>
-                <th style={S.thR}>액션</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(o => (
-                <tr key={o.id} style={{ ...S.tr, ...(selectedId === o.id ? S.trSelected : {}) }} onClick={() => setSelectedId(o.id)}>
-                  <td style={S.tdMono}>{o.order_no}</td>
-                  <td style={S.tdMono}>{o.items[0]?.style_no || "—"}</td>
-                  <td style={S.tdBold}>{o.items[0]?.product_name || "—"}</td>
-                  <td style={S.td}>{o.vendor_name || "—"}</td>
-                  <td style={S.tdR}>{fmt(o.total_qty)}</td>
-                  <td style={{ ...S.tdR, color: "#0369A1" }}>{fmt(o.received_qty)}</td>
-                  <td style={{ ...S.tdR, color: o.remain_qty > 0 ? "#1F2937" : "#9CA3AF" }}>{fmt(o.remain_qty)}</td>
-                  <td style={S.td}>
-                    <div style={S.progBar}>
-                      <div style={{ ...S.progFill, width: `${o.receive_rate}%`, background: o.status === "delayed" ? "#B91C1C" : o.status === "completed" ? "#15803D" : "#0369A1" }} />
-                    </div>
-                    <div style={S.progLabel}>{pct(o.receive_rate)}</div>
-                  </td>
-                  <td style={S.td}>{o.contract_date ?? "—"}</td>
-                  <td style={S.td}>{o.expected_final_date ?? "—"}</td>
-                  <td style={S.td}>{o.actual_final_date ?? "—"}</td>
-                  <td style={S.tdR}>{o.leadtime_days != null ? `${o.leadtime_days}일` : "—"}</td>
-                  <td style={S.td}>
-                    <span style={{ ...S.badge, color: STATUS_LABEL[o.status].color, background: STATUS_LABEL[o.status].bg }}>
-                      {STATUS_LABEL[o.status].ko}
-                    </span>
-                  </td>
-                  <td style={S.tdR}>
-                    <button style={S.miniBtn} onClick={(e) => { e.stopPropagation(); setShowInbound(o.id); }}>입고 등록</button>
-                  </td>
+        <>
+          {/* 업체 드롭다운 필터 */}
+          <div style={S.filterBar}>
+            <label style={S.filterLabel}>업체</label>
+            <select style={S.filterSelect} value={vendorFilter} onChange={(e) => setVendorFilter(e.target.value)}>
+              <option value="all">전체 업체</option>
+              {vendorList.map(v => <option key={v} value={v}>{v}</option>)}
+            </select>
+            {vendorFilter !== "all" && (
+              <button style={S.filterClear} onClick={() => setVendorFilter("all")}>전체 보기 ✕</button>
+            )}
+          </div>
+
+          <div style={S.tableWrap}>
+            <table style={S.table}>
+              <thead>
+                <tr style={S.theadRow}>
+                  <th style={S.thThumb}></th>
+                  <th style={S.th}>오더 NO</th>
+                  <th style={S.th}>스타일 NO</th>
+                  <th style={S.th}>상품명</th>
+                  <th style={S.th}>업체</th>
+                  <th style={S.thR}>총 수량</th>
+                  <th style={S.thR}>누적 입고</th>
+                  <th style={S.thR}>잔여</th>
+                  <th style={S.th}>입고율</th>
+                  <th style={S.th}>계약일</th>
+                  <th style={S.th}>납기일</th>
+                  <th style={S.th}>실제 완료</th>
+                  <th style={S.thR}>리드타임</th>
+                  <th style={S.th}>상태</th>
+                  <th style={S.thR}>액션</th>
                 </tr>
-              ))}
-              {filtered.length === 0 && (
-                <tr><td colSpan={14} style={S.empty}>
-                  {tab === "all" ? "아직 등록된 오더가 없습니다. 우측 상단 '+ 작업지시서 업로드' 버튼을 눌러주세요." : "해당 상태의 오더가 없습니다"}
-                </td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {grouped.map(g => {
+                  const collapsed = !!collapsedVendors[g.vendor];
+                  return (
+                    <Fragment key={g.vendor}>
+                      <tr style={S.groupRow} onClick={() => toggleVendor(g.vendor)}>
+                        <td colSpan={15} style={S.groupCell}>
+                          <div style={S.groupInner}>
+                            <span style={S.groupCaret}>{collapsed ? "▶" : "▼"}</span>
+                            <span style={S.groupName}>{g.vendor}</span>
+                            <span style={S.groupCount}>{g.list.length}건</span>
+                            <span style={S.groupMeta}>
+                              발주 <b>{fmt(g.total)}</b> · 입고 <b style={{ color: "#0369A1" }}>{fmt(g.received)}</b> · 입고율 <b style={{ color: g.rate >= 100 ? "#15803D" : "#0F172A" }}>{pct(g.rate)}</b>
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                      {!collapsed && g.list.map(o => {
+                        const imgUrl = imageMap[stripSpaces(o.items[0]?.product_name)];
+                        return (
+                          <tr key={o.id} style={{ ...S.tr, ...(selectedId === o.id ? S.trSelected : {}) }} onClick={() => setSelectedId(o.id)}>
+                            <td style={S.tdThumb}><ProductThumb url={imgUrl} /></td>
+                            <td style={S.tdMono}>{o.order_no}</td>
+                            <td style={S.tdMono}>{o.items[0]?.style_no || "—"}</td>
+                            <td style={S.tdBold}>{o.items[0]?.product_name || "—"}</td>
+                            <td style={S.td}>{o.vendor_name || "—"}</td>
+                            <td style={S.tdR}>{fmt(o.total_qty)}</td>
+                            <td style={{ ...S.tdR, color: "#0369A1" }}>{fmt(o.received_qty)}</td>
+                            <td style={{ ...S.tdR, color: o.remain_qty > 0 ? "#1F2937" : "#9CA3AF" }}>{fmt(o.remain_qty)}</td>
+                            <td style={S.td}>
+                              <div style={S.progBar}>
+                                <div style={{ ...S.progFill, width: `${o.receive_rate}%`, background: o.status === "delayed" ? "#B91C1C" : o.status === "completed" ? "#15803D" : "#0369A1" }} />
+                              </div>
+                              <div style={S.progLabel}>{pct(o.receive_rate)}</div>
+                            </td>
+                            <td style={S.td}>{o.contract_date ?? "—"}</td>
+                            <td style={S.td}>{o.expected_final_date ?? "—"}</td>
+                            <td style={S.td}>{o.actual_final_date ?? "—"}</td>
+                            <td style={S.tdR}>{o.leadtime_days != null ? `${o.leadtime_days}일` : "—"}</td>
+                            <td style={S.td}>
+                              <span style={{ ...S.badge, color: STATUS_LABEL[o.status].color, background: STATUS_LABEL[o.status].bg }}>
+                                {STATUS_LABEL[o.status].ko}
+                              </span>
+                            </td>
+                            <td style={S.tdR}>
+                              <button style={S.miniBtn} onClick={(e) => { e.stopPropagation(); setShowInbound(o.id); }}>입고 등록</button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </Fragment>
+                  );
+                })}
+                {filtered.length === 0 && (
+                  <tr><td colSpan={15} style={S.empty}>
+                    {tab === "all" && vendorFilter === "all"
+                      ? "아직 등록된 오더가 없습니다. 우측 상단 '+ 작업지시서 업로드' 버튼을 눌러주세요."
+                      : "조건에 맞는 오더가 없습니다"}
+                  </td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
       {selected && tab !== "analytics" && (
@@ -909,6 +1022,27 @@ export default function ProductionDashboard() {
         />
       )}
     </div>
+  );
+}
+
+// ============================================================
+// 상품 썸네일 (URL 없거나 로드 실패 시 회색 placeholder)
+// ============================================================
+function ProductThumb({ url }) {
+  const [error, setError] = useState(false);
+  // url이 바뀌면 에러 상태 초기화
+  useEffect(() => { setError(false); }, [url]);
+  if (!url || error) {
+    return <div style={S.thumbPlaceholder}>📷</div>;
+  }
+  return (
+    <img
+      src={url}
+      alt=""
+      loading="lazy"
+      style={S.thumbImg}
+      onError={() => setError(true)}
+    />
   );
 }
 
@@ -2154,6 +2288,27 @@ const S = {
   tab: { background: "transparent", border: "none", padding: "9px 18px", borderRadius: 6, fontSize: 14, fontWeight: 500, color: "#64748B", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 },
   tabActive: { background: "#0F172A", color: "white" },
   tabCount: { background: "rgba(0,0,0,0.08)", padding: "1px 7px", borderRadius: 8, fontSize: 12, fontWeight: 600 },
+
+  // 업체 드롭다운 필터 바
+  filterBar: { display: "flex", alignItems: "center", gap: 10, marginBottom: 12 },
+  filterLabel: { fontSize: 12, fontWeight: 600, color: "#64748B", letterSpacing: 0.2 },
+  filterSelect: { padding: "8px 12px", border: "1px solid #CBD5E1", borderRadius: 6, fontSize: 14, color: "#0F172A", background: "white", fontFamily: "inherit", cursor: "pointer", minWidth: 180 },
+  filterClear: { background: "white", color: "#64748B", border: "1px solid #E2E8F0", padding: "7px 12px", borderRadius: 6, fontSize: 12, fontWeight: 500, cursor: "pointer" },
+
+  // 상품 썸네일
+  thThumb: { padding: "12px 12px", width: 36 },
+  tdThumb: { padding: "8px 12px", width: 36 },
+  thumbImg: { width: 36, height: 36, borderRadius: 8, objectFit: "cover", display: "block", background: "#F1F5F9" },
+  thumbPlaceholder: { width: 36, height: 36, borderRadius: 8, background: "#F1F5F9", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, color: "#CBD5E1" },
+
+  // 업체 그룹 헤더 행
+  groupRow: { background: "#F1F5F9", borderBottom: "1px solid #E2E8F0", cursor: "pointer" },
+  groupCell: { padding: 0 },
+  groupInner: { display: "flex", alignItems: "center", gap: 10, padding: "10px 14px" },
+  groupCaret: { fontSize: 10, color: "#94A3B8", width: 12, flexShrink: 0 },
+  groupName: { fontSize: 14, fontWeight: 700, color: "#0F172A" },
+  groupCount: { fontSize: 12, fontWeight: 600, color: "#64748B", background: "white", border: "1px solid #E2E8F0", borderRadius: 8, padding: "1px 8px" },
+  groupMeta: { marginLeft: "auto", fontSize: 13, color: "#475569", fontVariantNumeric: "tabular-nums" },
 
   tableWrap: { background: "white", borderRadius: 10, border: "1px solid #E2E8F0", overflow: "hidden" },
   table: { width: "100%", borderCollapse: "collapse", fontSize: 14 },
