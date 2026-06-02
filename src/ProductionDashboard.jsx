@@ -562,24 +562,28 @@ async function parseWorkorder(file) {
 
     const range = XLSX.utils.decode_range(ws["!ref"] || "A1:Z40");
 
-    // 'STYLE NO' 헤더를 찾아 그 블록에서 스타일NO·상품명·작업처 값을 읽는다.
+    // 'STYLE NO' / 'Style No.' 헤더를 찾아 그 블록에서 스타일NO·상품명·작업처 값을 읽는다(한/영 공통).
     // 상품명은 시트 탭 이름이 아니라 'STYLE NO 값 오른쪽의 상품명 셀'(보통 C5)을 사용.
+    // 영문 양식: B1='WORK ORDER', B4='Style No.', C4='Product Name', D4='Manufacturer' / 값은 B5/C5/D5.
+    // 컬럼 헤더로 인정할 라벨(한·영). 오른쪽 셀이 이 중 하나(또는 빈칸)이면 값은 다음 행에 있음.
+    const HEADER_LABELS = ["상품명", "품명", "작업처", "작업장", "공장", "productname", "manufacturer", "factory", "unitprice", "styleno"];
     let styleNo = null, productName = null, factory = null;
     {
       let sr = 0, sc = 0;
       outerS: for (let r = 1; r <= Math.min(range.e.r + 1, 20); r++) {
         for (let c = 1; c <= range.e.c + 1; c++) {
           const v = cell(r, c);
+          // 'STYLE NO' 또는 'Style No.' (공백/대소문자/마침표 무시)
           if (v && String(v).replace(/\s/g, "").toUpperCase().includes("STYLENO")) {
             sr = r; sc = c; break outerS;
           }
         }
       }
       if (sr > 0) {
-        // 같은 행 오른쪽 셀이 값이면 인라인 라벨, 비었거나 헤더 텍스트면 컬럼 헤더(값은 다음 행)
+        // 같은 행 오른쪽 셀이 값이면 인라인 라벨, 비었거나 헤더 텍스트(한/영)면 컬럼 헤더(값은 다음 행)
         const rightVal = cell(sr, sc + 1);
         const rightTrim = rightVal == null ? "" : String(rightVal).replace(/\s/g, "");
-        const isHeaderRow = rightTrim === "" || ["상품명", "품명", "작업처", "작업장", "공장"].includes(rightTrim);
+        const isHeaderRow = rightTrim === "" || HEADER_LABELS.includes(rightTrim.toLowerCase());
         if (isHeaderRow) {
           styleNo = cell(sr + 1, sc);
           productName = cell(sr + 1, sc + 1);
@@ -598,12 +602,14 @@ async function parseWorkorder(file) {
     }
     if (!styleNo || !String(styleNo).trim()) continue;
 
-    // COLOR 헤더 위치 탐색 (시트를 위→아래 스캔. "COLOR" 뿐 아니라 "COLOR(스와치 컬러)" 등도 인식)
+    // COLOR 헤더 위치 탐색 (위→아래 스캔). 영문 'COLOR'/'Color'(+ "COLOR(스와치 컬러)") 및 한글 '색상'/'컬러' 인식.
     let colorRow = 0, colorCol = 0;
     outer: for (let r = 1; r <= range.e.r + 1; r++) {
       for (let c = 1; c <= range.e.c + 1; c++) {
         const v = cell(r, c);
-        if (v && String(v).trim().toUpperCase().startsWith("COLOR")) {
+        if (!v) continue;
+        const t = String(v).trim();
+        if (t.toUpperCase().startsWith("COLOR") || t.startsWith("색상") || t.startsWith("컬러")) {
           colorRow = r; colorCol = c;
           break outer;
         }
