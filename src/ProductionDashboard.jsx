@@ -1146,7 +1146,8 @@ export default function ProductionDashboard() {
                   <th style={S.thR}>누적 입고</th>
                   <th style={S.thR}>잔여</th>
                   <th style={S.thC}>입고율</th>
-                  <th style={S.th}>입고일</th>
+                  <th style={S.th}>납기 예정일</th>
+                  <th style={S.th}>최종 입고일</th>
                   <th style={S.thR}>리드타임</th>
                   <th style={S.thC}>상태</th>
                   <th style={S.thC}>액션</th>
@@ -1158,7 +1159,7 @@ export default function ProductionDashboard() {
                   return (
                     <Fragment key={g.vendor}>
                       <tr style={S.groupRow} onClick={() => toggleVendor(g.vendor)}>
-                        <td colSpan={12} style={S.groupCell}>
+                        <td colSpan={13} style={S.groupCell}>
                           <div style={S.groupInner}>
                             <span style={S.groupCaret}>{collapsed ? "▶" : "▼"}</span>
                             <span style={S.groupName}>{g.vendor}</span>
@@ -1190,6 +1191,7 @@ export default function ProductionDashboard() {
                               </div>
                               <div style={S.progLabel}>{pct(o.receive_rate)}</div>
                             </td>
+                            <td style={S.td}>{o.expected_final_date ?? "—"}</td>
                             <td style={S.td}>{o.actual_final_date ?? "—"}</td>
                             <td style={S.tdR}>{o.leadtime_days != null ? `${o.leadtime_days}일` : "—"}</td>
                             <td style={S.tdC}>
@@ -1207,7 +1209,7 @@ export default function ProductionDashboard() {
                   );
                 })}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={12} style={S.empty}>
+                  <tr><td colSpan={13} style={S.empty}>
                     {tab === "all" && vendorFilter === "all"
                       ? "아직 등록된 오더가 없습니다. 우측 상단 '+ 작업지시서 업로드' 버튼을 눌러주세요."
                       : "조건에 맞는 오더가 없습니다"}
