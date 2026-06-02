@@ -1301,8 +1301,10 @@ function OrderDrawer({ order, onClose, onAddInbound, onDelete, onUpdate, onDelet
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <div style={S.drawerCardHead}>⏱ 일정</div>
-                  {!editing && delay != null && delay > 0 && (
-                    <span style={{ ...S.delayBadge, color: "#B91C1C", background: "#FEE2E2" }}>납기 대비 {delay}일 지연</span>
+                  {!editing && delay != null && (
+                    delay > 0
+                      ? <span style={{ ...S.delayBadge, color: "#B91C1C", background: "#FEE2E2" }}>납기 대비 {delay}일 지연</span>
+                      : <span style={{ ...S.delayBadge, color: "#15803D", background: "#DCFCE7" }}>납기 준수</span>
                   )}
                   {!editing && (
                     <span style={S.leadtimeInline}>리드타임 <strong style={{ color: "#0369A1" }}>{order.leadtime_days != null ? `${order.leadtime_days}일` : "미완료"}</strong></span>
