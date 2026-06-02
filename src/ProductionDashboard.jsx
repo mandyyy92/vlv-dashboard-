@@ -321,6 +321,9 @@ async function lookupInventoryByNameAndOption(productNameEn, color, size) {
     `[${colorKr}-${sizeSimple}]`,
     `[${colorKr}-${sizeKr}]`,
   ];
+  // 사이즈가 FREE/F/빈값일 때 색상만 패턴도 추가 (inventory는 FREE 상품을 '[멜란지]'처럼 사이즈 없이 저장)
+  const s = sizeSimple;
+  if (!s || ["FREE", "F", "없음", "-"].includes(s)) optionPatterns.push(`[${colorKr}]`);
   const uniquePatterns = [...new Set(optionPatterns)];
 
   const url = `${SUPABASE_URL}/rest/v1/rpc/lookup_inventory_by_name_option`;
