@@ -2143,15 +2143,80 @@ function InboundModal({ order, onClose, onSubmit }) {
 // 패킹리스트 자동 입고 등록 모달
 // ============================================================
 function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onComplete }) {
-  const [step, setStep] = useState("select"); // select | parsing | matching | preview | uploading
+  const [step, setStep] = useState("select"); // select | parsing | preview | uploading
   const [file, setFile] = useState(null);
   const [parsed, setParsed] = useState(null);
-  const [matched, setMatched] = useState(null); // 매칭 결과
   const [error, setError] = useState(null);
   const [inboundDate, setInboundDate] = useState(""); // 실제 완료일(입고일). 미입력 시 등록 시점에 오늘로 fallback
   const [memo, setMemo] = useState("");
+  const [seasonSel, setSeasonSel] = useState("all"); // 후보 오더 시즌 한정
+  const [vendorSel, setVendorSel] = useState("all");  // 후보 오더 업체 한정
+  const [lineAssign, setLineAssign] = useState({});   // lineIdx → order_id ("" = 미배정)
 
-  // sku_code → order_id, item_id 인덱스 만들기
+  const baseStyle = (s) => String(s || "").replace(/\s*-\s*\d+\s*$/, "").trim();
+  const seasonOf = (o) => (o.season || String(o.order_no || "").split("-")[1] || "").trim() || "미지정";
+  const inScope = (ord) =>
+    (seasonSel === "all" || seasonOf(ord) === seasonSel) &&
+    (vendorSel === "all" || (ord.vendor_name || "미지정") === vendorSel);
+
+  // 시즌/업체 드롭다운 옵션 (전체 오더 기준)
+  const seasonOptions = useMemo(() => [...new Set(orders.map(seasonOf))].sort((a, b) => a.localeCompare(b, "ko")), [orders]);
+  const vendorOptions = useMemo(() => [...new Set(orders.map(o => o.vendor_name || "미지정"))].sort((a, b) => a.localeCompare(b, "ko")), [orders]);
+
+  // sku_code → 후보 {order, item} 전체
+  const skuToCands = useMemo(() => {
+    const m = {};
+    for (const ord of orders) {
+      for (const it of (itemsByOrder[ord.id] || [])) {
+        if (!it.sku_code) continue;
+        (m[it.sku_code] = m[it.sku_code] || []).push({ order: ord, item: it });
+      }
+    }
+    return m;
+  }, [orders, itemsByOrder]);
+
+  // 라인별: 시즌·업체 스코프 내 후보 오더 + 스타일 그룹키
+  const lineInfos = useMemo(() => {
+    if (!parsed) return [];
+    return parsed.lines.map((line, idx) => {
+      const cands = (skuToCands[line.sku_code] || []).filter(c => inScope(c.order));
+      const groupKey = cands.length ? (baseStyle(cands[0].item.style_no) || `__sku_${line.sku_code}`) : `__none_${idx}`;
+      return { idx, line, cands, groupKey };
+    });
+  }, [parsed, skuToCands, seasonSel, vendorSel]);
+
+  // 기본 배정: 같은 스타일 그룹은 사이즈를 가장 많이 커버하는 단일 오더로(쪼개짐 방지). 스코프 바뀌면 재계산.
+  useEffect(() => {
+    if (!parsed) return;
+    const byGroup = {};
+    for (const li of lineInfos) (byGroup[li.groupKey] = byGroup[li.groupKey] || []).push(li);
+    const assign = {};
+    for (const [gkey, infos] of Object.entries(byGroup)) {
+      const pool = {};
+      for (const li of infos) for (const c of li.cands) pool[c.order.id] = c.order;
+      const poolArr = Object.values(pool);
+      if (poolArr.length === 0) { infos.forEach(li => { assign[li.idx] = ""; }); continue; }
+      const scoreOf = (ord) => {
+        const items = itemsByOrder[ord.id] || [];
+        const skuSet = new Set(items.map(it => it.sku_code));
+        const covered = infos.filter(li => skuSet.has(li.line.sku_code)).length;
+        const styleQty = items.filter(it => baseStyle(it.style_no) === gkey).reduce((s, it) => s + (it.order_qty || 0), 0);
+        return { covered, styleQty };
+      };
+      const chosen = poolArr.sort((a, b) => {
+        const sa = scoreOf(a), sb = scoreOf(b);
+        if (sb.covered !== sa.covered) return sb.covered - sa.covered;
+        if (sb.styleQty !== sa.styleQty) return sb.styleQty - sa.styleQty;
+        return String(a.order_no || "").localeCompare(String(b.order_no || ""));
+      })[0];
+      infos.forEach(li => {
+        const ok = li.cands.some(c => c.order.id === chosen.id);
+        assign[li.idx] = ok ? chosen.id : (li.cands[0]?.order.id ?? "");
+      });
+    }
+    setLineAssign(assign);
+  }, [lineInfos]);
+
   const handleFile = async (f) => {
     setFile(f);
     // 파일명 앞쪽 6자리(YYMMDD)에서 입고일/실제 완료일 자동 추출 (예: 260212_… → 2026-02-12)
@@ -2159,9 +2224,7 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
     if (dm) {
       const yy = dm[1].slice(0, 2), mm = dm[1].slice(2, 4), dd = dm[1].slice(4, 6);
       const mi = parseInt(mm, 10), di = parseInt(dd, 10);
-      if (mi >= 1 && mi <= 12 && di >= 1 && di <= 31) {
-        setInboundDate(`20${yy}-${mm}-${dd}`);
-      }
+      if (mi >= 1 && mi <= 12 && di >= 1 && di <= 31) setInboundDate(`20${yy}-${mm}-${dd}`);
     }
     setStep("parsing");
     setError(null);
@@ -2173,94 +2236,6 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
         return;
       }
       setParsed(result);
-
-      // 매칭 분석
-      setStep("matching");
-      
-      // 각 라인을 sku_code로 매칭하되, 같은 상품(스타일NO 기준)의 라인은 같은 오더로 모은다.
-      // (버그: 같은 sku_code가 여러 오더에 중복 등록되면 사이즈별로 다른 오더에 흩어짐)
-      const matchedByOrder = {}; // order_id -> { order, lines: [...], qty }
-      const unmatchedLines = [];
-
-      // 1) sku_code → 후보 {order, item} 목록 전체 (덮어쓰지 않고 모두 보관)
-      const skuToCands = {};
-      for (const ord of orders) {
-        for (const it of (itemsByOrder[ord.id] || [])) {
-          if (!it.sku_code) continue;
-          (skuToCands[it.sku_code] = skuToCands[it.sku_code] || []).push({ order: ord, item: it });
-        }
-      }
-      // 스타일NO 기준 그룹키: 끝의 ' - N' 접미사 제거 (예: 'V25FT01UB500 - 2' → 'V25FT01UB500')
-      const baseStyle = (s) => String(s || "").replace(/\s*-\s*\d+\s*$/, "").trim();
-
-      // 2) 라인별 후보 수집 + 스타일 그룹키 결정
-      const lineEntries = []; // { line, groupKey }
-      for (const line of result.lines) {
-        const cands = skuToCands[line.sku_code] || [];
-        if (cands.length === 0) { unmatchedLines.push(line); continue; }
-        const groupKey = baseStyle(cands[0].item.style_no) || `__sku_${line.sku_code}`;
-        lineEntries.push({ line, groupKey });
-      }
-
-      // 3) 스타일 그룹별로 단일 오더 선택 → 그룹의 모든 라인을 그 오더에 할당
-      const byGroup = {};
-      for (const e of lineEntries) (byGroup[e.groupKey] = byGroup[e.groupKey] || []).push(e);
-
-      for (const [gkey, entries] of Object.entries(byGroup)) {
-        // 후보 오더 풀: 그룹 라인들의 모든 후보 오더
-        const orderPool = {};
-        for (const e of entries) for (const c of (skuToCands[e.line.sku_code] || [])) orderPool[c.order.id] = c.order;
-
-        // 점수: (그룹 라인을 sku로 커버하는 수) 우선 → (그 스타일 발주수량 합) → 오더 NO
-        const scoreOf = (ord) => {
-          const items = itemsByOrder[ord.id] || [];
-          const skuSet = new Set(items.map(it => it.sku_code));
-          const covered = entries.filter(e => skuSet.has(e.line.sku_code)).length;
-          const styleQty = items.filter(it => baseStyle(it.style_no) === gkey).reduce((s, it) => s + (it.order_qty || 0), 0);
-          return { covered, styleQty };
-        };
-        const chosen = Object.values(orderPool).sort((a, b) => {
-          const sa = scoreOf(a), sb = scoreOf(b);
-          if (sb.covered !== sa.covered) return sb.covered - sa.covered;   // 더 많은 사이즈 커버 우선
-          if (sb.styleQty !== sa.styleQty) return sb.styleQty - sa.styleQty; // 그 스타일 발주량 큰 오더 우선
-          return String(a.order_no || "").localeCompare(String(b.order_no || ""));
-        })[0];
-
-        const chosenItems = itemsByOrder[chosen.id] || [];
-        // 선택 오더 내에서 라인에 대응하는 아이템: 정확 sku → 같은 스타일+사이즈 → 첫 아이템
-        const findItem = (line) =>
-          chosenItems.find(x => x.sku_code === line.sku_code)
-          || chosenItems.find(x => baseStyle(x.style_no) === gkey && normalizeSizeKey(x.size) === normalizeSizeKey(line.size))
-          || chosenItems[0];
-
-        if (!matchedByOrder[chosen.id]) {
-          matchedByOrder[chosen.id] = { order: chosen, first_item_id: chosenItems[0]?.id, lines: [], qty: 0 };
-        }
-        for (const e of entries) {
-          const it = findItem(e.line);
-          // 매칭된 오더 아이템의 색상/사이즈를 함께 보관 → 매트릭스 셀 키(it.color||it.size)와 정확히 일치
-          matchedByOrder[chosen.id].lines.push({
-            ...e.line,
-            item_id: it?.id,
-            item_color: it?.color,
-            item_size: it?.size,
-          });
-          matchedByOrder[chosen.id].qty += e.line.qty;
-        }
-      }
-
-      // 각 매칭된 오더의 다음 차수 계산
-      const matchedOrderList = Object.values(matchedByOrder).map(m => {
-        const existing = (inboundsByOrder[m.order.id] || []).length;
-        return { ...m, next_round: existing + 1 };
-      });
-
-      setMatched({
-        matched_orders: matchedOrderList,
-        unmatched_lines: unmatchedLines,
-        matched_qty: matchedOrderList.reduce((s, m) => s + m.qty, 0),
-        unmatched_qty: unmatchedLines.reduce((s, l) => s + l.qty, 0),
-      });
       setStep("preview");
     } catch (e) {
       console.error(e);
@@ -2269,12 +2244,28 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
     }
   };
 
-  const handleConfirm = async () => {
-    if (matched.matched_orders.length === 0) {
-      alert("매칭된 오더가 없어 입고 등록을 진행할 수 없습니다.");
-      return;
+  // 라인별 배정(lineAssign)을 오더 단위로 묶음 → 등록용 구조
+  const buildTargets = () => {
+    const byOrder = {}; // order_id → { order, lines, qty }
+    for (const li of lineInfos) {
+      const oid = lineAssign[li.idx];
+      if (!oid) continue;
+      const ord = (li.cands.find(c => String(c.order.id) === String(oid)) || {}).order || orders.find(o => String(o.id) === String(oid));
+      if (!ord) continue;
+      const items = itemsByOrder[ord.id] || [];
+      const item = items.find(x => x.sku_code === li.line.sku_code)
+        || items.find(x => baseStyle(x.style_no) === li.groupKey && normalizeSizeKey(x.size) === normalizeSizeKey(li.line.size))
+        || items[0];
+      if (!byOrder[ord.id]) byOrder[ord.id] = { order: ord, lines: [], qty: 0 };
+      byOrder[ord.id].lines.push({ ...li.line, item_id: item?.id, item_color: item?.color, item_size: item?.size, first_item_id: items[0]?.id });
+      byOrder[ord.id].qty += li.line.qty;
     }
-    // 미입력 시에만 오늘 날짜로 fallback
+    return Object.values(byOrder).map(t => ({ ...t, next_round: (inboundsByOrder[t.order.id] || []).length + 1 }));
+  };
+
+  const handleConfirm = async () => {
+    const targets = buildTargets();
+    if (targets.length === 0) { alert("배정된 라인이 없습니다. 라인별 대상 오더를 선택하세요."); return; }
     const finalDate = inboundDate || new Date().toISOString().slice(0, 10);
     setStep("uploading");
     try {
@@ -2282,52 +2273,36 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
       let packingUrl = null;
       const ext = file.name.split(".").pop();
       const safeName = `PL_${Date.now()}.${ext}`;
-      const uploadUrl = `${SUPABASE_URL}/storage/v1/object/packing-lists/${safeName}`;
-      const upR = await fetch(uploadUrl, {
+      const upR = await fetch(`${SUPABASE_URL}/storage/v1/object/packing-lists/${safeName}`, {
         method: "POST",
-        headers: {
-          "Authorization": `Bearer ${SUPABASE_KEY}`,
-          "apikey": SUPABASE_KEY,
-          "Content-Type": file.type || "application/octet-stream",
-          "x-upsert": "true",
-        },
+        headers: { "Authorization": `Bearer ${SUPABASE_KEY}`, "apikey": SUPABASE_KEY, "Content-Type": file.type || "application/octet-stream", "x-upsert": "true" },
         body: file,
       });
-      if (upR.ok) {
-        packingUrl = `${SUPABASE_URL}/storage/v1/object/public/packing-lists/${safeName}`;
-      }
+      if (upR.ok) packingUrl = `${SUPABASE_URL}/storage/v1/object/public/packing-lists/${safeName}`;
 
-      // 2) 각 오더에 차수별 입고 등록 + 실제 완료일(입고일)을 오더에 반영
-      for (const m of matched.matched_orders) {
-        // 2-1) 기존 차수 총량 입고 (누적입고/입고율 계산 로직은 그대로 inbound_history 사용)
+      // 2) 오더별 차수 총량 입고(inbound_history) + 옵션별 라인(inbound_lines)
+      for (const t of targets) {
         await insertInbound({
-          order_id: m.order.id,
-          item_id: m.first_item_id,
-          inbound_round: m.next_round,
+          order_id: t.order.id,
+          item_id: t.lines[0]?.first_item_id ?? t.lines[0]?.item_id,
+          inbound_round: t.next_round,
           inbound_date: finalDate,
-          qty: m.qty,
-          memo: memo || `패킹리스트 자동 등록 - ${file.name}`,
+          qty: t.qty,
+          memo: memo || `패킹리스트 등록 - ${file.name}`,
           packing_list_url: packingUrl,
           packing_list_name: file.name,
         });
-        // 2-2) 옵션(색상×사이즈)별 입고 라인을 inbound_lines 에 병행 적재 (매트릭스 표시용)
-        // 실제 테이블 스키마(전부 영문 컬럼): order_id, round, inbound_date, color, size, qty
-        const lineRows = m.lines.map(l => ({
-          order_id: m.order.id,
-          round: m.next_round,
+        const lineRows = t.lines.map(l => ({
+          order_id: t.order.id,
+          round: t.next_round,
           inbound_date: finalDate,
-          // 매트릭스 발주 키와 동일 표현(한글 색상/표준 사이즈)으로 정규화해 저장
           color: normalizeColorKey(l.item_color ?? l.color),
           size: normalizeSizeKey(l.item_size ?? l.size),
           qty: l.qty,
         }));
-        try {
-          await insertInboundLines(lineRows);
-        } catch (e) {
-          // 라인 적재 실패해도 차수 총량 입고는 유효하므로 진행 (콘솔에만 기록)
-          console.error("[입고 라인 적재 실패]", e);
-        }
-        await updateOrder(m.order.id, { actual_final_date: finalDate });
+        try { await insertInboundLines(lineRows); }
+        catch (e) { console.error("[입고 라인 적재 실패]", e); }
+        await updateOrder(t.order.id, { actual_final_date: finalDate });
       }
       onComplete();
     } catch (e) {
@@ -2336,6 +2311,12 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
     }
   };
 
+  // 미리보기 집계
+  const assignedCount = lineInfos.filter(li => lineAssign[li.idx]).length;
+  const noCandCount = lineInfos.filter(li => li.cands.length === 0).length;
+  const targetOrderCount = new Set(lineInfos.map(li => lineAssign[li.idx]).filter(Boolean)).size;
+  const assignedQty = lineInfos.filter(li => lineAssign[li.idx]).reduce((s, li) => s + li.line.qty, 0);
+
   return (
     <>
       <div style={S.modalBackdrop} onClick={step !== "uploading" ? onClose : undefined} />
@@ -2343,7 +2324,7 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
         <div style={S.modalHeader}>
           <div>
             <div style={S.modalTitle}>📦 패킹리스트 업로드</div>
-            <div style={S.modalSubtitle}>SKU 코드로 자동 매칭하여 차수별 입고 등록</div>
+            <div style={S.modalSubtitle}>시즌·업체로 후보를 좁히고 라인별 대상 오더를 확정해 입고 등록</div>
           </div>
           <button style={S.iconBtn} onClick={onClose} disabled={step === "uploading"}>✕</button>
         </div>
@@ -2374,40 +2355,53 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
             </div>
           )}
 
-          {step === "matching" && (
-            <div style={S.parsing}>
-              <div style={S.spinner} />
-              <div style={S.parsingText}>SKU 매칭 중...</div>
-              <div style={S.parsingSub}>등록된 오더와 자동 연결합니다</div>
-            </div>
-          )}
-
           {step === "uploading" && (
             <div style={S.parsing}>
               <div style={S.spinner} />
-              <div style={S.parsingText}>차수별 입고 등록 중...</div>
-              <div style={S.parsingSub}>{matched?.matched_orders.length}개 오더에 입고 추가</div>
+              <div style={S.parsingText}>입고 등록 중...</div>
+              <div style={S.parsingSub}>{targetOrderCount}개 오더에 입고 추가</div>
             </div>
           )}
 
-          {step === "preview" && parsed && matched && (
+          {step === "preview" && parsed && (
             <div>
+              {/* 시즌 · 업체 한정 */}
+              <div style={S.previewSection}>
+                <div style={S.previewSectionTitle}>🎯 후보 오더 범위</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <div>
+                    <div style={S.dimLabel}>시즌</div>
+                    <select style={S.formInput} value={seasonSel} onChange={e => setSeasonSel(e.target.value)}>
+                      <option value="all">전체 시즌</option>
+                      {seasonOptions.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <div style={S.dimLabel}>업체</div>
+                    <select style={S.formInput} value={vendorSel} onChange={e => setVendorSel(e.target.value)}>
+                      <option value="all">전체 업체</option>
+                      {vendorOptions.map(v => <option key={v} value={v}>{v}</option>)}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
               <div style={S.previewKpi}>
                 <div style={S.previewKpiBox}>
                   <div style={S.previewKpiLabel}>패킹리스트 라인</div>
                   <div style={S.previewKpiVal}>{parsed.line_count}</div>
                 </div>
                 <div style={S.previewKpiBox}>
-                  <div style={S.previewKpiLabel}>총 수량</div>
-                  <div style={S.previewKpiVal}>{fmt(parsed.total_qty)}<span style={S.previewKpiUnit}>장</span></div>
+                  <div style={S.previewKpiLabel}>배정 라인</div>
+                  <div style={{ ...S.previewKpiVal, color: "#15803D" }}>{assignedCount}</div>
                 </div>
                 <div style={S.previewKpiBox}>
-                  <div style={S.previewKpiLabel}>매칭된 수량</div>
-                  <div style={{ ...S.previewKpiVal, color: "#15803D" }}>{fmt(matched.matched_qty)}<span style={S.previewKpiUnit}>장</span></div>
+                  <div style={S.previewKpiLabel}>배정 수량</div>
+                  <div style={S.previewKpiVal}>{fmt(assignedQty)}<span style={S.previewKpiUnit}>장</span></div>
                 </div>
                 <div style={S.previewKpiBox}>
-                  <div style={S.previewKpiLabel}>미매칭</div>
-                  <div style={{ ...S.previewKpiVal, color: matched.unmatched_qty > 0 ? "#B91C1C" : "#94A3B8" }}>{fmt(matched.unmatched_qty)}<span style={S.previewKpiUnit}>장</span></div>
+                  <div style={S.previewKpiLabel}>후보 없음</div>
+                  <div style={{ ...S.previewKpiVal, color: noCandCount > 0 ? "#B91C1C" : "#94A3B8" }}>{noCandCount}</div>
                 </div>
               </div>
 
@@ -2427,47 +2421,51 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
                 </div>
               </div>
 
-              {/* 매칭된 오더 리스트 */}
-              {matched.matched_orders.length > 0 && (
-                <div style={S.previewSection}>
-                  <div style={S.previewSectionTitle}>✅ 자동 입고 등록 예정 ({matched.matched_orders.length}개 오더)</div>
-                  <div style={S.previewList}>
-                    {matched.matched_orders.map((m, i) => (
-                      <div key={i} style={{ ...S.previewRow, gridTemplateColumns: "1fr 1.5fr 60px 80px" }}>
-                        <span style={S.previewSheet}>{m.order.order_no}</span>
-                        <span style={{ ...S.previewSheet, fontSize: 11, color: "#475569" }}>
-                          {m.lines[0].product_name} ({m.lines.length} SKU)
-                        </span>
-                        <span style={{ fontSize: 11, color: "#0369A1", fontWeight: 600 }}>{m.next_round}차</span>
-                        <span style={S.previewQty}>{fmt(m.qty)} 장</span>
+              {/* 라인별 대상 오더 선택 */}
+              <div style={S.previewSection}>
+                <div style={S.previewSectionTitle}>🔗 라인별 대상 오더 ({assignedCount}/{lineInfos.length} 배정 · {targetOrderCount}개 오더)</div>
+                <div style={{ ...S.previewList, maxHeight: 280 }}>
+                  {lineInfos.map(li => {
+                    const ambiguous = li.cands.length > 1;
+                    const none = li.cands.length === 0;
+                    const opt = (li.line.color || "") + (li.line.size ? `-${li.line.size}` : "");
+                    return (
+                      <div key={li.idx} style={{ ...S.plLineRow, ...(none ? S.plLineNone : ambiguous ? S.plLineAmbiguous : {}) }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "#1F2937", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{li.line.product_name || "—"}</div>
+                          <div style={{ fontSize: 11, color: "#64748B" }}>{li.line.sku_code} · {opt || "—"} · {fmt(li.line.qty)}장{ambiguous ? ` · 후보 ${li.cands.length}` : ""}</div>
+                        </div>
+                        {none ? (
+                          <span style={{ fontSize: 11, color: "#B91C1C", fontWeight: 600, whiteSpace: "nowrap" }}>후보 없음</span>
+                        ) : (
+                          <select style={S.plSelect} value={lineAssign[li.idx] ?? ""} onChange={e => setLineAssign(prev => ({ ...prev, [li.idx]: e.target.value }))}>
+                            <option value="">미등록</option>
+                            {li.cands.map(c => (
+                              <option key={c.order.id} value={c.order.id}>
+                                {c.order.order_no} · {c.order.vendor_name || "—"}
+                              </option>
+                            ))}
+                          </select>
+                        )}
                       </div>
-                    ))}
-                  </div>
+                    );
+                  })}
                 </div>
-              )}
-
-              {/* 미매칭 라인 */}
-              {matched.unmatched_lines.length > 0 && (
-                <div style={S.previewSection}>
-                  <div style={S.previewSectionTitle}>⚠️ 매칭 실패 ({matched.unmatched_lines.length}개 라인 / {fmt(matched.unmatched_qty)}장)</div>
-                  <div style={S.previewSkipped}>
-                    {[...new Set(matched.unmatched_lines.map(l => `${l.sku_code} (${l.product_name})`))].slice(0, 10).join(" · ")}
-                    {matched.unmatched_lines.length > 10 && ` ... 외 ${matched.unmatched_lines.length - 10}건`}
-                    <div style={{ marginTop: 6, fontSize: 10 }}>
-                      이 SKU들은 등록된 오더에 없어 입고가 자동 등록되지 않습니다. 작업지시서 업로드를 먼저 확인해주세요.
-                    </div>
+                {noCandCount > 0 && (
+                  <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 6 }}>
+                    '후보 없음' 라인은 현재 시즌·업체 범위에 매칭 오더가 없습니다. 범위를 넓히거나 작업지시서 등록을 확인하세요.
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           )}
         </div>
 
-        {step === "preview" && matched && matched.matched_orders.length > 0 && (
+        {step === "preview" && (
           <div style={S.modalFooter}>
             <button style={S.ghostBtn} onClick={onClose}>취소</button>
-            <button style={S.primaryBtn} onClick={handleConfirm}>
-              {matched.matched_orders.length}개 오더에 입고 등록
+            <button style={S.primaryBtn} onClick={handleConfirm} disabled={assignedCount === 0}>
+              {targetOrderCount}개 오더에 입고 등록
             </button>
           </div>
         )}
@@ -2792,6 +2790,11 @@ const S = {
   previewSectionTitle: { fontSize: 13, fontWeight: 600, color: "#475569", marginBottom: 8 },
   previewList: { background: "#F8FAFC", borderRadius: 8, border: "1px solid #E2E8F0", maxHeight: 200, overflowY: "auto" },
   previewRow: { display: "grid", gridTemplateColumns: "1.5fr 1.5fr 1fr", padding: "9px 14px", fontSize: 13, borderBottom: "1px solid #E2E8F0", alignItems: "center" },
+  // 라인별 대상 오더 선택 행
+  plLineRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "9px 14px", borderBottom: "1px solid #E2E8F0" },
+  plLineAmbiguous: { background: "#FEF9C3" }, // 후보 여러 개(모호) 강조
+  plLineNone: { background: "#FEE2E2" },      // 후보 없음
+  plSelect: { padding: "6px 8px", border: "1px solid #CBD5E1", borderRadius: 6, fontSize: 12, color: "#0F172A", background: "white", fontFamily: "inherit", cursor: "pointer", maxWidth: 220, flexShrink: 0 },
   previewSheet: { color: "#1F2937", fontWeight: 500 },
   previewStyle: { color: "#64748B", fontFamily: "'JetBrains Mono', monospace", fontSize: 12 },
   previewQty: { textAlign: "right", color: "#0369A1", fontWeight: 600, fontVariantNumeric: "tabular-nums" },
