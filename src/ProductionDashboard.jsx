@@ -775,6 +775,7 @@ export default function ProductionDashboard() {
   const [imageMap, setImageMap] = useState({});            // { name_key: image_url }
   const [vendorFilter, setVendorFilter] = useState("all"); // 'all' | 업체명
   const [seasonFilter, setSeasonFilter] = useState("all"); // 'all' | 시즌(26SS 등)
+  const [search, setSearch] = useState(""); // 상품명/스타일NO/오더NO 검색
   const [collapsedVendors, setCollapsedVendors] = useState({}); // { 업체명: true=접힘 }
 
   // 데이터 로드
@@ -862,13 +863,21 @@ export default function ProductionDashboard() {
     [scoped]
   );
 
-  // 시즌 AND 상태 탭 AND 업체 필터 적용
+  // 시즌 AND 상태 탭 AND 업체 AND 검색어 필터 적용
   const filtered = useMemo(() => {
     let list = scoped;
     if (tab !== "all" && tab !== "analytics") list = list.filter(o => o.status === tab);
     if (vendorFilter !== "all") list = list.filter(o => (o.vendor_name || "미지정") === vendorFilter);
+    const q = String(search || "").replace(/\s/g, "").toLowerCase();
+    if (q) {
+      list = list.filter(o => {
+        const hay = [o.items[0]?.product_name, o.items[0]?.style_no, o.order_no, o.display_no]
+          .map(v => String(v || "").replace(/\s/g, "").toLowerCase()).join("|");
+        return hay.includes(q);
+      });
+    }
     return list;
-  }, [scoped, tab, vendorFilter]);
+  }, [scoped, tab, vendorFilter, search]);
 
   // 등록 순(오름차순) 비교: created_at → 없으면 id → 없으면 오더 NO 끝 숫자(PO-26SS-NNN)
   const byRegistrationAsc = (a, b) => {
@@ -1056,7 +1065,7 @@ export default function ProductionDashboard() {
         <AnalyticsPanel orders={scoped} kpi={kpi} />
       ) : (
         <>
-          {/* 업체 드롭다운 필터 */}
+          {/* 업체 드롭다운 + 상품명 검색 */}
           <div style={S.filterBar}>
             <label style={S.filterLabel}>업체</label>
             <select style={S.filterSelect} value={vendorFilter} onChange={(e) => setVendorFilter(e.target.value)}>
@@ -1066,6 +1075,13 @@ export default function ProductionDashboard() {
             {vendorFilter !== "all" && (
               <button style={S.filterClear} onClick={() => setVendorFilter("all")}>전체 보기 ✕</button>
             )}
+            <input
+              style={S.searchInput}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="상품명 검색 (예: 레글런)"
+            />
+            {search && <button style={S.filterClear} onClick={() => setSearch("")}>✕</button>}
           </div>
 
           <div style={S.tableWrap}>
@@ -1076,7 +1092,6 @@ export default function ProductionDashboard() {
                   <th style={S.th}>오더 NO</th>
                   <th style={S.th}>스타일 NO</th>
                   <th style={S.th}>상품명</th>
-                  <th style={S.th}>업체</th>
                   <th style={S.thR}>총 수량</th>
                   <th style={S.thR}>누적 입고</th>
                   <th style={S.thR}>잔여</th>
@@ -1093,7 +1108,7 @@ export default function ProductionDashboard() {
                   return (
                     <Fragment key={g.vendor}>
                       <tr style={S.groupRow} onClick={() => toggleVendor(g.vendor)}>
-                        <td colSpan={13} style={S.groupCell}>
+                        <td colSpan={12} style={S.groupCell}>
                           <div style={S.groupInner}>
                             <span style={S.groupCaret}>{collapsed ? "▶" : "▼"}</span>
                             <span style={S.groupName}>{g.vendor}</span>
@@ -1116,7 +1131,6 @@ export default function ProductionDashboard() {
                             <td style={S.tdMono}>{o.display_no}</td>
                             <td style={S.tdMono}>{o.items[0]?.style_no || "—"}</td>
                             <td style={S.tdBold}>{o.items[0]?.product_name || "—"}</td>
-                            <td style={S.td}>{o.vendor_name || "—"}</td>
                             <td style={S.tdR}>{fmt(o.total_qty)}</td>
                             <td style={{ ...S.tdR, color: "#0369A1" }}>{fmt(o.received_qty)}</td>
                             <td style={{ ...S.tdR, color: o.remain_qty > 0 ? "#1F2937" : "#9CA3AF" }}>{fmt(o.remain_qty)}</td>
@@ -1143,7 +1157,7 @@ export default function ProductionDashboard() {
                   );
                 })}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={13} style={S.empty}>
+                  <tr><td colSpan={12} style={S.empty}>
                     {tab === "all" && vendorFilter === "all"
                       ? "아직 등록된 오더가 없습니다. 우측 상단 '+ 작업지시서 업로드' 버튼을 눌러주세요."
                       : "조건에 맞는 오더가 없습니다"}
@@ -2654,6 +2668,7 @@ const S = {
   filterLabel: { fontSize: 12, fontWeight: 600, color: "#64748B", letterSpacing: 0.2 },
   filterSelect: { padding: "8px 12px", border: "1px solid #CBD5E1", borderRadius: 6, fontSize: 14, color: "#0F172A", background: "white", fontFamily: "inherit", cursor: "pointer", minWidth: 180 },
   filterClear: { background: "white", color: "#64748B", border: "1px solid #E2E8F0", padding: "7px 12px", borderRadius: 6, fontSize: 12, fontWeight: 500, cursor: "pointer" },
+  searchInput: { marginLeft: "auto", padding: "8px 12px", border: "1px solid #CBD5E1", borderRadius: 6, fontSize: 14, color: "#0F172A", background: "white", fontFamily: "inherit", minWidth: 240 },
 
   // 상품 썸네일
   thThumb: { padding: "12px 12px", width: 36, textAlign: "center", verticalAlign: "middle" },
