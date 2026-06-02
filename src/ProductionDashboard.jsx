@@ -124,6 +124,31 @@ async function deleteInbound(id) {
   const r = await fetch(`${PO_API}/inbound_history?id=eq.${id}`, { method: "DELETE", headers: sbHeaders });
   if (!r.ok) throw new Error("입고 기록 삭제 실패");
 }
+// 입고 이력 여러 건을 id 기준으로 삭제. id in.(...) 일괄 삭제 시도 후,
+// 0건 삭제되면 id 하나씩 루프 delete로 폴백. 삭제된 건수를 반환.
+async function deleteInbounds(ids) {
+  const list = [...new Set((ids || []).filter(v => v != null))];
+  if (list.length === 0) return 0;
+  // 1차: in.(...) 일괄 삭제 (sbHeaders가 Prefer: return=representation 이라 삭제된 행을 반환)
+  try {
+    const r = await fetch(`${PO_API}/inbound_history?id=in.(${list.join(",")})`, { method: "DELETE", headers: sbHeaders });
+    if (r.ok) {
+      const rows = await r.json().catch(() => null);
+      if (Array.isArray(rows) && rows.length > 0) return rows.length;
+      // 0건이면 폴백으로 진행
+    }
+  } catch (e) {
+    // 폴백으로 진행
+  }
+  // 폴백: id 하나씩 삭제
+  let count = 0;
+  for (const id of list) {
+    const rr = await fetch(`${PO_API}/inbound_history?id=eq.${id}`, { method: "DELETE", headers: sbHeaders });
+    if (rr.ok) count++;
+  }
+  if (count === 0) throw new Error("입고 기록 삭제 실패");
+  return count;
+}
 
 // ============================================================
 // 매핑 사전 (작업지시서 ↔ inventory)
@@ -1005,6 +1030,7 @@ export default function ProductionDashboard() {
           onDelete={() => handleDelete(selected.id)}
           onUpdate={async (patch) => { await updateOrder(selected.id, patch); await reload(); }}
           onDeleteInbound={async (id) => { await deleteInbound(id); await reload(); }}
+          onDeleteInbounds={async (ids) => { const n = await deleteInbounds(ids); await reload(); return n; }}
         />
       )}
 
@@ -1115,9 +1141,12 @@ function KpiCard({ label, value, unit, accent, progress }) {
 // ============================================================
 // Drawer
 // ============================================================
-function OrderDrawer({ order, onClose, onAddInbound, onDelete, onUpdate, onDeleteInbound }) {
+function OrderDrawer({ order, onClose, onAddInbound, onDelete, onUpdate, onDeleteInbound, onDeleteInbounds }) {
   const [editing, setEditing] = useState(false);
-  const [deletingInbound, setDeletingInbound] = useState(null);
+  // 입고 이력 선택 삭제 모드
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedInbounds, setSelectedInbounds] = useState([]); // 체크된 입고 id 배열
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [contractDate, setContractDate] = useState(order.contract_date || "");
   const [expectedDate, setExpectedDate] = useState(order.expected_final_date || "");
   const [actualDate, setActualDate] = useState(order.actual_final_date || "");
@@ -1137,6 +1166,25 @@ function OrderDrawer({ order, onClose, onAddInbound, onDelete, onUpdate, onDelet
   const saveDate = async () => {
     await onUpdate({ contract_date: contractDate || null, expected_final_date: expectedDate || null, actual_final_date: actualDate || null });
     setEditing(false);
+  };
+
+  // 입고 이력: 차수(inbound_round) 오름차순 정렬. 라벨은 남은 레코드 기준 위치로 다시 매김.
+  const sortedInbounds = [...order.inbounds].sort((a, b) => a.inbound_round - b.inbound_round);
+  const toggleSelectInbound = (id) =>
+    setSelectedInbounds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  const exitSelectMode = () => { setSelectMode(false); setSelectedInbounds([]); };
+  const handleBulkDeleteInbounds = async () => {
+    if (selectedInbounds.length === 0) return;
+    if (!confirm(`선택한 ${selectedInbounds.length}건의 입고 이력을 삭제할까요? 누적 입고/입고율이 다시 계산됩니다.`)) return;
+    setBulkDeleting(true);
+    try {
+      await onDeleteInbounds(selectedInbounds);
+      exitSelectMode();
+    } catch (e) {
+      alert("삭제 실패: " + e.message);
+    } finally {
+      setBulkDeleting(false);
+    }
   };
 
   const uploadContract = async (file) => {
@@ -1336,37 +1384,48 @@ function OrderDrawer({ order, onClose, onAddInbound, onDelete, onUpdate, onDelet
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div style={S.drawerCardHead}>📦 입고 이력 ({order.inbounds.length}회)</div>
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                  <button style={S.miniBtn} onClick={onAddInbound}>+ 입고 등록</button>
-                  {order.inbounds.length > 0 && (() => {
-                    const lastIb = [...order.inbounds].sort((a, b) => a.inbound_round - b.inbound_round).slice(-1)[0];
-                    return (
+                  {selectMode ? (
+                    <>
                       <button
-                        style={S.inboundDeleteBtn}
-                        title={`최근 입고(${lastIb.inbound_round}차) 삭제`}
-                        disabled={deletingInbound === lastIb.id}
-                        onClick={async () => {
-                          if (!confirm("이 입고 기록을 삭제할까요?")) return;
-                          setDeletingInbound(lastIb.id);
-                          try { await onDeleteInbound(lastIb.id); }
-                          catch (e) { alert("삭제 실패: " + e.message); }
-                          finally { setDeletingInbound(null); }
-                        }}
-                      >🗑</button>
-                    );
-                  })()}
+                        style={{ ...S.miniBtn, color: "#B91C1C", borderColor: "#FCA5A5", background: "white" }}
+                        disabled={selectedInbounds.length === 0 || bulkDeleting}
+                        onClick={handleBulkDeleteInbounds}
+                      >{bulkDeleting ? "삭제 중…" : `선택 삭제 (${selectedInbounds.length})`}</button>
+                      <button style={S.miniBtnGhost} disabled={bulkDeleting} onClick={exitSelectMode}>취소</button>
+                    </>
+                  ) : (
+                    <>
+                      <button style={S.miniBtn} onClick={onAddInbound}>+ 입고 등록</button>
+                      {order.inbounds.length > 0 && (
+                        <button
+                          style={S.inboundDeleteBtn}
+                          title="입고 이력 선택 삭제"
+                          onClick={() => { setSelectMode(true); setSelectedInbounds([]); }}
+                        >🗑</button>
+                      )}
+                    </>
+                  )}
                 </div>
               </div>
               {order.inbounds.length === 0 ? (
                 <div style={{ fontSize: 12, color: "#94A3B8", marginTop: 8 }}>아직 입고가 없습니다</div>
               ) : (
                 <div style={{ marginTop: 6 }}>
-                  {[...order.inbounds].sort((a, b) => a.inbound_round - b.inbound_round).map((ib) => (
-                    <div key={ib.id} style={S.inRow}>
-                      <span style={S.inRound}>{ib.inbound_round}차</span>
+                  {sortedInbounds.map((ib, idx) => (
+                    <label key={ib.id} style={{ ...S.inRow, cursor: selectMode ? "pointer" : "default" }}>
+                      {selectMode && (
+                        <input
+                          type="checkbox"
+                          style={S.inCheckbox}
+                          checked={selectedInbounds.includes(ib.id)}
+                          onChange={() => toggleSelectInbound(ib.id)}
+                        />
+                      )}
+                      <span style={S.inRound}>{idx + 1}차</span>
                       <span style={S.inDate}>{ib.inbound_date}</span>
                       {ib.memo && <span style={S.inMemo}>{ib.memo}</span>}
                       <span style={S.inQty}>{fmt(ib.qty)} 장</span>
-                    </div>
+                    </label>
                   ))}
                 </div>
               )}
@@ -2432,6 +2491,7 @@ const S = {
   iconBtnSm: { width: 30, height: 30, borderRadius: 6, border: "1px solid #E2E8F0", background: "white", cursor: "pointer", fontSize: 14, lineHeight: 1, display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#475569" },
   // 컴팩트 입고 차수 행
   inRow: { display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderTop: "0.5px solid #F1F5F9" },
+  inCheckbox: { width: 15, height: 15, accentColor: "#0F172A", cursor: "pointer", flexShrink: 0, margin: 0 },
   inRound: { fontSize: 11, fontWeight: 700, color: "#0369A1", background: "#E0F2FE", borderRadius: 4, padding: "2px 6px", flexShrink: 0 },
   inDate: { fontSize: 12, color: "#1F2937", fontVariantNumeric: "tabular-nums", flexShrink: 0 },
   inMemo: { fontSize: 11, color: "#94A3B8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 },
