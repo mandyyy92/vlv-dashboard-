@@ -423,6 +423,8 @@ async function parseWorkorder(file) {
       return v ? v.v : null;
     };
 
+    const range = XLSX.utils.decode_range(ws["!ref"] || "A1:Z40");
+
     // 'STYLE NO' 헤더를 찾아 그 블록에서 스타일NO·상품명·작업처 값을 읽는다.
     // 상품명은 시트 탭 이름이 아니라 'STYLE NO 값 오른쪽의 상품명 셀'(보통 C5)을 사용.
     let styleNo = null, productName = null, factory = null;
@@ -460,7 +462,6 @@ async function parseWorkorder(file) {
     if (!styleNo || !String(styleNo).trim()) continue;
 
     // COLOR 헤더 위치 탐색 (시트를 위→아래 스캔. "COLOR" 뿐 아니라 "COLOR(스와치 컬러)" 등도 인식)
-    const range = XLSX.utils.decode_range(ws["!ref"] || "A1:Z40");
     let colorRow = 0, colorCol = 0;
     outer: for (let r = 1; r <= range.e.r + 1; r++) {
       for (let c = 1; c <= range.e.c + 1; c++) {
