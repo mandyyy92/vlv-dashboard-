@@ -37,12 +37,11 @@ function calcOrderTotals(order, items, inbounds) {
     status = expDate && expDate < today ? "delayed" : "partial";
   }
 
-  let actual_final_date = order.actual_final_date;
-  if (received_qty >= total_qty && total_qty > 0 && inbounds.length > 0) {
+  // 수동 저장된 실제 완료일이 있으면 우선 사용, 없으면 완납 시 마지막 입고일로 추정
+  let actual_final_date = order.actual_final_date || null;
+  if (!actual_final_date && received_qty >= total_qty && total_qty > 0 && inbounds.length > 0) {
     const sortedDates = inbounds.map(ib => ib.inbound_date).filter(Boolean).sort();
     actual_final_date = sortedDates[sortedDates.length - 1];
-  } else {
-    actual_final_date = null;
   }
 
   const leadtime_days = actual_final_date && order.contract_date
@@ -893,11 +892,17 @@ function OrderDrawer({ order, onClose, onAddInbound, onDelete, onUpdate }) {
   const [editing, setEditing] = useState(false);
   const [contractDate, setContractDate] = useState(order.contract_date || "");
   const [expectedDate, setExpectedDate] = useState(order.expected_final_date || "");
+  const [actualDate, setActualDate] = useState(order.actual_final_date || "");
   const contractInputRef = useRef(null);
   const [contractUploading, setContractUploading] = useState(false);
 
+  // 실제 완료일 − 계약일 (편집 중 실시간 리드타임)
+  const editLeadtime = actualDate && contractDate
+    ? Math.round((new Date(actualDate) - new Date(contractDate)) / 86400000)
+    : null;
+
   const saveDate = async () => {
-    await onUpdate({ contract_date: contractDate || null, expected_final_date: expectedDate || null });
+    await onUpdate({ contract_date: contractDate || null, expected_final_date: expectedDate || null, actual_final_date: actualDate || null });
     setEditing(false);
   };
 
@@ -1047,6 +1052,14 @@ function OrderDrawer({ order, onClose, onAddInbound, onDelete, onUpdate }) {
                 <div style={{ marginBottom: 8 }}>
                   <div style={S.dimLabel}>예상 완료일</div>
                   <input type="date" value={expectedDate} onChange={e => setExpectedDate(e.target.value)} style={S.formInput} />
+                </div>
+                <div style={{ marginBottom: 8 }}>
+                  <div style={S.dimLabel}>실제 완료일</div>
+                  <input type="date" value={actualDate} onChange={e => setActualDate(e.target.value)} style={S.formInput} />
+                </div>
+                <div style={{ marginBottom: 8 }}>
+                  <div style={S.dimLabel}>리드타임 (실제 완료일 − 계약일)</div>
+                  <div style={{ ...S.dimValue, fontWeight: 700, color: "#0369A1" }}>{editLeadtime != null ? `${editLeadtime}일` : "미완료"}</div>
                 </div>
                 <div style={{ display: "flex", gap: 6 }}>
                   <button style={S.primaryBtn} onClick={saveDate}>저장</button>
@@ -1641,7 +1654,7 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
   const [parsed, setParsed] = useState(null);
   const [matched, setMatched] = useState(null); // 매칭 결과
   const [error, setError] = useState(null);
-  const [inboundDate, setInboundDate] = useState(new Date().toISOString().slice(0, 10));
+  const [inboundDate, setInboundDate] = useState(""); // 실제 완료일(입고일). 미입력 시 등록 시점에 오늘로 fallback
   const [memo, setMemo] = useState("");
 
   // sku_code → order_id, item_id 인덱스 만들기
@@ -1722,7 +1735,8 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
       alert("매칭된 오더가 없어 입고 등록을 진행할 수 없습니다.");
       return;
     }
-    if (!inboundDate) { alert("입고 날짜를 선택하세요"); return; }
+    // 미입력 시에만 오늘 날짜로 fallback
+    const finalDate = inboundDate || new Date().toISOString().slice(0, 10);
     setStep("uploading");
     try {
       // 1) 패킹리스트 파일 Storage 업로드
@@ -1744,18 +1758,19 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
         packingUrl = `${SUPABASE_URL}/storage/v1/object/public/packing-lists/${safeName}`;
       }
 
-      // 2) 각 오더에 차수별 입고 등록
+      // 2) 각 오더에 차수별 입고 등록 + 실제 완료일(입고일)을 오더에 반영
       for (const m of matched.matched_orders) {
         await insertInbound({
           order_id: m.order.id,
           item_id: m.first_item_id,
           inbound_round: m.next_round,
-          inbound_date: inboundDate,
+          inbound_date: finalDate,
           qty: m.qty,
           memo: memo || `패킹리스트 자동 등록 - ${file.name}`,
           packing_list_url: packingUrl,
           packing_list_name: file.name,
         });
+        await updateOrder(m.order.id, { actual_final_date: finalDate });
       }
       onComplete();
     } catch (e) {
@@ -1844,8 +1859,9 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
                 <div style={S.previewSectionTitle}>📅 입고 정보</div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 8 }}>
                   <div>
-                    <div style={S.dimLabel}>입고 날짜</div>
+                    <div style={S.dimLabel}>실제 완료일 (입고일)</div>
                     <input type="date" value={inboundDate} onChange={e => setInboundDate(e.target.value)} style={S.formInput} />
+                    <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 3 }}>미입력 시 오늘 날짜로 등록됩니다</div>
                   </div>
                   <div>
                     <div style={S.dimLabel}>공통 메모 (선택)</div>
