@@ -845,7 +845,20 @@ export default function ProductionDashboard() {
     return tail(a.order_no) - tail(b.order_no);
   };
 
-  // 업체별 그룹핑 (그룹 헤더용 합계 포함). 각 그룹 안에서는 등록 순 오름차순.
+  // 업체 그룹 내부 정렬: 같은 상품명끼리 묶되, 묶음 순서는 그 상품명의 최초 등록순, 묶음 안은 등록순.
+  // 등록순 오름차순으로 먼저 정렬한 뒤 상품명별로 모으면(Map은 삽입순 유지) 자연히 충족된다.
+  const clusterByProduct = (list) => {
+    const sorted = [...list].sort(byRegistrationAsc);
+    const clusters = new Map(); // 상품명 → 오더[] (최초 등장 순서 유지 = 최초 등록순)
+    for (const o of sorted) {
+      const name = o.items?.[0]?.product_name || "—";
+      if (!clusters.has(name)) clusters.set(name, []);
+      clusters.get(name).push(o);
+    }
+    return [...clusters.values()].flat();
+  };
+
+  // 업체별 그룹핑 (그룹 헤더용 합계 포함). 각 그룹 안에서는 상품명 묶음 + 등록 순.
   const grouped = useMemo(() => {
     const map = {};
     filtered.forEach(o => {
@@ -854,7 +867,7 @@ export default function ProductionDashboard() {
     });
     return Object.entries(map)
       .map(([vendor, list]) => {
-        const sortedList = [...list].sort(byRegistrationAsc);
+        const sortedList = clusterByProduct(list);
         const total = sortedList.reduce((s, o) => s + o.total_qty, 0);
         const received = sortedList.reduce((s, o) => s + o.received_qty, 0);
         return { vendor, list: sortedList, total, received, rate: total ? (received / total) * 100 : 0 };
@@ -1046,10 +1059,14 @@ export default function ProductionDashboard() {
                           </div>
                         </td>
                       </tr>
-                      {!collapsed && g.list.map(o => {
+                      {!collapsed && g.list.map((o, idx) => {
                         const imgUrl = imageMap[stripSpaces(o.items[0]?.product_name)];
+                        // 상품명 묶음 경계: 직전 행과 상품명이 다르면 얇은 구분선(그룹 첫 행 제외)
+                        const curName = o.items[0]?.product_name || "—";
+                        const prevName = idx > 0 ? (g.list[idx - 1].items[0]?.product_name || "—") : null;
+                        const isClusterStart = idx > 0 && curName !== prevName;
                         return (
-                          <tr key={o.id} style={{ ...S.tr, ...(selectedId === o.id ? S.trSelected : {}) }} onClick={() => setSelectedId(o.id)}>
+                          <tr key={o.id} style={{ ...S.tr, ...(isClusterStart ? S.clusterStart : {}), ...(selectedId === o.id ? S.trSelected : {}) }} onClick={() => setSelectedId(o.id)}>
                             <td style={S.tdThumb}><ProductThumb url={imgUrl} /></td>
                             <td style={S.tdMono}>{o.order_no}</td>
                             <td style={S.tdMono}>{o.items[0]?.style_no || "—"}</td>
@@ -2585,6 +2602,7 @@ const S = {
   thR: { padding: "12px 12px", textAlign: "right", verticalAlign: "middle", fontSize: 12, fontWeight: 600, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.3 },
   thC: { padding: "12px 12px", textAlign: "center", verticalAlign: "middle", fontSize: 12, fontWeight: 600, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.3 },
   tr: { borderBottom: "1px solid #F1F5F9", cursor: "pointer" },
+  clusterStart: { borderTop: "1px solid #E2E8F0" }, // 같은 상품명 묶음 경계 구분선
   trSelected: { background: "#EFF6FF" },
   td: { padding: "12px 12px", color: "#1F2937", verticalAlign: "middle" },
   tdR: { padding: "12px 12px", color: "#1F2937", textAlign: "right", verticalAlign: "middle", fontVariantNumeric: "tabular-nums" },
