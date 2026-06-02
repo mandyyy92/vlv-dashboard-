@@ -118,8 +118,27 @@ async function deleteInboundLinesByRounds(orderId, rounds) {
 }
 async function insertOrder(payload) {
   const r = await fetch(`${PO_API}/production_orders`, { method: "POST", headers: sbHeaders, body: JSON.stringify(payload) });
-  if (!r.ok) throw new Error("오더 생성 실패");
+  if (!r.ok) {
+    const err = new Error(`오더 생성 실패 (${r.status})`);
+    err.status = r.status; // 409(중복키) 감지용
+    throw err;
+  }
   return r.json();
+}
+// 특정 시즌(PO-{season}-NNN)의 현재 최대 번호를 DB에서 라이브 조회 (중복 방지용). 실패 시 0.
+async function fetchSeasonMaxSeq(season) {
+  try {
+    const r = await fetch(`${PO_API}/production_orders?select=order_no`, { headers: sbHeaders });
+    if (!r.ok) return 0;
+    const rows = await r.json();
+    const re = new RegExp(`^PO-${season}-(\\d+)$`);
+    let max = 0;
+    for (const row of rows) {
+      const m = String(row.order_no || "").match(re);
+      if (m) max = Math.max(max, parseInt(m[1], 10));
+    }
+    return max;
+  } catch { return 0; }
 }
 async function insertItems(items) {
   const r = await fetch(`${PO_API}/production_order_items`, { method: "POST", headers: sbHeaders, body: JSON.stringify(items) });
@@ -1891,22 +1910,20 @@ function UploadModal({ existingOrderNos, onClose, onComplete }) {
 
       const styleList = Object.values(byStyle);
 
-      // 오더번호 자동 부여 — ★항상 PO-{season}-{NNN} 형식으로만 생성★ (orderNoBase 오염/'차' 무시).
-      // 같은 시즌의 기존 PO-{season}-NNN 중 최대 번호 +1 부터 순차 (충돌·'차' 방지).
+      // 오더번호 자동 부여 — ★항상 PO-{season}-{NNN} 형식★ (orderNoBase 오염/'차' 무시).
+      // ★DB 라이브 최대값★ 기준으로 +1부터 순차 (클라이언트 prop이 stale이어도 충돌 방지).
       const prefix = `PO-${season}-`;
       const seasonRe = new RegExp(`^PO-${season}-(\\d+)$`);
-      const usedNums = (existingOrderNos || [])
-        .map(no => { const m = String(no || "").match(seasonRe); return m ? parseInt(m[1], 10) : null; })
-        .filter(n => n != null);
-      const startNum = (usedNums.length ? Math.max(...usedNums) : 0) + 1;
+      const propMax = (existingOrderNos || [])
+        .reduce((mx, no) => { const m = String(no || "").match(seasonRe); return m ? Math.max(mx, parseInt(m[1], 10)) : mx; }, 0);
+      const liveMax = await fetchSeasonMaxSeq(season);
+      let nextNum = Math.max(propMax, liveMax) + 1; // 다음 빈 번호
 
       for (let i = 0; i < styleList.length; i++) {
         const styleGroup = styleList[i];
-        const orderNo = `${prefix}${String(startNum + i).padStart(3, "0")}`;
 
-        // 1) 오더 생성 (스타일별) — 계약서 정보 포함
-        const orderPayload = {
-          order_no: orderNo,
+        // 1) 오더 생성 (스타일별) — 계약서 정보 포함. 409(중복키)면 번호 +1로 자동 재시도.
+        const basePayload = {
           vendor_name: styleGroup.factory,
           season,
           order_date: new Date().toISOString().slice(0, 10),
@@ -1914,11 +1931,23 @@ function UploadModal({ existingOrderNos, onClose, onComplete }) {
           expected_final_date: expectedDate || null,
         };
         if (contractUrl) {
-          orderPayload.contract_file_url = contractUrl;
-          orderPayload.contract_file_name = contractName;
-          orderPayload.contract_uploaded_at = new Date().toISOString();
+          basePayload.contract_file_url = contractUrl;
+          basePayload.contract_file_name = contractName;
+          basePayload.contract_uploaded_at = new Date().toISOString();
         }
-        const createdRows = await insertOrder(orderPayload);
+        let createdRows = null;
+        for (let attempt = 0; attempt < 100; attempt++) {
+          const orderNo = `${prefix}${String(nextNum).padStart(3, "0")}`;
+          try {
+            createdRows = await insertOrder({ ...basePayload, order_no: orderNo });
+            nextNum++; // 다음 스타일은 그 다음 번호부터
+            break;
+          } catch (e) {
+            if (e.status === 409) { nextNum++; continue; } // 중복 → 다음 번호로 재시도
+            throw e;
+          }
+        }
+        if (!createdRows) throw new Error("오더 번호 자동 할당 실패 (중복 과다)");
         const orderId = createdRows[0].id;
 
         // 2) 아이템 일괄 생성 (sku_code 포함)
