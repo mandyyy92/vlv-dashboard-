@@ -773,12 +773,14 @@ export default function ProductionDashboard() {
     const total = enriched.reduce((s, o) => s + o.total_qty, 0);
     const received = enriched.reduce((s, o) => s + o.received_qty, 0);
     const remain = received - total;
+    const unreceived = Math.max(0, total - received); // 미입고 수량(양수)
     const delayed = enriched.filter(o => o.status === "delayed").length;
     const partial = enriched.filter(o => o.status === "partial").length;
     const completed = enriched.filter(o => o.status === "completed").length;
+    const inProgress = enriched.filter(o => o.status === "in_progress").length;
     const leadtimes = enriched.filter(o => o.leadtime_days != null).map(o => o.leadtime_days);
     const avgLeadtime = leadtimes.length ? Math.round(leadtimes.reduce((a, b) => a + b, 0) / leadtimes.length) : null;
-    return { total, received, remain, delayed, partial, completed, avgLeadtime, rate: total ? (received / total) * 100 : 0 };
+    return { total, received, remain, unreceived, delayed, partial, completed, inProgress, avgLeadtime, rate: total ? (received / total) * 100 : 0 };
   }, [enriched]);
 
   const selected = enriched.find(o => o.id === selectedId);
@@ -847,16 +849,30 @@ export default function ProductionDashboard() {
         </div>
       </header>
 
-      {/* KPI 카드 */}
-      <section style={S.kpiGrid}>
-        <KpiCard label="총 오더 수량" value={fmt(kpi.total)} unit="장" />
+      {/* KPI 영역: 상단 2열(입고율 hero + 상태 스택바) + 하단 4열 메트릭 */}
+      <section style={S.kpiTop}>
+        {/* 좌: 전체 입고율 hero */}
+        <div style={S.kpiHeroCard}>
+          <div style={S.kpiLabel}>전체 입고율</div>
+          <div style={S.kpiHeroValue}>{pct(kpi.rate)}</div>
+          <div style={S.kpiHeroBar}>
+            <div style={{ ...S.kpiHeroFill, width: `${Math.min(100, kpi.rate)}%` }} />
+          </div>
+          <div style={S.kpiHeroSub}>총 발주 {fmt(kpi.total)}장 중 누적 입고 {fmt(kpi.received)}장</div>
+        </div>
+
+        {/* 우: 오더 상태 가로 스택 바 + 범례 */}
+        <div style={S.kpiStatusCard}>
+          <div style={S.kpiLabel}>오더 상태</div>
+          <StatusStackBar completed={kpi.completed} partial={kpi.partial} delayed={kpi.delayed} inProgress={kpi.inProgress} />
+        </div>
+      </section>
+
+      <section style={S.kpiMetricGrid}>
+        <KpiCard label="총 발주" value={fmt(kpi.total)} unit="장" />
         <KpiCard label="누적 입고" value={fmt(kpi.received)} unit="장" accent="#0369A1" />
-        <KpiCard label="잔여 수량" value={fmt(kpi.remain)} unit="장" />
-        <KpiCard label="전체 입고율" value={pct(kpi.rate)} progress={kpi.rate} />
+        <KpiCard label="미입고 수량" value={fmt(kpi.unreceived)} unit="장" />
         <KpiCard label="평균 리드타임" value={kpi.avgLeadtime ?? "—"} unit="일" />
-        <KpiCard label="지연 오더" value={kpi.delayed} unit="건" accent="#B91C1C" />
-        <KpiCard label="부분 입고" value={kpi.partial} unit="건" accent="#0369A1" />
-        <KpiCard label="입고 완료" value={kpi.completed} unit="건" accent="#15803D" />
       </section>
 
       {/* 탭 */}
@@ -1039,6 +1055,41 @@ function ProductThumb({ url }) {
       style={S.thumbImg}
       onError={() => setError(true)}
     />
+  );
+}
+
+// ============================================================
+// 오더 상태 가로 스택 바 (완료/부분/지연/진행중 비율) + 범례
+// ============================================================
+function StatusStackBar({ completed, partial, delayed, inProgress }) {
+  const segs = [
+    { key: "completed", label: "완료", count: completed, color: "#15803D" },   // success
+    { key: "partial", label: "부분", count: partial, color: "#0369A1" },       // info
+    { key: "delayed", label: "지연", count: delayed, color: "#B91C1C" },        // danger
+    { key: "in_progress", label: "진행중", count: inProgress, color: "#94A3B8" }, // 회색
+  ];
+  const total = segs.reduce((s, x) => s + x.count, 0);
+  return (
+    <>
+      <div style={S.stackBar}>
+        {total === 0 ? (
+          <div style={{ ...S.stackSeg, width: "100%", background: "#E2E8F0" }} />
+        ) : (
+          segs.filter(s => s.count > 0).map(s => (
+            <div key={s.key} title={`${s.label} ${s.count}건`} style={{ ...S.stackSeg, width: `${(s.count / total) * 100}%`, background: s.color }} />
+          ))
+        )}
+      </div>
+      <div style={S.stackLegend}>
+        {segs.map(s => (
+          <div key={s.key} style={S.stackLegendItem}>
+            <span style={{ ...S.stackDot, background: s.color }} />
+            <span style={S.stackLegendLabel}>{s.label}</span>
+            <span style={S.stackLegendCount}>{s.count}</span>
+          </div>
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -2273,6 +2324,26 @@ const S = {
   iconBtn: { background: "transparent", border: "none", fontSize: 20, color: "#94A3B8", cursor: "pointer", padding: 4 },
 
   kpiGrid: { display: "grid", gridTemplateColumns: "repeat(8, 1fr)", gap: 12, marginBottom: 20 },
+
+  // 상단 KPI 2열 (입고율 hero + 상태 스택바)
+  kpiTop: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 },
+  kpiHeroCard: { background: "white", borderRadius: 10, padding: "16px 18px", border: "1px solid #E2E8F0" },
+  kpiHeroValue: { fontSize: 30, fontWeight: 800, color: "#0F172A", letterSpacing: -0.8, marginTop: 4, fontVariantNumeric: "tabular-nums" },
+  kpiHeroBar: { height: 8, background: "#E2E8F0", borderRadius: 4, marginTop: 10, overflow: "hidden" },
+  kpiHeroFill: { height: "100%", background: "#0369A1", borderRadius: 4, transition: "width 0.3s" },
+  kpiHeroSub: { fontSize: 12, color: "#64748B", marginTop: 8 },
+  kpiStatusCard: { background: "white", borderRadius: 10, padding: "16px 18px", border: "1px solid #E2E8F0", display: "flex", flexDirection: "column" },
+  stackBar: { display: "flex", height: 14, borderRadius: 7, overflow: "hidden", marginTop: 12, background: "#E2E8F0" },
+  stackSeg: { height: "100%", transition: "width 0.3s" },
+  stackLegend: { display: "flex", flexWrap: "wrap", gap: 16, marginTop: "auto", paddingTop: 12 },
+  stackLegendItem: { display: "flex", alignItems: "center", gap: 6 },
+  stackDot: { width: 9, height: 9, borderRadius: 3, flexShrink: 0 },
+  stackLegendLabel: { fontSize: 12, color: "#64748B" },
+  stackLegendCount: { fontSize: 13, fontWeight: 700, color: "#0F172A", fontVariantNumeric: "tabular-nums" },
+
+  // 하단 KPI 4열 메트릭
+  kpiMetricGrid: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 20 },
+
   kpiCard: { background: "white", borderRadius: 10, padding: "14px 16px", border: "1px solid #E2E8F0" },
   kpiLabel: { fontSize: 12, color: "#64748B", fontWeight: 500, letterSpacing: 0.2 },
   kpiValue: { fontSize: 26, fontWeight: 700, marginTop: 4, letterSpacing: -0.5 },
