@@ -191,6 +191,72 @@ async function deleteInbounds(ids) {
 }
 
 // ============================================================
+// 업로드 내역(uploads) — 업로드 단위 추적/삭제
+// uploads + production_orders/inbound_history/inbound_lines 의 upload_id 만 사용.
+// ★보호 테이블(inventory, purchase_orders, v_option_* 등)은 절대 건드리지 않음.★
+// ============================================================
+async function fetchUploads() {
+  const r = await fetch(`${PO_API}/uploads?select=*&order=created_at.desc`, { headers: sbHeaders });
+  if (!r.ok) throw new Error("업로드 내역 조회 실패");
+  return r.json();
+}
+// 업로드 기록 1건 생성. uploads 테이블/컬럼이 아직 없으면(마이그레이션 전) 호출부에서 catch.
+async function insertUpload(payload) {
+  const r = await fetch(`${PO_API}/uploads`, { method: "POST", headers: sbHeaders, body: JSON.stringify(payload) });
+  if (!r.ok) throw new Error("업로드 기록 생성 실패");
+  return r.json();
+}
+// 공용: 조건절로 행 조회(select 컬럼 지정). 실패 시 [].
+async function fetchRows(table, query) {
+  const r = await fetch(`${PO_API}/${table}?${query}`, { headers: sbHeaders });
+  return r.ok ? r.json() : [];
+}
+// 공용: DELETE. 실패 시 throw.
+async function deleteWhere(table, query) {
+  const r = await fetch(`${PO_API}/${table}?${query}`, { method: "DELETE", headers: sbHeaders });
+  if (!r.ok) throw new Error(`${table} 삭제 실패 (${r.status})`);
+}
+// 작업지시서 업로드 삭제 시 실제로 지워질 개수 (삭제 전 조회).
+async function countWorkorderDeletion(uploadId) {
+  const orders = await fetchRows("production_orders", `upload_id=eq.${uploadId}&select=id`);
+  const ids = orders.map(o => o.id);
+  let items = 0, inbounds = 0, lines = 0;
+  if (ids.length) {
+    const inExpr = `in.(${ids.join(",")})`;
+    items = (await fetchRows("production_order_items", `order_id=${inExpr}&select=id`)).length;
+    inbounds = (await fetchRows("inbound_history", `order_id=${inExpr}&select=id`)).length;
+    lines = (await fetchRows("inbound_lines", `order_id=${inExpr}&select=id`)).length;
+  }
+  return { orders: ids.length, items, inbounds, lines };
+}
+// 패킹리스트 업로드 삭제 시 실제로 지워질 개수 + 영향 받는 오더 수 (삭제 전 조회).
+async function countPackingDeletion(uploadId) {
+  const inbounds = await fetchRows("inbound_history", `upload_id=eq.${uploadId}&select=order_id`);
+  const lines = await fetchRows("inbound_lines", `upload_id=eq.${uploadId}&select=id`);
+  const affectedOrders = new Set(inbounds.map(r => r.order_id)).size;
+  return { inbounds: inbounds.length, lines: lines.length, affectedOrders };
+}
+// 작업지시서 업로드 삭제: 그 upload_id 의 오더 + 자식(아이템) + 연결 입고/라인까지. 자식→부모 순서.
+async function deleteWorkorderUpload(uploadId) {
+  const orders = await fetchRows("production_orders", `upload_id=eq.${uploadId}&select=id`);
+  const ids = orders.map(o => o.id);
+  if (ids.length) {
+    const inExpr = `in.(${ids.join(",")})`;
+    await deleteWhere("inbound_lines", `order_id=${inExpr}`);
+    await deleteWhere("inbound_history", `order_id=${inExpr}`);
+    await deleteWhere("production_order_items", `order_id=${inExpr}`);
+    await deleteWhere("production_orders", `id=${inExpr}`);
+  }
+  await deleteWhere("uploads", `id=eq.${uploadId}`);
+}
+// 패킹리스트 업로드 삭제: 그 upload_id 의 입고 라인/이력만. 오더 누적입고는 앱에서 자동 재계산(reload).
+async function deletePackingUpload(uploadId) {
+  await deleteWhere("inbound_lines", `upload_id=eq.${uploadId}`);
+  await deleteWhere("inbound_history", `upload_id=eq.${uploadId}`);
+  await deleteWhere("uploads", `id=eq.${uploadId}`);
+}
+
+// ============================================================
 // 매핑 사전 (작업지시서 ↔ inventory)
 // ============================================================
 
@@ -816,6 +882,7 @@ export default function ProductionDashboard() {
   const [showUpload, setShowUpload] = useState(false);
   const [showInbound, setShowInbound] = useState(null);
   const [showPacking, setShowPacking] = useState(false);
+  const [showUploads, setShowUploads] = useState(false); // 업로드 내역 모달
   const [imageMap, setImageMap] = useState({});            // { name_key: image_url }
   const [vendorFilter, setVendorFilter] = useState("all"); // 'all' | 업체명
   const [seasonFilter, setSeasonFilter] = useState("all"); // 'all' | 시즌(26SS 등)
@@ -1043,6 +1110,9 @@ export default function ProductionDashboard() {
           <button style={S.ghostBtnRed} onClick={handleResetAll} title="전체 초기화">
             ⚠ 전체 초기화
           </button>
+          <button style={S.ghostBtn} onClick={() => setShowUploads(true)} title="업로드 내역(작업지시서·패킹리스트) 보기 및 단위 삭제">
+            🗂 업로드 내역
+          </button>
           <button style={S.secondaryBtn} onClick={() => setShowPacking(true)} disabled={orders.length === 0} title={orders.length === 0 ? "먼저 작업지시서를 업로드하세요" : ""}>
             📦 패킹리스트 업로드
           </button>
@@ -1269,6 +1339,13 @@ export default function ProductionDashboard() {
           inboundsByOrder={inboundsByOrder}
           onClose={() => setShowPacking(false)}
           onComplete={async () => { setShowPacking(false); await reload(); }}
+        />
+      )}
+
+      {showUploads && (
+        <UploadHistoryModal
+          onClose={() => setShowUploads(false)}
+          onChanged={async () => { setSelectedId(null); await reload(); }}
         />
       )}
     </div>
@@ -1936,6 +2013,14 @@ function UploadModal({ existingOrderNos, onClose, onComplete }) {
         contractName = contractFile.name;
       }
       
+      // 0.5) 업로드 기록 생성 → 생성되는 모든 오더에 upload_id 태깅(업로드 단위 삭제용).
+      // uploads 테이블/컬럼이 아직 없으면(마이그레이션 전) 건너뛰고 기존 동작 그대로.
+      let uploadId = null;
+      try {
+        const u = await insertUpload({ kind: "workorder", file_name: file?.name || null, season });
+        uploadId = u?.[0]?.id ?? null;
+      } catch (e) { console.warn("[uploads] 작업지시서 업로드 기록 건너뜀(마이그레이션 전?):", e); }
+
       // 스타일별로 그룹화 -> 스타일마다 별도 오더 생성
       const byStyle = {};
       parsed.items.forEach(it => {
@@ -1973,6 +2058,7 @@ function UploadModal({ existingOrderNos, onClose, onComplete }) {
           order_date: new Date().toISOString().slice(0, 10),
           contract_date: contractDate || null,
           expected_final_date: expectedDate || null,
+          ...(uploadId != null ? { upload_id: uploadId } : {}),
         };
         if (contractUrl) {
           basePayload.contract_file_url = contractUrl;
@@ -2429,6 +2515,14 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
       });
       if (upR.ok) packingUrl = `${SUPABASE_URL}/storage/v1/object/public/packing-lists/${safeName}`;
 
+      // 1.5) 업로드 기록 생성 → 이 패킹리스트가 만든 입고 이력/라인에 upload_id 태깅(업로드 단위 삭제용).
+      // uploads 테이블/컬럼이 아직 없으면(마이그레이션 전) 건너뛰고 기존 동작 그대로.
+      let uploadId = null;
+      try {
+        const u = await insertUpload({ kind: "packing", file_name: file.name, memo: memo || null });
+        uploadId = u?.[0]?.id ?? null;
+      } catch (e) { console.warn("[uploads] 패킹리스트 업로드 기록 건너뜀(마이그레이션 전?):", e); }
+
       // 2) 오더별 차수 총량 입고(inbound_history) + 옵션별 라인(inbound_lines)
       for (const t of targets) {
         await insertInbound({
@@ -2440,6 +2534,7 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
           memo: memo || `패킹리스트 등록 - ${file.name}`,
           packing_list_url: packingUrl,
           packing_list_name: file.name,
+          ...(uploadId != null ? { upload_id: uploadId } : {}),
         });
         const lineRows = t.lines.map(l => ({
           order_id: t.order.id,
@@ -2448,6 +2543,7 @@ function PackingListModal({ orders, itemsByOrder, inboundsByOrder, onClose, onCo
           color: normalizeColorKey(l.item_color ?? l.color),
           size: normalizeSizeKey(l.item_size ?? l.size),
           qty: l.qty,
+          ...(uploadId != null ? { upload_id: uploadId } : {}),
         }));
         try { await insertInboundLines(lineRows); }
         catch (e) { console.error("[입고 라인 적재 실패]", e); }
@@ -2785,6 +2881,136 @@ function AnalyticsPanel({ orders, kpi }) {
 }
 
 // ============================================================
+// 업로드 내역 모달 — 업로드 단위 삭제(경고 확인 모달 필수)
+// ============================================================
+const UPLOAD_KIND = {
+  workorder: { label: "작업지시서", style: "uplKindWO" },
+  packing: { label: "패킹리스트", style: "uplKindPL" },
+};
+
+function UploadHistoryModal({ onClose, onChanged }) {
+  const [uploads, setUploads] = useState(null);   // null = 로딩중
+  const [confirm, setConfirm] = useState(null);    // { upload, counts } — 경고 확인 모달
+  const [busy, setBusy] = useState(false);         // 개수 조회 / 삭제 진행중
+  const [error, setError] = useState(null);
+
+  const load = async () => {
+    setError(null);
+    try { setUploads(await fetchUploads()); }
+    catch (e) { setError("업로드 내역 조회 실패: " + e.message + " (uploads 테이블 마이그레이션이 필요할 수 있습니다)"); setUploads([]); }
+  };
+  useEffect(() => { load(); }, []);
+
+  // [삭제] 클릭 → 바로 지우지 않고, 실제로 지워질 개수를 조회한 뒤 경고 확인 모달을 띄움.
+  const askDelete = async (u) => {
+    setBusy(true); setError(null);
+    try {
+      const counts = u.kind === "workorder"
+        ? await countWorkorderDeletion(u.id)
+        : await countPackingDeletion(u.id);
+      setConfirm({ upload: u, counts });
+    } catch (e) {
+      setError("삭제 대상 개수 조회 실패: " + e.message);
+    }
+    setBusy(false);
+  };
+
+  // 확인 모달에서 [삭제] 누른 경우에만 실제 삭제 실행.
+  const doDelete = async () => {
+    if (!confirm) return;
+    setBusy(true); setError(null);
+    try {
+      if (confirm.upload.kind === "workorder") await deleteWorkorderUpload(confirm.upload.id);
+      else await deletePackingUpload(confirm.upload.id);
+      setConfirm(null);
+      await load();        // 내역 목록 갱신
+      await onChanged();   // 대시보드(오더/입고/입고율) 갱신
+    } catch (e) {
+      setError("삭제 실패: " + e.message);
+    }
+    setBusy(false);
+  };
+
+  const fmtDate = (s) => (s ? String(s).slice(0, 10) : "—");
+
+  return (
+    <>
+      <div style={S.modalBackdrop} onClick={busy ? undefined : onClose} />
+      <div style={S.modal}>
+        <div style={S.modalHeader}>
+          <div>
+            <div style={S.modalTitle}>🗂 업로드 내역</div>
+            <div style={S.modalSubtitle}>업로드 단위로 데이터를 삭제합니다. 삭제 시 경고 확인을 거칩니다.</div>
+          </div>
+          <button style={S.iconBtn} onClick={onClose} disabled={busy}>✕</button>
+        </div>
+
+        <div style={S.modalBody}>
+          {error && <div style={S.errorBox}>{error}</div>}
+
+          {uploads === null ? (
+            <div style={S.parsing}><div style={S.spinner} /><div style={S.parsingText}>불러오는 중...</div></div>
+          ) : uploads.length === 0 ? (
+            <div style={S.fileEmpty}>업로드 내역이 없습니다.</div>
+          ) : (
+            <div style={S.uplList}>
+              {uploads.map(u => {
+                const k = UPLOAD_KIND[u.kind] || { label: u.kind || "기타", style: "uplKindWO" };
+                return (
+                  <div key={u.id} style={S.uplRow}>
+                    <span style={S[k.style]}>{k.label}</span>
+                    <span style={S.uplName} title={u.file_name || ""}>{u.file_name || "(파일명 없음)"}</span>
+                    <span style={S.uplDate}>{fmtDate(u.created_at)}</span>
+                    <button style={S.uplDelBtn} onClick={() => askDelete(u)} disabled={busy}>삭제</button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 경고 확인 모달 — [삭제] 누른 그때만 실제 삭제 */}
+      {confirm && (
+        <>
+          <div style={S.confirmBackdrop} onClick={busy ? undefined : () => setConfirm(null)} />
+          <div style={S.confirmBox}>
+            <div style={S.confirmBody}>
+              <div style={S.confirmTitle}>
+                {UPLOAD_KIND[confirm.upload.kind]?.label || "업로드"} 삭제
+              </div>
+              <div style={{ fontSize: 13, color: "#64748B", marginBottom: 12 }}>
+                파일: <b style={{ color: "#1F2937" }}>{confirm.upload.file_name || "(파일명 없음)"}</b>
+              </div>
+
+              {confirm.upload.kind === "workorder" ? (
+                <div style={{ fontSize: 14, color: "#1F2937", lineHeight: 1.6 }}>
+                  오더 <b>{fmt(confirm.counts.orders)}</b>건 + 그에 연결된 입고 <b>{fmt(confirm.counts.inbounds)}</b>건이 함께 삭제됩니다.
+                  <div style={{ fontSize: 12, color: "#94A3B8", marginTop: 4 }}>
+                    포함: 오더 아이템 {fmt(confirm.counts.items)}개 · 입고 라인 {fmt(confirm.counts.lines)}개
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontSize: 14, color: "#1F2937", lineHeight: 1.6 }}>
+                  입고 <b>{fmt(confirm.counts.inbounds)}</b>건(라인 <b>{fmt(confirm.counts.lines)}</b>개)이 삭제되고,
+                  관련 오더 <b>{fmt(confirm.counts.affectedOrders)}</b>건의 누적입고가 다시 계산됩니다.
+                </div>
+              )}
+
+              <div style={S.confirmWarn}>⚠️ 이 작업은 되돌릴 수 없습니다.</div>
+            </div>
+            <div style={S.confirmFooter}>
+              <button style={S.ghostBtn} onClick={() => setConfirm(null)} disabled={busy}>취소</button>
+              <button style={S.dangerBtn} onClick={doDelete} disabled={busy}>{busy ? "삭제 중..." : "삭제"}</button>
+            </div>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+// ============================================================
 // 스타일
 // ============================================================
 const S = {
@@ -2971,6 +3197,24 @@ const S = {
   modalSubtitle: { fontSize: 13, color: "#64748B", marginTop: 4 },
   modalBody: { flex: 1, overflowY: "auto", padding: 24 },
   modalFooter: { padding: "16px 24px", borderTop: "1px solid #E2E8F0", display: "flex", justifyContent: "flex-end", gap: 8 },
+
+  // 업로드 내역 목록
+  uplList: { border: "1px solid #E2E8F0", borderRadius: 8, overflow: "hidden" },
+  uplRow: { display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", borderTop: "1px solid #F1F5F9", background: "white" },
+  uplKindWO: { fontSize: 11, fontWeight: 700, color: "#0F172A", background: "#E2E8F0", borderRadius: 4, padding: "3px 9px", flexShrink: 0 },
+  uplKindPL: { fontSize: 11, fontWeight: 700, color: "#0369A1", background: "#E0F2FE", borderRadius: 4, padding: "3px 9px", flexShrink: 0 },
+  uplName: { fontSize: 13, fontWeight: 600, color: "#1F2937", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0, flex: 1 },
+  uplDate: { fontSize: 12, color: "#94A3B8", flexShrink: 0, fontVariantNumeric: "tabular-nums" },
+  uplDelBtn: { background: "white", color: "#B91C1C", border: "1px solid #FCA5A5", padding: "5px 14px", borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: "pointer", flexShrink: 0 },
+
+  // 경고 확인 모달 (업로드 내역 모달 위에 겹쳐 표시)
+  dangerBtn: { background: "#DC2626", color: "white", border: "none", padding: "10px 18px", borderRadius: 6, fontSize: 14, fontWeight: 600, cursor: "pointer" },
+  confirmBackdrop: { position: "fixed", inset: 0, background: "rgba(15, 23, 42, 0.55)", zIndex: 110 },
+  confirmBox: { position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)", background: "white", borderRadius: 12, width: "90%", maxWidth: 440, zIndex: 111, boxShadow: "0 25px 50px rgba(0,0,0,0.3)", overflow: "hidden" },
+  confirmBody: { padding: "22px 24px" },
+  confirmTitle: { fontSize: 17, fontWeight: 700, color: "#0F172A", marginBottom: 6 },
+  confirmWarn: { fontSize: 13, color: "#B91C1C", fontWeight: 600, marginTop: 16 },
+  confirmFooter: { padding: "14px 24px", borderTop: "1px solid #E2E8F0", display: "flex", justifyContent: "flex-end", gap: 8 },
 
   errorBox: { background: "#FEE2E2", border: "1px solid #FECACA", color: "#991B1B", padding: 12, borderRadius: 6, fontSize: 14, marginBottom: 16 },
 
