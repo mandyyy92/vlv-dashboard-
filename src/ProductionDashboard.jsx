@@ -877,6 +877,7 @@ export default function ProductionDashboard() {
   const [inboundsByOrder, setInboundsByOrder] = useState({});
   const [inboundLinesByOrder, setInboundLinesByOrder] = useState({}); // 옵션별 입고 라인
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState("orders"); // 상단 페이지: orders | products
   const [tab, setTab] = useState("all");
   const [selectedId, setSelectedId] = useState(null);
   const [showUpload, setShowUpload] = useState(false);
@@ -1099,6 +1100,20 @@ export default function ProductionDashboard() {
     <div style={S.wrap}>
       <style>{CSS}</style>
 
+      {/* 상단 페이지 네비게이션 */}
+      <nav style={S.pageNav}>
+        <button style={{ ...S.pageNavBtn, ...(page === "orders" ? S.pageNavActive : {}) }} onClick={() => setPage("orders")}>
+          오더 입고현황
+        </button>
+        <button style={{ ...S.pageNavBtn, ...(page === "products" ? S.pageNavActive : {}) }} onClick={() => setPage("products")}>
+          제품 DB
+        </button>
+      </nav>
+
+      {page === "products" ? (
+        <ProductDB />
+      ) : (
+      <>
       {/* 헤더 */}
       <header style={S.header}>
         <div>
@@ -1348,6 +1363,176 @@ export default function ProductionDashboard() {
           onChanged={async () => { setSelectedId(null); await reload(); }}
         />
       )}
+      </>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// 제품 DB (Notion 제품DB — Edge Function 호출 + 카드 그리드)
+// ============================================================
+const PRODUCTS_API = `${SUPABASE_URL}/functions/v1/swift-service`;
+
+// 진행상태 → 배지 색. 미지정 상태는 회색 fallback.
+const PRODUCT_STATUS_COLORS = {
+  "판매중": { color: "#15803D", bg: "#DCFCE7" },
+  "입고완료": { color: "#0369A1", bg: "#E0F2FE" },
+  "생산중": { color: "#B45309", bg: "#FEF3C7" },
+  "샘플": { color: "#7C3AED", bg: "#EDE9FE" },
+  "단종": { color: "#B91C1C", bg: "#FEE2E2" },
+  "품절": { color: "#BE123C", bg: "#FFE4E6" },
+};
+function productStatusStyle(status) {
+  return PRODUCT_STATUS_COLORS[status] || { color: "#475569", bg: "#F1F5F9" };
+}
+
+function ProductDB() {
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [seasonFilter, setSeasonFilter] = useState("all");
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const r = await fetch(PRODUCTS_API, {
+          method: "GET",
+          headers: {
+            "Authorization": `Bearer ${SUPABASE_KEY}`,
+            "apikey": SUPABASE_KEY,
+          },
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data?.error ? JSON.stringify(data.error) : `HTTP ${r.status}`);
+        if (!Array.isArray(data)) throw new Error("예상치 못한 응답 형식");
+        if (alive) setProducts(data);
+      } catch (e) {
+        if (alive) { setError(String(e?.message || e)); setProducts([]); }
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  // 필터 옵션(데이터에서 추출)
+  const statusList = useMemo(
+    () => [...new Set(products.map(p => p.status).filter(Boolean))].sort(),
+    [products]
+  );
+  const seasonList = useMemo(
+    () => [...new Set(products.flatMap(p => p.season || []).filter(Boolean))].sort(),
+    [products]
+  );
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return products.filter(p => {
+      if (statusFilter !== "all" && p.status !== statusFilter) return false;
+      if (seasonFilter !== "all" && !(p.season || []).includes(seasonFilter)) return false;
+      if (q) {
+        const hay = `${p.name || ""} ${p.adminName || ""} ${p.barcode || ""}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [products, search, statusFilter, seasonFilter]);
+
+  return (
+    <div>
+      {/* 필터 바: 검색 + 진행상태 + 시즌 */}
+      <div style={S.filterBar}>
+        <label style={S.filterLabel}>진행상태</label>
+        <select style={S.filterSelect} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+          <option value="all">전체 상태</option>
+          {statusList.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <label style={S.filterLabel}>시즌</label>
+        <select style={S.filterSelect} value={seasonFilter} onChange={(e) => setSeasonFilter(e.target.value)}>
+          <option value="all">전체 시즌</option>
+          {seasonList.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <input
+          style={S.searchInput}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="제품명 / 바코드 검색"
+        />
+        {search && <button style={S.filterClear} onClick={() => setSearch("")}>✕</button>}
+      </div>
+
+      {loading ? (
+        <div style={S.loading}>
+          <div style={S.spinner} />
+          <div style={{ marginTop: 16, color: "#64748B", fontSize: 13 }}>제품 DB 로드 중...</div>
+        </div>
+      ) : error ? (
+        <div style={S.productError}>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>제품 DB를 불러오지 못했습니다</div>
+          <div style={{ fontSize: 13, color: "#B91C1C" }}>{error}</div>
+        </div>
+      ) : filtered.length === 0 ? (
+        <div style={S.empty}>
+          {products.length === 0 ? "표시할 제품이 없습니다" : "조건에 맞는 제품이 없습니다"}
+        </div>
+      ) : (
+        <>
+          <div style={S.productCount}>총 {fmt(filtered.length)}개 제품</div>
+          <div style={S.productGrid}>
+            {filtered.map(p => <ProductCard key={p.id} p={p} />)}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ProductCard({ p }) {
+  const [imgError, setImgError] = useState(false);
+  const st = productStatusStyle(p.status);
+  const showImg = p.image && !imgError;
+  return (
+    <div style={S.productCard}>
+      <div style={S.productImgWrap}>
+        {showImg ? (
+          <img
+            src={p.image}
+            alt={p.name || ""}
+            style={S.productImg}
+            referrerPolicy="no-referrer"
+            onError={() => setImgError(true)}
+          />
+        ) : (
+          <div style={S.productImgPlaceholder}>📷</div>
+        )}
+        {p.status && (
+          <span style={{ ...S.productStatusBadge, color: st.color, background: st.bg }}>{p.status}</span>
+        )}
+      </div>
+      <div style={S.productBody}>
+        <div style={S.productName} title={p.name}>{p.name || "—"}</div>
+        {(p.category || []).length > 0 && (
+          <div style={S.productCategory}>{p.category.join(" · ")}</div>
+        )}
+        <div style={S.productOptions}>
+          {(p.color || []).length > 0 && <span>🎨 {p.color.join(", ")}</span>}
+          {(p.size || []).length > 0 && <span>📏 {p.size.join(", ")}</span>}
+        </div>
+        <div style={S.productMeta}>
+          {(p.season || []).length > 0 && <span style={S.productTag}>{p.season.join(", ")}</span>}
+          {(p.year || []).length > 0 && <span style={S.productTag}>{p.year.join(", ")}</span>}
+        </div>
+        <div style={S.productPriceRow}>
+          <span style={S.productPrice}>{p.price != null ? `₩${fmt(p.price)}` : "—"}</span>
+          {p.cost != null && <span style={S.productCost}>원가 ₩{fmt(p.cost)}</span>}
+        </div>
+      </div>
     </div>
   );
 }
@@ -3059,6 +3244,30 @@ const S = {
   tab: { background: "transparent", border: "none", padding: "9px 18px", borderRadius: 6, fontSize: 14, fontWeight: 500, color: "#64748B", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 },
   tabActive: { background: "#0F172A", color: "white" },
   tabCount: { background: "rgba(0,0,0,0.08)", padding: "1px 7px", borderRadius: 8, fontSize: 12, fontWeight: 600 },
+
+  // 상단 페이지 네비게이션
+  pageNav: { display: "flex", gap: 4, background: "white", padding: 6, borderRadius: 10, border: "1px solid #E2E8F0", marginBottom: 20, width: "fit-content" },
+  pageNavBtn: { background: "transparent", border: "none", padding: "10px 22px", borderRadius: 6, fontSize: 15, fontWeight: 600, color: "#64748B", cursor: "pointer" },
+  pageNavActive: { background: "#0F172A", color: "white" },
+
+  // 제품 DB
+  productError: { background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10, padding: 24, color: "#7F1D1D" },
+  productCount: { fontSize: 13, color: "#64748B", marginBottom: 12, fontWeight: 500 },
+  productGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 16 },
+  productCard: { background: "white", border: "1px solid #E2E8F0", borderRadius: 12, overflow: "hidden", display: "flex", flexDirection: "column" },
+  productImgWrap: { position: "relative", width: "100%", aspectRatio: "1 / 1", background: "#F1F5F9" },
+  productImg: { width: "100%", height: "100%", objectFit: "cover", display: "block" },
+  productImgPlaceholder: { width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 36, color: "#CBD5E1" },
+  productStatusBadge: { position: "absolute", top: 8, left: 8, padding: "3px 10px", borderRadius: 12, fontSize: 11, fontWeight: 700 },
+  productBody: { padding: "12px 14px", display: "flex", flexDirection: "column", gap: 6 },
+  productName: { fontSize: 14, fontWeight: 700, color: "#0F172A", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", minHeight: 36 },
+  productCategory: { fontSize: 12, color: "#0369A1", fontWeight: 600 },
+  productOptions: { display: "flex", flexDirection: "column", gap: 2, fontSize: 12, color: "#64748B" },
+  productMeta: { display: "flex", flexWrap: "wrap", gap: 4 },
+  productTag: { fontSize: 11, fontWeight: 600, color: "#475569", background: "#F1F5F9", border: "1px solid #E2E8F0", borderRadius: 6, padding: "1px 7px" },
+  productPriceRow: { display: "flex", alignItems: "baseline", justifyContent: "space-between", marginTop: 4, paddingTop: 8, borderTop: "1px solid #F1F5F9" },
+  productPrice: { fontSize: 15, fontWeight: 700, color: "#0F172A", fontVariantNumeric: "tabular-nums" },
+  productCost: { fontSize: 11, color: "#94A3B8", fontVariantNumeric: "tabular-nums" },
 
   // 시즌 필터 바 (KPI 위, 전체 대시보드 스코프)
   seasonBar: { display: "flex", alignItems: "center", gap: 10, marginBottom: 16 },
