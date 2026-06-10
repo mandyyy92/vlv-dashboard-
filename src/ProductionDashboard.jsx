@@ -877,7 +877,6 @@ export default function ProductionDashboard() {
   const [inboundsByOrder, setInboundsByOrder] = useState({});
   const [inboundLinesByOrder, setInboundLinesByOrder] = useState({}); // 옵션별 입고 라인
   const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState("orders"); // 상단 페이지: orders | products
   const [tab, setTab] = useState("all");
   const [selectedId, setSelectedId] = useState(null);
   const [showUpload, setShowUpload] = useState(false);
@@ -1100,20 +1099,6 @@ export default function ProductionDashboard() {
     <div style={S.wrap}>
       <style>{CSS}</style>
 
-      {/* 상단 페이지 네비게이션 */}
-      <nav style={S.pageNav}>
-        <button style={{ ...S.pageNavBtn, ...(page === "orders" ? S.pageNavActive : {}) }} onClick={() => setPage("orders")}>
-          오더 입고현황
-        </button>
-        <button style={{ ...S.pageNavBtn, ...(page === "products" ? S.pageNavActive : {}) }} onClick={() => setPage("products")}>
-          제품 DB
-        </button>
-      </nav>
-
-      {page === "products" ? (
-        <ProductDB />
-      ) : (
-      <>
       {/* 헤더 */}
       <header style={S.header}>
         <div>
@@ -1363,8 +1348,6 @@ export default function ProductionDashboard() {
           onChanged={async () => { setSelectedId(null); await reload(); }}
         />
       )}
-      </>
-      )}
     </div>
   );
 }
@@ -1387,7 +1370,7 @@ function productStatusStyle(status) {
   return PRODUCT_STATUS_COLORS[status] || { color: "#475569", bg: "#F1F5F9" };
 }
 
-function ProductDB() {
+export function ProductDB() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -3244,11 +3227,6 @@ const S = {
   tab: { background: "transparent", border: "none", padding: "9px 18px", borderRadius: 6, fontSize: 14, fontWeight: 500, color: "#64748B", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 },
   tabActive: { background: "#0F172A", color: "white" },
   tabCount: { background: "rgba(0,0,0,0.08)", padding: "1px 7px", borderRadius: 8, fontSize: 12, fontWeight: 600 },
-
-  // 상단 페이지 네비게이션
-  pageNav: { display: "flex", gap: 4, background: "white", padding: 6, borderRadius: 10, border: "1px solid #E2E8F0", marginBottom: 20, width: "fit-content" },
-  pageNavBtn: { background: "transparent", border: "none", padding: "10px 22px", borderRadius: 6, fontSize: 15, fontWeight: 600, color: "#64748B", cursor: "pointer" },
-  pageNavActive: { background: "#0F172A", color: "white" },
 
   // 제품 DB
   productError: { background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10, padding: 24, color: "#7F1D1D" },
