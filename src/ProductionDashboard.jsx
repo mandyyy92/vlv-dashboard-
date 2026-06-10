@@ -1377,6 +1377,7 @@ export function ProductDB() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [seasonFilter, setSeasonFilter] = useState("all");
+  const [selectedId, setSelectedId] = useState(null);
 
   useEffect(() => {
     let alive = true;
@@ -1427,6 +1428,11 @@ export function ProductDB() {
     });
   }, [products, search, statusFilter, seasonFilter]);
 
+  const selected = useMemo(
+    () => products.find(p => p.id === selectedId) || null,
+    [products, selectedId]
+  );
+
   return (
     <div>
       {/* 필터 바: 검색 + 진행상태 + 시즌 */}
@@ -1468,20 +1474,24 @@ export function ProductDB() {
         <>
           <div style={S.productCount}>총 {fmt(filtered.length)}개 제품</div>
           <div style={S.productGrid}>
-            {filtered.map(p => <ProductCard key={p.id} p={p} />)}
+            {filtered.map(p => <ProductCard key={p.id} p={p} onClick={() => setSelectedId(p.id)} />)}
           </div>
         </>
       )}
+
+      {selected && <ProductDrawer p={selected} onClose={() => setSelectedId(null)} />}
     </div>
   );
 }
 
-function ProductCard({ p }) {
+function ProductCard({ p, onClick }) {
   const [imgError, setImgError] = useState(false);
   const st = productStatusStyle(p.status);
   const showImg = p.image && !imgError;
   return (
-    <div style={S.productCard}>
+    <div style={S.productCard} onClick={onClick} role="button" tabIndex={0}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick?.(); } }}>
+
       <div style={S.productImgWrap}>
         {showImg ? (
           <img
@@ -1517,6 +1527,201 @@ function ProductCard({ p }) {
         </div>
       </div>
     </div>
+  );
+}
+
+// ============================================================
+// 제품 DB — 상세 사이드 패널 (기본정보 + Notion 본문)
+// ============================================================
+function ProductDrawer({ p, onClose }) {
+  const [blocks, setBlocks] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [imgError, setImgError] = useState(false);
+  const st = productStatusStyle(p.status);
+  const showImg = p.image && !imgError;
+
+  // ESC 로 닫기
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  // 카드 id 로 Notion 본문(blocks) 로드
+  useEffect(() => {
+    let alive = true;
+    setLoading(true); setError(null); setBlocks(null); setImgError(false);
+    (async () => {
+      try {
+        const r = await fetch(`${PRODUCTS_API}?page=${encodeURIComponent(p.id)}`, {
+          method: "GET",
+          headers: {
+            "Authorization": `Bearer ${SUPABASE_KEY}`,
+            "apikey": SUPABASE_KEY,
+          },
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data?.error ? JSON.stringify(data.error) : `HTTP ${r.status}`);
+        // {blocks:[...]} 가 기본, 혹시 배열로 와도 허용
+        const blk = Array.isArray(data) ? data : data?.blocks;
+        if (!Array.isArray(blk)) throw new Error("본문 형식을 해석할 수 없습니다");
+        if (alive) setBlocks(blk);
+      } catch (e) {
+        if (alive) setError(String(e?.message || e));
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, [p.id]);
+
+  // 표시할 값이 있을 때만 한 줄 렌더
+  const Field = ({ label, children }) =>
+    (children == null || children === "" || (Array.isArray(children) && children.length === 0))
+      ? null
+      : (
+        <div style={S.pdField}>
+          <div style={S.pdFieldLabel}>{label}</div>
+          <div style={S.pdFieldValue}>{children}</div>
+        </div>
+      );
+
+  return (
+    <>
+      <div style={S.drawerBackdrop} onClick={onClose} />
+      <aside style={S.productDrawer}>
+        <div style={S.productDrawerHead}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {(p.category || []).length > 0 && (
+              <div style={S.pdCategory}>{p.category.join(" · ")}</div>
+            )}
+            <div style={S.pdTitle}>{p.name || "—"}</div>
+          </div>
+          <button style={S.iconBtn} onClick={onClose} aria-label="닫기">✕</button>
+        </div>
+
+        <div style={S.drawerBody}>
+          {/* 대표 이미지 */}
+          <div style={S.pdImgWrap}>
+            {showImg ? (
+              <img
+                src={p.image}
+                alt={p.name || ""}
+                style={S.pdImg}
+                referrerPolicy="no-referrer"
+                onError={() => setImgError(true)}
+              />
+            ) : (
+              <div style={S.pdImgPlaceholder}>📷</div>
+            )}
+            {p.status && (
+              <span style={{ ...S.productStatusBadge, color: st.color, background: st.bg }}>{p.status}</span>
+            )}
+          </div>
+
+          {/* 기본 정보 */}
+          <div style={S.pdInfo}>
+            <Field label="진행상태">
+              {p.status ? (
+                <span style={{ ...S.badge, color: st.color, background: st.bg }}>{p.status}</span>
+              ) : null}
+            </Field>
+            <Field label="카테고리">{(p.category || []).join(" · ") || null}</Field>
+            <Field label="컬러">{(p.color || []).join(", ") || null}</Field>
+            <Field label="사이즈">{(p.size || []).join(", ") || null}</Field>
+            <Field label="시즌">{(p.season || []).join(", ") || null}</Field>
+            <Field label="판매년도">{(p.year || []).join(", ") || null}</Field>
+            <Field label="판매가">{p.price != null ? `₩${fmt(p.price)}` : null}</Field>
+            <Field label="생산원가">{p.cost != null ? `₩${fmt(p.cost)}` : null}</Field>
+            <Field label="대표바코드">
+              {p.barcode ? <span style={S.pdMono}>{p.barcode}</span> : null}
+            </Field>
+            <Field label="샘플링크">
+              {p.sampleLink ? (
+                <a href={p.sampleLink} target="_blank" rel="noreferrer" style={S.pdLink}>링크 열기 ↗</a>
+              ) : null}
+            </Field>
+          </div>
+
+          <hr style={S.nbDivider} />
+
+          {/* Notion 본문 */}
+          {loading ? (
+            <div style={{ padding: 32, textAlign: "center" }}>
+              <div style={S.spinner} />
+              <div style={{ marginTop: 12, color: "#64748B", fontSize: 13 }}>본문 로드 중...</div>
+            </div>
+          ) : error ? (
+            <div style={S.productError}>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>본문을 불러오지 못했습니다</div>
+              <div style={{ fontSize: 13, color: "#B91C1C" }}>{error}</div>
+            </div>
+          ) : (blocks && blocks.length > 0) ? (
+            <div style={S.nbRoot}><NotionBlocks blocks={blocks} /></div>
+          ) : (
+            <div style={S.empty}>표시할 본문이 없습니다</div>
+          )}
+        </div>
+      </aside>
+    </>
+  );
+}
+
+// Notion 블록 재귀 렌더. 블록 = {type, text?, image?, children?}
+function NotionBlocks({ blocks, depth = 0 }) {
+  if (!Array.isArray(blocks)) return null;
+  return blocks.map((b, i) => <NotionBlock key={i} block={b} depth={depth} />);
+}
+
+function NotionBlock({ block, depth }) {
+  const { type, text, image, children } = block || {};
+  let node = null;
+  switch (type) {
+    case "heading_1": node = text ? <div style={S.nbH1}>{text}</div> : null; break;
+    case "heading_2": node = text ? <div style={S.nbH2}>{text}</div> : null; break;
+    case "heading_3": node = text ? <div style={S.nbH3}>{text}</div> : null; break;
+    case "paragraph": node = text ? <p style={S.nbP}>{text}</p> : null; break;
+    case "bulleted_list_item":
+    case "numbered_list_item":
+      node = text ? (
+        <div style={S.nbLi}><span style={S.nbBullet}>•</span><span style={S.nbLiText}>{text}</span></div>
+      ) : null;
+      break;
+    case "quote":
+    case "callout":
+      node = text ? <div style={S.nbQuote}>{text}</div> : null; break;
+    case "divider": node = <hr style={S.nbDivider} />; break;
+    case "image": node = <NotionImage url={image} />; break;
+    // table·child_database 등 못 그리는 타입은 건너뜀. text 있으면 문단으로.
+    default: node = text ? <p style={S.nbP}>{text}</p> : null;
+  }
+
+  const hasChildren = Array.isArray(children) && children.length > 0;
+  if (!node && !hasChildren) return null;
+
+  return (
+    <>
+      {node}
+      {hasChildren && (
+        <div style={S.nbIndent}><NotionBlocks blocks={children} depth={depth + 1} /></div>
+      )}
+    </>
+  );
+}
+
+// Notion 이미지 (referrer 차단 + 로드 실패 시 숨김)
+function NotionImage({ url }) {
+  const [err, setErr] = useState(false);
+  if (!url || err) return null;
+  return (
+    <img
+      src={url}
+      alt=""
+      style={S.nbImg}
+      referrerPolicy="no-referrer"
+      onError={() => setErr(true)}
+    />
   );
 }
 
@@ -3246,6 +3451,35 @@ const S = {
   productPriceRow: { display: "flex", alignItems: "baseline", justifyContent: "space-between", marginTop: 4, paddingTop: 8, borderTop: "1px solid #F1F5F9" },
   productPrice: { fontSize: 15, fontWeight: 700, color: "#0F172A", fontVariantNumeric: "tabular-nums" },
   productCost: { fontSize: 11, color: "#94A3B8", fontVariantNumeric: "tabular-nums" },
+
+  // 제품 DB — 상세 사이드 패널
+  productDrawer: { position: "fixed", top: 0, right: 0, bottom: 0, width: 560, maxWidth: "100vw", background: "white", boxShadow: "-12px 0 32px rgba(15,23,42,0.12)", zIndex: 51, display: "flex", flexDirection: "column" },
+  productDrawerHead: { padding: "20px 24px", borderBottom: "1px solid #E2E8F0", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 },
+  pdCategory: { fontSize: 12, color: "#0369A1", fontWeight: 600, marginBottom: 4 },
+  pdTitle: { fontSize: 20, fontWeight: 700, color: "#0F172A", lineHeight: 1.3 },
+  pdImgWrap: { position: "relative", width: "100%", aspectRatio: "1 / 1", background: "#F1F5F9", borderRadius: 10, overflow: "hidden", marginBottom: 16 },
+  pdImg: { width: "100%", height: "100%", objectFit: "cover", display: "block" },
+  pdImgPlaceholder: { width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 48, color: "#CBD5E1" },
+  pdInfo: { display: "flex", flexDirection: "column", gap: 2 },
+  pdField: { display: "grid", gridTemplateColumns: "92px 1fr", gap: 12, alignItems: "baseline", padding: "7px 0", borderTop: "0.5px solid #F1F5F9" },
+  pdFieldLabel: { fontSize: 12, color: "#94A3B8", fontWeight: 600 },
+  pdFieldValue: { fontSize: 14, color: "#1F2937", wordBreak: "break-word" },
+  pdMono: { fontFamily: "'JetBrains Mono', monospace", fontSize: 13, color: "#475569" },
+  pdLink: { fontSize: 14, color: "#0369A1", fontWeight: 600, textDecoration: "none" },
+
+  // Notion 본문 렌더
+  nbRoot: { display: "flex", flexDirection: "column", gap: 8 },
+  nbIndent: { marginLeft: 16, display: "flex", flexDirection: "column", gap: 8, marginTop: 8 },
+  nbH1: { fontSize: 20, fontWeight: 700, color: "#0F172A", lineHeight: 1.3, marginTop: 8 },
+  nbH2: { fontSize: 17, fontWeight: 700, color: "#0F172A", lineHeight: 1.3, marginTop: 6 },
+  nbH3: { fontSize: 15, fontWeight: 700, color: "#1F2937", lineHeight: 1.3, marginTop: 4 },
+  nbP: { fontSize: 14, color: "#334155", lineHeight: 1.6, margin: 0, whiteSpace: "pre-wrap" },
+  nbLi: { display: "flex", gap: 8, fontSize: 14, color: "#334155", lineHeight: 1.6 },
+  nbBullet: { color: "#94A3B8", flexShrink: 0 },
+  nbLiText: { whiteSpace: "pre-wrap" },
+  nbQuote: { borderLeft: "3px solid #CBD5E1", padding: "4px 0 4px 12px", fontSize: 14, color: "#475569", lineHeight: 1.6, whiteSpace: "pre-wrap" },
+  nbDivider: { border: "none", borderTop: "1px solid #E2E8F0", margin: "12px 0" },
+  nbImg: { width: "100%", borderRadius: 8, display: "block" },
 
   // 시즌 필터 바 (KPI 위, 전체 대시보드 스코프)
   seasonBar: { display: "flex", alignItems: "center", gap: 10, marginBottom: 16 },
