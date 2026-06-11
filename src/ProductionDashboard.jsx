@@ -1683,6 +1683,8 @@ function NotionBlock({ block, depth }) {
   if (type === "table") return <NotionTable block={block} />;
   // table_row 는 표 안에서만 렌더 (단독으로는 건너뜀)
   if (type === "table_row") return null;
+  // 임베드 DB: columns/rows 를 표로 렌더
+  if (type === "child_database") return <NotionChildDatabase block={block} />;
 
   // 토글: type "toggle" / toggleable 헤딩 / children 있는 헤딩 → 접기·펼치기
   if (type === "toggle" || (isHeading && (toggleable || hasChildren))) {
@@ -1706,7 +1708,7 @@ function NotionBlock({ block, depth }) {
       node = text ? <div style={S.nbQuote}>{text}</div> : null; break;
     case "divider": node = <hr style={S.nbDivider} />; break;
     case "image": node = <NotionImage url={image} />; break;
-    // child_database 등 못 그리는 타입은 건너뜀. text 있으면 문단으로.
+    // 못 그리는 타입은 건너뜀. text 있으면 문단으로.
     default: node = text ? <p style={S.nbP}>{text}</p> : null;
   }
 
@@ -1761,6 +1763,37 @@ function NotionTable({ block }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+// Notion 임베드 DB(child_database) — title 소제목 + columns/rows 표
+function NotionChildDatabase({ block }) {
+  const { title, columns, rows } = block || {};
+  const cols = Array.isArray(columns) ? columns : [];
+  const data = Array.isArray(rows) ? rows : [];
+  return (
+    <div>
+      {title && <div style={S.nbH3}>{title}</div>}
+      {cols.length > 0 && data.length > 0 && (
+        <div style={S.nbTableWrap}>
+          <table style={S.nbTable}>
+            <thead>
+              <tr>{cols.map((c, i) => <th key={i} style={S.nbTh}>{c}</th>)}</tr>
+            </thead>
+            <tbody>
+              {data.map((row, ri) => (
+                <tr key={ri}>
+                  {cols.map((c, ci) => {
+                    const v = row?.[c];
+                    return <td key={ci} style={S.nbTd}>{v == null ? "" : String(v)}</td>;
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
