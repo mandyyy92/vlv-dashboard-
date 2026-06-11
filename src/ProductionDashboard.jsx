@@ -1675,7 +1675,20 @@ function NotionBlocks({ blocks, depth = 0 }) {
 }
 
 function NotionBlock({ block, depth }) {
-  const { type, text, image, children } = block || {};
+  const { type, text, image, children, toggleable } = block || {};
+  const hasChildren = Array.isArray(children) && children.length > 0;
+  const isHeading = type === "heading_1" || type === "heading_2" || type === "heading_3";
+
+  // 표: children(table_row, 각 cells 배열)을 <table>로 렌더
+  if (type === "table") return <NotionTable block={block} />;
+  // table_row 는 표 안에서만 렌더 (단독으로는 건너뜀)
+  if (type === "table_row") return null;
+
+  // 토글: type "toggle" / toggleable 헤딩 / children 있는 헤딩 → 접기·펼치기
+  if (type === "toggle" || (isHeading && (toggleable || hasChildren))) {
+    return <NotionToggle block={block} depth={depth} />;
+  }
+
   let node = null;
   switch (type) {
     case "heading_1": node = text ? <div style={S.nbH1}>{text}</div> : null; break;
@@ -1693,11 +1706,10 @@ function NotionBlock({ block, depth }) {
       node = text ? <div style={S.nbQuote}>{text}</div> : null; break;
     case "divider": node = <hr style={S.nbDivider} />; break;
     case "image": node = <NotionImage url={image} />; break;
-    // table·child_database 등 못 그리는 타입은 건너뜀. text 있으면 문단으로.
+    // child_database 등 못 그리는 타입은 건너뜀. text 있으면 문단으로.
     default: node = text ? <p style={S.nbP}>{text}</p> : null;
   }
 
-  const hasChildren = Array.isArray(children) && children.length > 0;
   if (!node && !hasChildren) return null;
 
   return (
@@ -1707,6 +1719,49 @@ function NotionBlock({ block, depth }) {
         <div style={S.nbIndent}><NotionBlocks blocks={children} depth={depth + 1} /></div>
       )}
     </>
+  );
+}
+
+// Notion 토글 (헤딩 토글 포함) — 기본 펼침, 클릭 시 children 접기/펼치기
+function NotionToggle({ block, depth }) {
+  const [open, setOpen] = useState(true);
+  const { type, text, children } = block || {};
+  const hasChildren = Array.isArray(children) && children.length > 0;
+  const headStyle = type === "heading_1" ? S.nbH1
+    : type === "heading_2" ? S.nbH2
+    : type === "heading_3" ? S.nbH3
+    : S.nbToggleText;
+  return (
+    <div>
+      <div style={S.nbToggleHead} onClick={() => setOpen(o => !o)}>
+        <span style={S.nbToggleArrow}>{open ? "▼" : "▶"}</span>
+        <span style={headStyle}>{text}</span>
+      </div>
+      {open && hasChildren && (
+        <div style={S.nbIndent}><NotionBlocks blocks={children} depth={depth + 1} /></div>
+      )}
+    </div>
+  );
+}
+
+// Notion 표 — children(table_row)의 cells 배열을 표로. 첫 행은 헤더.
+function NotionTable({ block }) {
+  const rows = (block?.children || []).filter(r => r?.type === "table_row" && Array.isArray(r.cells));
+  if (rows.length === 0) return null;
+  const [head, ...body] = rows;
+  return (
+    <div style={S.nbTableWrap}>
+      <table style={S.nbTable}>
+        <thead>
+          <tr>{head.cells.map((c, i) => <th key={i} style={S.nbTh}>{c}</th>)}</tr>
+        </thead>
+        <tbody>
+          {body.map((r, ri) => (
+            <tr key={ri}>{r.cells.map((c, ci) => <td key={ci} style={S.nbTd}>{c}</td>)}</tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -3479,7 +3534,16 @@ const S = {
   nbLiText: { whiteSpace: "pre-wrap" },
   nbQuote: { borderLeft: "3px solid #CBD5E1", padding: "4px 0 4px 12px", fontSize: 14, color: "#475569", lineHeight: 1.6, whiteSpace: "pre-wrap" },
   nbDivider: { border: "none", borderTop: "1px solid #E2E8F0", margin: "12px 0" },
-  nbImg: { width: "100%", borderRadius: 8, display: "block" },
+  nbImg: { maxWidth: "100%", height: "auto", maxHeight: 500, objectFit: "contain", borderRadius: 8, display: "block" },
+  // 토글
+  nbToggleHead: { display: "flex", alignItems: "baseline", gap: 6, cursor: "pointer", userSelect: "none" },
+  nbToggleArrow: { fontSize: 10, color: "#94A3B8", flexShrink: 0, lineHeight: 1.6 },
+  nbToggleText: { fontSize: 14, fontWeight: 600, color: "#334155", lineHeight: 1.6 },
+  // 표
+  nbTableWrap: { overflowX: "auto", border: "1px solid #E2E8F0", borderRadius: 8 },
+  nbTable: { borderCollapse: "collapse", width: "100%", fontSize: 13 },
+  nbTh: { border: "1px solid #E2E8F0", padding: "8px 10px", textAlign: "left", fontWeight: 700, color: "#0F172A", background: "#F8FAFC", whiteSpace: "pre-wrap", verticalAlign: "top" },
+  nbTd: { border: "1px solid #E2E8F0", padding: "8px 10px", textAlign: "left", color: "#334155", whiteSpace: "pre-wrap", verticalAlign: "top" },
 
   // 시즌 필터 바 (KPI 위, 전체 대시보드 스코프)
   seasonBar: { display: "flex", alignItems: "center", gap: 10, marginBottom: 16 },
