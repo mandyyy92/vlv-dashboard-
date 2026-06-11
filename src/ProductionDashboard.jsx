@@ -1683,8 +1683,15 @@ function NotionBlock({ block, depth }) {
   if (type === "table") return <NotionTable block={block} />;
   // table_row 는 표 안에서만 렌더 (단독으로는 건너뜀)
   if (type === "table_row") return null;
-  // 임베드 DB: columns/rows 를 표로 렌더
-  if (type === "child_database") return <NotionChildDatabase block={block} />;
+  // child_page 는 건너뜀 (본문에 제목만 노출되는 잡음 제거)
+  if (type === "child_page") return null;
+  // 임베드 DB: columns/rows 를 표로 렌더 (title 없음/"Untitled"/rows 비면 건너뜀)
+  if (type === "child_database") {
+    const t = (block?.title || "").trim();
+    const hasRows = Array.isArray(block?.rows) && block.rows.length > 0;
+    if (!t || t.toLowerCase() === "untitled" || !hasRows) return null;
+    return <NotionChildDatabase block={block} />;
+  }
 
   // 토글: type "toggle" / toggleable 헤딩 / children 있는 헤딩 → 접기·펼치기
   if (type === "toggle" || (isHeading && (toggleable || hasChildren))) {
@@ -1784,10 +1791,9 @@ function NotionChildDatabase({ block }) {
             <tbody>
               {data.map((row, ri) => (
                 <tr key={ri}>
-                  {cols.map((c, ci) => {
-                    const v = row?.[c];
-                    return <td key={ci} style={S.nbTd}>{v == null ? "" : String(v)}</td>;
-                  })}
+                  {cols.map((c, ci) => (
+                    <td key={ci} style={S.nbTd}><NotionCell value={row?.[c]} /></td>
+                  ))}
                 </tr>
               ))}
             </tbody>
@@ -1795,6 +1801,41 @@ function NotionChildDatabase({ block }) {
         </div>
       )}
     </div>
+  );
+}
+
+// 임베드 DB 셀 — http URL 이면 썸네일(클릭 시 새 탭), 여러 URL은 \n 으로 분리. 아니면 텍스트.
+function NotionCell({ value }) {
+  if (value == null) return null;
+  const text = String(value);
+  const parts = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  const allUrls = parts.length > 0 && parts.every(s => /^https?:\/\//i.test(s));
+  if (allUrls) {
+    return (
+      <div style={S.nbCellThumbs}>
+        {parts.map((u, i) => <NotionCellThumb key={i} url={u} />)}
+      </div>
+    );
+  }
+  return text;
+}
+
+// 셀 썸네일 — 클릭 시 새 탭에서 원본 열기(다운로드), 로드 실패 시 링크로 폴백
+function NotionCellThumb({ url }) {
+  const [err, setErr] = useState(false);
+  if (err) {
+    return <a href={url} target="_blank" rel="noreferrer" style={S.pdLink}>링크 ↗</a>;
+  }
+  return (
+    <a href={url} target="_blank" rel="noreferrer" title="원본 열기">
+      <img
+        src={url}
+        alt=""
+        style={S.nbCellThumb}
+        referrerPolicy="no-referrer"
+        onError={() => setErr(true)}
+      />
+    </a>
   );
 }
 
@@ -3541,7 +3582,7 @@ const S = {
   productCost: { fontSize: 11, color: "#94A3B8", fontVariantNumeric: "tabular-nums" },
 
   // 제품 DB — 상세 사이드 패널
-  productDrawer: { position: "fixed", top: 0, right: 0, bottom: 0, width: 560, maxWidth: "100vw", background: "white", boxShadow: "-12px 0 32px rgba(15,23,42,0.12)", zIndex: 51, display: "flex", flexDirection: "column" },
+  productDrawer: { position: "fixed", top: 0, right: 0, bottom: 0, width: 760, maxWidth: "90vw", background: "white", boxShadow: "-12px 0 32px rgba(15,23,42,0.12)", zIndex: 51, display: "flex", flexDirection: "column" },
   productDrawerHead: { padding: "20px 24px", borderBottom: "1px solid #E2E8F0", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 },
   pdCategory: { fontSize: 12, color: "#0369A1", fontWeight: 600, marginBottom: 4 },
   pdTitle: { fontSize: 20, fontWeight: 700, color: "#0F172A", lineHeight: 1.3 },
@@ -3577,6 +3618,8 @@ const S = {
   nbTable: { borderCollapse: "collapse", width: "100%", fontSize: 13 },
   nbTh: { border: "1px solid #E2E8F0", padding: "8px 10px", textAlign: "left", fontWeight: 700, color: "#0F172A", background: "#F8FAFC", whiteSpace: "pre-wrap", verticalAlign: "top" },
   nbTd: { border: "1px solid #E2E8F0", padding: "8px 10px", textAlign: "left", color: "#334155", whiteSpace: "pre-wrap", verticalAlign: "top" },
+  nbCellThumbs: { display: "flex", flexWrap: "wrap", gap: 6 },
+  nbCellThumb: { width: 64, height: 64, objectFit: "cover", borderRadius: 6, border: "1px solid #E2E8F0", display: "block", cursor: "pointer", background: "#F1F5F9" },
 
   // 시즌 필터 바 (KPI 위, 전체 대시보드 스코프)
   seasonBar: { display: "flex", alignItems: "center", gap: 10, marginBottom: 16 },
