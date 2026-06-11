@@ -1530,6 +1530,46 @@ function ProductCard({ p, onClick }) {
   );
 }
 
+// 한글 색상명 → hex. 복합색('-')은 두 색 반반 그라데이션, 없으면 회색 폴백.
+const COLOR_HEX = {
+  "화이트":"#FFFFFF","아이보리":"#FFFFF0","크림":"#FFF8E1","블랙":"#1A1A1A","검정":"#1A1A1A",
+  "그레이":"#9CA3AF","라이트그레이":"#C4C7CC","멜란지그레이":"#B0B3B8","멜란지":"#C4C4C4","백멜란지":"#D6D6D6",
+  "차콜":"#36454F","네이비":"#1F2A44","곤색":"#1F2A44","다크네이비":"#16203A",
+  "블루":"#2563EB","스카이블루":"#7DD3FC","스카이":"#7DD3FC","샌드블루":"#9DB4CE","연청":"#93B7D4","중청":"#4A6FA5",
+  "그린":"#16A34A","카키":"#6B7A3F","카모":"#5A5F3D","차코":"#3F4A3A",
+  "레드":"#DC2626","버건디":"#7B1E3A","핑크":"#F9A8D4","그레이핑크":"#D8A7B1",
+  "퍼플":"#7C3AED","오렌지":"#F97316","옐로우":"#FACC15",
+  "베이지":"#E3D5B8","연베이지":"#ECE0C6","라이트베이지":"#E7D8BC","오트밀":"#D8C9A3","브라운":"#8B5A2B","먹밤":"#3B2A24"
+};
+const COLOR_FALLBACK = "#D1D5DB";
+// hex 밝기(0~1) — 밝은 색은 흰 배경에서 안 보이니 테두리 강조
+function hexLum(hex) {
+  const h = (hex || "").replace("#", "");
+  if (h.length < 6) return 0.5;
+  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+}
+function ColorChip({ name }) {
+  const parts = String(name).split("-").map(s => s.trim()).filter(Boolean);
+  let bg, light;
+  if (parts.length >= 2) {
+    const h1 = COLOR_HEX[parts[0]] || COLOR_FALLBACK;
+    const h2 = COLOR_HEX[parts[1]] || COLOR_FALLBACK;
+    bg = `linear-gradient(135deg, ${h1} 0 50%, ${h2} 50% 100%)`;
+    light = hexLum(h1) > 0.8 || hexLum(h2) > 0.8;
+  } else {
+    const h = COLOR_HEX[name] || COLOR_FALLBACK;
+    bg = h;
+    light = hexLum(h) > 0.8;
+  }
+  return (
+    <span style={S.colorChipWrap}>
+      <span style={{ ...S.colorDot, background: bg, border: light ? "1px solid #DDD" : "1px solid rgba(0,0,0,0.08)" }} />
+      <span>{name}</span>
+    </span>
+  );
+}
+
 // ============================================================
 // 제품 DB — 상세 사이드 패널 (기본정보 + Notion 본문)
 // ============================================================
@@ -1587,6 +1627,13 @@ function ProductDrawer({ p, onClose }) {
         </div>
       );
 
+  // 배열 값을 둥근 pill 묶음으로
+  const Pills = ({ items }) => {
+    const arr = (items || []).filter(Boolean);
+    if (arr.length === 0) return null;
+    return <div style={S.pdPills}>{arr.map((x, i) => <span key={i} style={S.pdPill}>{x}</span>)}</div>;
+  };
+
   return (
     <>
       <div style={S.drawerBackdrop} onClick={onClose} />
@@ -1620,20 +1667,30 @@ function ProductDrawer({ p, onClose }) {
             )}
           </div>
 
-          {/* 기본 정보 */}
+          {/* 기본 정보 카드 */}
           <div style={S.pdInfo}>
+            {/* 가격 강조 */}
+            {(p.price != null || p.cost != null) && (
+              <div style={S.pdPriceRow}>
+                {p.price != null && <span style={S.pdPrice}>₩{fmt(p.price)}</span>}
+                {p.cost != null && <span style={S.pdCost}>원가 ₩{fmt(p.cost)}</span>}
+              </div>
+            )}
+
             <Field label="진행상태">
               {p.status ? (
                 <span style={{ ...S.badge, color: st.color, background: st.bg }}>{p.status}</span>
               ) : null}
             </Field>
-            <Field label="카테고리">{(p.category || []).join(" · ") || null}</Field>
-            <Field label="컬러">{(p.color || []).join(", ") || null}</Field>
-            <Field label="사이즈">{(p.size || []).join(", ") || null}</Field>
-            <Field label="시즌">{(p.season || []).join(", ") || null}</Field>
-            <Field label="판매년도">{(p.year || []).join(", ") || null}</Field>
-            <Field label="판매가">{p.price != null ? `₩${fmt(p.price)}` : null}</Field>
-            <Field label="생산원가">{p.cost != null ? `₩${fmt(p.cost)}` : null}</Field>
+            <Field label="카테고리">{(p.category || []).length ? <Pills items={p.category} /> : null}</Field>
+            <Field label="컬러">
+              {(p.color || []).length ? (
+                <div style={S.pdChips}>{p.color.map((c, i) => <ColorChip key={i} name={c} />)}</div>
+              ) : null}
+            </Field>
+            <Field label="사이즈">{(p.size || []).length ? <Pills items={p.size} /> : null}</Field>
+            <Field label="시즌">{(p.season || []).length ? <Pills items={p.season} /> : null}</Field>
+            <Field label="판매년도">{(p.year || []).length ? <Pills items={p.year} /> : null}</Field>
             <Field label="대표바코드">
               {p.barcode ? <span style={S.pdMono}>{p.barcode}</span> : null}
             </Field>
@@ -3589,12 +3646,23 @@ const S = {
   pdImgWrap: { position: "relative", width: "100%", aspectRatio: "1 / 1", background: "#F1F5F9", borderRadius: 10, overflow: "hidden", marginBottom: 16 },
   pdImg: { width: "100%", height: "100%", objectFit: "cover", display: "block" },
   pdImgPlaceholder: { width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 48, color: "#CBD5E1" },
-  pdInfo: { display: "flex", flexDirection: "column", gap: 2 },
-  pdField: { display: "grid", gridTemplateColumns: "92px 1fr", gap: 12, alignItems: "baseline", padding: "7px 0", borderTop: "0.5px solid #F1F5F9" },
+  pdInfo: { display: "flex", flexDirection: "column", border: "1px solid #E2E8F0", borderRadius: 12, padding: "4px 16px" },
+  pdField: { display: "grid", gridTemplateColumns: "84px 1fr", gap: 12, alignItems: "center", padding: "9px 0", borderTop: "1px solid #F1F5F9" },
   pdFieldLabel: { fontSize: 12, color: "#94A3B8", fontWeight: 600 },
   pdFieldValue: { fontSize: 14, color: "#1F2937", wordBreak: "break-word" },
-  pdMono: { fontFamily: "'JetBrains Mono', monospace", fontSize: 13, color: "#475569" },
+  pdMono: { fontFamily: "'JetBrains Mono', monospace", fontSize: 13, color: "#94A3B8", letterSpacing: 0.3 },
   pdLink: { fontSize: 14, color: "#0369A1", fontWeight: 600, textDecoration: "none" },
+  // 가격 강조 행
+  pdPriceRow: { display: "flex", alignItems: "baseline", gap: 10, padding: "12px 0 10px" },
+  pdPrice: { fontSize: 24, fontWeight: 800, color: "#0F172A", fontVariantNumeric: "tabular-nums", lineHeight: 1 },
+  pdCost: { fontSize: 12, color: "#94A3B8", fontVariantNumeric: "tabular-nums" },
+  // pill 묶음 (카테고리·사이즈·시즌·판매년도)
+  pdPills: { display: "flex", flexWrap: "wrap", gap: 6 },
+  pdPill: { fontSize: 12, fontWeight: 600, color: "#475569", background: "#F1F5F9", border: "1px solid #E2E8F0", borderRadius: 999, padding: "2px 10px" },
+  // 컬러칩
+  pdChips: { display: "flex", flexWrap: "wrap", gap: 10 },
+  colorChipWrap: { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: "#334155" },
+  colorDot: { width: 16, height: 16, borderRadius: "50%", display: "inline-block", flexShrink: 0, boxSizing: "border-box" },
 
   // Notion 본문 렌더
   nbRoot: { display: "flex", flexDirection: "column", gap: 8 },
