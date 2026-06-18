@@ -35,12 +35,18 @@ function determineOrderStatus(total_qty, received_qty, expected_final_date) {
   return overdue ? "delayed" : "in_progress";
 }
 
+// 수동 지정 가능한 상태값 (status_override 에 저장되는 유효 값). 이외 값은 무시하고 자동 계산 사용.
+const MANUAL_STATUS_VALUES = ["in_progress", "partial", "completed", "delayed"];
+
 function calcOrderTotals(order, items, inbounds) {
   const total_qty = items.reduce((s, it) => s + (it.order_qty || 0), 0);
   const received_qty = inbounds.reduce((s, ib) => s + (ib.qty || 0), 0);
   const remain_qty = received_qty - total_qty;
 
-  const status = determineOrderStatus(total_qty, received_qty, order.expected_final_date);
+  // 자동 계산 상태와 최종 상태(수동 지정값 우선) 분리. 배지·탭·KPI 모두 최종 status 사용.
+  const auto_status = determineOrderStatus(total_qty, received_qty, order.expected_final_date);
+  const is_manual = MANUAL_STATUS_VALUES.includes(order.status_override);
+  const status = is_manual ? order.status_override : auto_status;
 
   // 수동 저장된 실제 완료일이 있으면 우선 사용, 없으면 완납 시 마지막 입고일로 추정
   let actual_final_date = order.actual_final_date || null;
@@ -53,7 +59,7 @@ function calcOrderTotals(order, items, inbounds) {
     ? Math.round((new Date(actual_final_date) - new Date(order.contract_date)) / 86400000)
     : null;
 
-  return { total_qty, received_qty, remain_qty, status, leadtime_days, actual_final_date, receive_rate: total_qty ? Math.round((received_qty / total_qty) * 1000) / 10 : 0 };
+  return { total_qty, received_qty, remain_qty, status, auto_status, is_manual, leadtime_days, actual_final_date, receive_rate: total_qty ? Math.round((received_qty / total_qty) * 1000) / 10 : 0 };
 }
 
 const STATUS_LABEL = {
@@ -869,6 +875,66 @@ async function parsePackingList(file) {
 }
 
 // ============================================================
+// 상태 배지 + 드롭다운(수동 지정)
+// 배지를 클릭하면 진행중/부분입고/입고완료/지연/자동(계산값) 선택 메뉴 표시.
+// onChange(value) — value=상태문자열이면 수동 지정, null 이면 자동 계산 복귀.
+// ============================================================
+const STATUS_OPTIONS = [
+  { value: "in_progress", ko: "진행중" },
+  { value: "partial", ko: "부분입고" },
+  { value: "completed", ko: "입고완료" },
+  { value: "delayed", ko: "지연" },
+];
+
+function StatusBadgeSelect({ status, isManual, onChange, big = false }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+  const lbl = STATUS_LABEL[status] || STATUS_LABEL.in_progress;
+  return (
+    <div ref={ref} style={{ position: "relative", display: "inline-block" }} onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); setOpen(o => !o); }}
+        style={{ ...S.badge, ...(big ? S.badgeBig : {}), color: lbl.color, background: lbl.bg, border: "none", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}
+        title="클릭하여 상태 변경"
+      >
+        {lbl.ko}
+        {isManual && <span style={S.manualTag}>수동</span>}
+        <span style={{ fontSize: 9, opacity: 0.55 }}>▾</span>
+      </button>
+      {open && (
+        <div style={S.statusMenu}>
+          {STATUS_OPTIONS.map(opt => (
+            <div
+              key={opt.value}
+              style={{ ...S.statusMenuItem, ...(isManual && status === opt.value ? S.statusMenuItemActive : {}) }}
+              onClick={(e) => { e.stopPropagation(); setOpen(false); onChange(opt.value); }}
+            >
+              <span style={{ width: 8, height: 8, borderRadius: 8, background: STATUS_LABEL[opt.value].color, display: "inline-block", flexShrink: 0 }} />
+              {opt.ko}
+            </div>
+          ))}
+          <div style={S.statusMenuDivider} />
+          <div
+            style={{ ...S.statusMenuItem, ...(!isManual ? S.statusMenuItemActive : {}) }}
+            onClick={(e) => { e.stopPropagation(); setOpen(false); onChange(null); }}
+          >
+            <span style={{ width: 8, height: 8, borderRadius: 8, border: "1px dashed #94A3B8", display: "inline-block", flexShrink: 0 }} />
+            자동(계산값)
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
 // 메인 컴포넌트
 // ============================================================
 export default function ProductionDashboard() {
@@ -1076,6 +1142,17 @@ export default function ProductionDashboard() {
     }
   };
 
+  // 상태 수동 지정/해제. value=null 이면 status_override 를 null 로 → 다시 자동 계산.
+  // ★production_orders 만 UPDATE. 보호 테이블 미접근.★
+  const handleStatusOverride = async (orderId, value) => {
+    try {
+      await updateOrder(orderId, { status_override: value });
+      await reload();
+    } catch (e) {
+      alert("상태 변경 실패: " + e.message);
+    }
+  };
+
   const handleDelete = async (orderId) => {
     if (!confirm("이 오더를 삭제하시겠습니까? 관련 입고 이력도 함께 삭제됩니다.")) return;
     await deleteOrder(orderId);
@@ -1267,9 +1344,11 @@ export default function ProductionDashboard() {
                             <td style={S.td}>{o.actual_final_date ?? "—"}</td>
                             <td style={S.tdR}>{o.leadtime_days != null ? `${o.leadtime_days}일` : "—"}</td>
                             <td style={S.tdC}>
-                              <span style={{ ...S.badge, color: STATUS_LABEL[o.status].color, background: STATUS_LABEL[o.status].bg }}>
-                                {STATUS_LABEL[o.status].ko}
-                              </span>
+                              <StatusBadgeSelect
+                                status={o.status}
+                                isManual={o.is_manual}
+                                onChange={(v) => handleStatusOverride(o.id, v)}
+                              />
                             </td>
                             <td style={S.tdC}>
                               <button style={S.miniBtn} onClick={(e) => { e.stopPropagation(); setShowInbound(o.id); }}>입고 등록</button>
@@ -2115,9 +2194,12 @@ function OrderDrawer({ order, onClose, onAddInbound, onDelete, onUpdate, onDelet
             <div style={S.detailSection}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div style={S.drawerCardHead}>현재 상태</div>
-                <span style={{ ...S.badge, color: STATUS_LABEL[order.status].color, background: STATUS_LABEL[order.status].bg }}>
-                  {STATUS_LABEL[order.status].ko}
-                </span>
+                <StatusBadgeSelect
+                  status={order.status}
+                  isManual={order.is_manual}
+                  big
+                  onChange={(v) => onUpdate({ status_override: v })}
+                />
               </div>
               <div style={{ display: "flex", alignItems: "baseline", marginTop: 10 }}>
                 <span style={S.heroNum}>{fmt(order.received_qty)}<span style={S.heroNumUnit}> / {fmt(order.total_qty)} 장</span></span>
@@ -3731,6 +3813,11 @@ const S = {
 
   badge: { display: "inline-block", padding: "4px 11px", borderRadius: 12, fontSize: 12, fontWeight: 600 },
   badgeBig: { padding: "6px 15px", fontSize: 14 },
+  manualTag: { fontSize: 9, fontWeight: 700, padding: "1px 4px", borderRadius: 5, background: "rgba(15,23,42,0.12)", color: "#334155", lineHeight: 1.4 },
+  statusMenu: { position: "absolute", top: "calc(100% + 4px)", left: "50%", transform: "translateX(-50%)", background: "white", border: "1px solid #E2E8F0", borderRadius: 10, boxShadow: "0 8px 24px rgba(15,23,42,0.16)", padding: 5, zIndex: 60, minWidth: 130 },
+  statusMenuItem: { display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", borderRadius: 7, fontSize: 13, color: "#334155", cursor: "pointer", whiteSpace: "nowrap" },
+  statusMenuItemActive: { background: "#F1F5F9", fontWeight: 700 },
+  statusMenuDivider: { height: 1, background: "#E2E8F0", margin: "4px 2px" },
 
   progBar: { width: 80, height: 5, background: "#E2E8F0", borderRadius: 3, overflow: "hidden", display: "inline-block", verticalAlign: "middle" },
   progFill: { height: "100%", background: "#0369A1", transition: "width 0.3s" },
