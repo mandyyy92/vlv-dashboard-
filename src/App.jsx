@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { sb } from "./lib/supabaseClient";
+import { sb, SUPABASE_URL, SUPABASE_KEY } from "./lib/supabaseClient";
 import { useReorderData, adaptToBasic } from "./hooks/useReorderData";
 import { useReferenceItems } from "./hooks/useReferenceItems";
 import ReferenceItemForm from "./components/ReferenceItemForm";
@@ -22,6 +22,43 @@ const UNIQUE_PRODUCTS=[...new Set(SKUS.map(s=>s[F.REP]))].length;
 const SUPPLIERS=["자체제작","국내-베키(동대문)","수입-(복건)GL","수입-(광동)BJ","수입-(복건)SY"];
 const SUPPLIER_COLORS={"자체제작":"#E8A87C","국내-베키(동대문)":"#85CDCA","수입-(복건)GL":"#D5A4CF","수입-(광동)BJ":"#8B5CF6","수입-(복건)SY":"#3B82F6"};
 const SCHEDULE_SUP_STYLES={"인도":{color:"#16A34A",bg:"#F0FDF4",icon:"🇮🇳"},"코니키즈":{color:"#2563EB",bg:"#EFF6FF",icon:"🏭"},"성은교역":{color:"#D97706",bg:"#FFFBEB",icon:"📦"},"오중":{color:"#0891B2",bg:"#ECFEFF",icon:"🏢"}};
+
+// ─── Notion 발주DB(super-worker) 병합 ───
+// 진행상태 → 기존 캘린더 상태 색에 매핑(확인중=amber, 확정=green 계열).
+const NOTION_STATUS_COLOR={
+  "발주중":{bg:"#F1F5F9",color:"#64748B"},
+  "생산중":{bg:"#FEF3C7",color:"#D97706"},
+  "선적 완료":{bg:"#DCFCE7",color:"#16A34A"},
+  "입고 일정 확인중":{bg:"#FEF3C7",color:"#F59E0B"},
+  "입고 확정":{bg:"#DCFCE7",color:"#10B981"},
+  "입고 완료":{bg:"#D1FAE5",color:"#059669"},
+};
+// super-worker GET → 캘린더 이벤트 매핑. 실패/지연해도 기존 캘린더 정상(빈 배열 반환).
+async function fetchNotionSchedule(){
+  try{
+    const r=await fetch(`${SUPABASE_URL}/functions/v1/super-worker`,{
+      method:"GET",
+      headers:{"Authorization":`Bearer ${SUPABASE_KEY}`,"apikey":SUPABASE_KEY},
+    });
+    if(!r.ok){console.warn("[super-worker] 응답 실패",r.status);return[];}
+    const data=await r.json();
+    const list=Array.isArray(data)?data:(data?.events||data?.data||[]);
+    return (list||[]).map(n=>({
+      _notion:true,
+      id:`notion-${n.id}`,
+      date:n.date,
+      orderDate:n.orderDate,
+      item:n.title||"",
+      round:n.round,
+      qty:n.qty||0,
+      received:n.received||0,
+      supplier:n.vendor||"",
+      status:n.status||"",
+      category:n.category||"",
+      code:n.code||"",
+    })).filter(n=>n.date);
+  }catch(e){console.warn("[super-worker] 호출 실패",e);return[];}
+}
 const getSupColor=(s)=>{
   if(SUPPLIER_COLORS[s])return SUPPLIER_COLORS[s];
   if(s.startsWith("자체"))return"#E8A87C";if(s.startsWith("국내"))return"#85CDCA";return"#D5A4CF";
@@ -677,6 +714,7 @@ function PackingListTab(){
 // ─── Tab 2: 입고 스케줄 (Supabase - 캘린더+업체별) ───
 function ScheduleTab(){
   const[schedules,setSchedules]=useState([]);
+  const[notionEvents,setNotionEvents]=useState([]); // Notion 발주DB(super-worker) 병합 이벤트
   const[loading,setLoading]=useState(true);
   const[viewMode,setViewMode]=useState("calendar");
   const[chatInput,setChatInput]=useState("");
@@ -716,7 +754,15 @@ function ScheduleTab(){
   const SUPPLIERS=["인도","코니키즈","성은교역","오중"];
   const SUP_STYLES=SCHEDULE_SUP_STYLES;
 
-  useEffect(()=>{(async()=>{setLoading(true);const data=await sb.get("schedules");setSchedules(data||[]);setLoading(false);})();},[]);
+  useEffect(()=>{(async()=>{
+    setLoading(true);
+    const data=await sb.get("schedules");
+    setSchedules(data||[]);
+    setLoading(false);
+    // Notion 발주DB 병합 (실패/지연해도 기존 캘린더는 정상 렌더, Notion 이벤트만 빈 배열)
+    try{const notion=await fetchNotionSchedule();setNotionEvents(notion);}
+    catch(e){console.warn("[super-worker] 병합 실패",e);setNotionEvents([]);}
+  })();},[]);
 
   // 한국도착일 입력 시 오즈센터 도착일 자동계산 (+3일)
   const handleKrDate=(v)=>{
@@ -1092,6 +1138,8 @@ function ScheduleTab(){
       if(s.kr_date===dayStr||(!s.kr_date&&!s.ship_date&&!s.oz_date&&s.date===dayStr))events.push({...s,eventType:"kr",label:"한국 도착"});
       if(s.oz_date===dayStr)events.push({...s,eventType:"oz",label:"오즈센터 도착"});
     });
+    // Notion 발주DB 이벤트 병합 (dedup 안 함, 중복 OK)
+    notionEvents.forEach(n=>{if(n.date===dayStr)events.push({...n,eventType:"notion",label:"발주"});});
     return events;
   };
   const evtColor=(type,sup)=>{
@@ -1133,6 +1181,9 @@ function ScheduleTab(){
           <span style={{display:"inline-flex",alignItems:"center",gap:4}}>
             <span style={{display:"inline-block",width:8,height:8,borderRadius:"50%",background:"#10B981"}} />입고 확정
           </span>
+          <span style={{display:"inline-flex",alignItems:"center",gap:4}}>
+            <span style={{display:"inline-block",fontSize:9,fontWeight:800,background:"#0F172A",color:"#FFF",borderRadius:3,padding:"0 4px",lineHeight:1.6}}>N</span>Notion 발주DB
+          </span>
         </div>
         <div style={{display:"flex",gap:6}}>
           <SmallBtn onClick={()=>setCurrentMonth(p=>{let m=p.month-1,y=p.year;if(m<0){m=11;y--;}return{year:y,month:m};})}>◀ 이전</SmallBtn>
@@ -1157,7 +1208,27 @@ function ScheduleTab(){
             onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget))setDragOverDay(prev=>prev===dayStr?null:prev);}}
             onDrop={e=>handleCellDrop(e,dayStr)}>
             <div style={{fontSize:14,fontWeight:isToday?800:500,color:isToday?"#2563EB":dow===0?"#DC2626":dow===6?"#2563EB":"#334155",marginBottom:4}}>{day}</div>
-            {events.map((ev,j)=>{const ec=evtColor(ev.eventType,ev.supplier);const isDragging=dragItem&&dragItem.id===ev.id&&dragItem.eventType===ev.eventType;return(
+            {events.map((ev,j)=>{
+              // Notion 발주DB 이벤트: 'N' 배지 + 진행상태 색. 읽기 전용(드래그/편집 없음).
+              if(ev._notion){
+                const nc=NOTION_STATUS_COLOR[ev.status]||{bg:"#EDE9FE",color:"#6D28D9"};
+                return(
+                  <div key={ev.id} title={`[Notion] ${ev.status||""}${ev.category?" · "+ev.category:""}${ev.code?" · "+ev.code:""}`}
+                    style={{padding:"9px 8px",borderRadius:4,marginBottom:2,background:nc.bg,fontSize:12,lineHeight:1.4,border:"1px dashed "+nc.color,userSelect:"none"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:4,color:nc.color,fontWeight:600}}>
+                      <span style={{display:"flex",alignItems:"center",gap:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                        <span style={{display:"inline-block",fontSize:9,fontWeight:800,background:"#0F172A",color:"#FFF",borderRadius:3,padding:"0 4px",lineHeight:1.6,flexShrink:0}}>N</span>
+                        {ev.status||"발주"}
+                      </span>
+                      {ev.supplier&&<span style={{opacity:0.85,fontWeight:500,flexShrink:0}}>· {ev.supplier}</span>}
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:4,marginTop:10,fontSize:15,lineHeight:1.2}}>
+                      <span style={{fontWeight:700,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{translateItemName(ev.item)}{ev.round?`_${ev.round}`:""}</span>
+                      {ev.qty>0&&<span style={{color:"#0F172A",fontWeight:700,flexShrink:0}}>{ev.qty.toLocaleString()}장</span>}
+                    </div>
+                  </div>);
+              }
+              const ec=evtColor(ev.eventType,ev.supplier);const isDragging=dragItem&&dragItem.id===ev.id&&dragItem.eventType===ev.eventType;return(
               <div key={`${ev.id}-${ev.eventType}`} draggable
                 title="클릭: 수정 / 드래그: 날짜 이동"
                 style={{padding:"9px 8px",borderRadius:4,marginBottom:2,background:ec.bg,fontSize:12,lineHeight:1.4,cursor:"grab",userSelect:"none",border:isDragging?"2px solid "+ec.color:"1px solid transparent",opacity:isDragging?0.5:1}}
