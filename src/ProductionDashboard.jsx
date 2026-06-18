@@ -886,50 +886,24 @@ const STATUS_OPTIONS = [
   { value: "delayed", ko: "지연" },
 ];
 
+// 네이티브 <select> 사용 — 브라우저가 옵션을 클리핑 없이 렌더하므로 표/컨테이너 overflow 에 잘리지 않음.
+// 배지 색은 STATUS_LABEL 그대로 유지. value='auto' 선택 시 onChange(null) → status_override 해제(자동 계산).
 function StatusBadgeSelect({ status, isManual, onChange, big = false }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
   const lbl = STATUS_LABEL[status] || STATUS_LABEL.in_progress;
+  const value = isManual ? status : "auto";
   return (
-    <div ref={ref} style={{ position: "relative", display: "inline-block" }} onClick={(e) => e.stopPropagation()}>
-      <button
-        type="button"
-        onClick={(e) => { e.stopPropagation(); setOpen(o => !o); }}
-        style={{ ...S.badge, ...(big ? S.badgeBig : {}), color: lbl.color, background: lbl.bg, border: "none", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}
-        title="클릭하여 상태 변경"
+    <div style={{ display: "inline-flex", alignItems: "center", gap: 5 }} onClick={(e) => e.stopPropagation()}>
+      <select
+        value={value}
+        title="상태 변경"
+        onClick={(e) => e.stopPropagation()}
+        onChange={(e) => { e.stopPropagation(); const v = e.target.value; onChange(v === "auto" ? null : v); }}
+        style={{ ...S.badge, ...(big ? S.badgeBig : {}), color: lbl.color, background: lbl.bg, border: "none", cursor: "pointer", fontFamily: "inherit" }}
       >
-        {lbl.ko}
-        {isManual && <span style={S.manualTag}>수동</span>}
-        <span style={{ fontSize: 9, opacity: 0.55 }}>▾</span>
-      </button>
-      {open && (
-        <div style={S.statusMenu}>
-          {STATUS_OPTIONS.map(opt => (
-            <div
-              key={opt.value}
-              style={{ ...S.statusMenuItem, ...(isManual && status === opt.value ? S.statusMenuItemActive : {}) }}
-              onClick={(e) => { e.stopPropagation(); setOpen(false); onChange(opt.value); }}
-            >
-              <span style={{ width: 8, height: 8, borderRadius: 8, background: STATUS_LABEL[opt.value].color, display: "inline-block", flexShrink: 0 }} />
-              {opt.ko}
-            </div>
-          ))}
-          <div style={S.statusMenuDivider} />
-          <div
-            style={{ ...S.statusMenuItem, ...(!isManual ? S.statusMenuItemActive : {}) }}
-            onClick={(e) => { e.stopPropagation(); setOpen(false); onChange(null); }}
-          >
-            <span style={{ width: 8, height: 8, borderRadius: 8, border: "1px dashed #94A3B8", display: "inline-block", flexShrink: 0 }} />
-            자동(계산값)
-          </div>
-        </div>
-      )}
+        {STATUS_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.ko}</option>)}
+        <option value="auto">자동(계산값)</option>
+      </select>
+      {isManual && <span style={S.manualTag}>수동</span>}
     </div>
   );
 }
@@ -3814,10 +3788,6 @@ const S = {
   badge: { display: "inline-block", padding: "4px 11px", borderRadius: 12, fontSize: 12, fontWeight: 600 },
   badgeBig: { padding: "6px 15px", fontSize: 14 },
   manualTag: { fontSize: 9, fontWeight: 700, padding: "1px 4px", borderRadius: 5, background: "rgba(15,23,42,0.12)", color: "#334155", lineHeight: 1.4 },
-  statusMenu: { position: "absolute", top: "calc(100% + 4px)", left: "50%", transform: "translateX(-50%)", background: "white", border: "1px solid #E2E8F0", borderRadius: 10, boxShadow: "0 8px 24px rgba(15,23,42,0.16)", padding: 5, zIndex: 60, minWidth: 130 },
-  statusMenuItem: { display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", borderRadius: 7, fontSize: 13, color: "#334155", cursor: "pointer", whiteSpace: "nowrap" },
-  statusMenuItemActive: { background: "#F1F5F9", fontWeight: 700 },
-  statusMenuDivider: { height: 1, background: "#E2E8F0", margin: "4px 2px" },
 
   progBar: { width: 80, height: 5, background: "#E2E8F0", borderRadius: 3, overflow: "hidden", display: "inline-block", verticalAlign: "middle" },
   progFill: { height: "100%", background: "#0369A1", transition: "width 0.3s" },
