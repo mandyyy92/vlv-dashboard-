@@ -887,24 +887,19 @@ const STATUS_OPTIONS = [
 ];
 
 // 네이티브 <select> 사용 — 브라우저가 옵션을 클리핑 없이 렌더하므로 표/컨테이너 overflow 에 잘리지 않음.
-// 배지 색은 STATUS_LABEL 그대로 유지. value='auto' 선택 시 onChange(null) → status_override 해제(자동 계산).
-function StatusBadgeSelect({ status, isManual, onChange, big = false }) {
+// 배지 색은 STATUS_LABEL 그대로 유지. 값 선택 시 status_override 를 그 값으로 UPDATE.
+function StatusBadgeSelect({ status, onChange, big = false }) {
   const lbl = STATUS_LABEL[status] || STATUS_LABEL.in_progress;
-  const value = isManual ? status : "auto";
   return (
-    <div style={{ display: "inline-flex", alignItems: "center", gap: 5 }} onClick={(e) => e.stopPropagation()}>
-      <select
-        value={value}
-        title="상태 변경"
-        onClick={(e) => e.stopPropagation()}
-        onChange={(e) => { e.stopPropagation(); const v = e.target.value; onChange(v === "auto" ? null : v); }}
-        style={{ ...S.badge, ...(big ? S.badgeBig : {}), color: lbl.color, background: lbl.bg, border: "none", cursor: "pointer", fontFamily: "inherit" }}
-      >
-        {STATUS_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.ko}</option>)}
-        <option value="auto">자동(계산값)</option>
-      </select>
-      {isManual && <span style={S.manualTag}>수동</span>}
-    </div>
+    <select
+      value={status}
+      title="상태 변경"
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => { e.stopPropagation(); onChange(e.target.value); }}
+      style={{ ...S.badge, ...(big ? S.badgeBig : {}), color: lbl.color, background: lbl.bg, border: "none", cursor: "pointer", fontFamily: "inherit" }}
+    >
+      {STATUS_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.ko}</option>)}
+    </select>
   );
 }
 
@@ -1320,7 +1315,6 @@ export default function ProductionDashboard() {
                             <td style={S.tdC}>
                               <StatusBadgeSelect
                                 status={o.status}
-                                isManual={o.is_manual}
                                 onChange={(v) => handleStatusOverride(o.id, v)}
                               />
                             </td>
@@ -2170,7 +2164,6 @@ function OrderDrawer({ order, onClose, onAddInbound, onDelete, onUpdate, onDelet
                 <div style={S.drawerCardHead}>현재 상태</div>
                 <StatusBadgeSelect
                   status={order.status}
-                  isManual={order.is_manual}
                   big
                   onChange={(v) => onUpdate({ status_override: v })}
                 />
@@ -3787,7 +3780,6 @@ const S = {
 
   badge: { display: "inline-block", padding: "4px 11px", borderRadius: 12, fontSize: 12, fontWeight: 600 },
   badgeBig: { padding: "6px 15px", fontSize: 14 },
-  manualTag: { fontSize: 9, fontWeight: 700, padding: "1px 4px", borderRadius: 5, background: "rgba(15,23,42,0.12)", color: "#334155", lineHeight: 1.4 },
 
   progBar: { width: 80, height: 5, background: "#E2E8F0", borderRadius: 3, overflow: "hidden", display: "inline-block", verticalAlign: "middle" },
   progFill: { height: "100%", background: "#0369A1", transition: "width 0.3s" },
