@@ -56,6 +56,7 @@ async function fetchNotionSchedule(){
       status:n.status||"",
       category:n.category||"",
       code:n.code||"",
+      image:n.image||null,
     })).filter(n=>n.date);
   }catch(e){console.warn("[super-worker] 호출 실패",e);return[];}
 }
@@ -1224,14 +1225,17 @@ function ScheduleTab(){
               const nc=NOTION_STATUS_COLOR[ev.status]||{bg:"#EDE9FE",color:"#6D28D9"};
               return(
                 <div key={ev.id} title={`${ev.status||"발주"}${ev.supplier?" · "+ev.supplier:""}${ev.code?" · "+ev.code:""}`}
-                  style={{padding:"6px 7px",borderRadius:4,marginBottom:2,background:nc.bg,border:"1px solid "+nc.color+"55",fontSize:12,lineHeight:1.3,userSelect:"none"}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:4,color:nc.color,fontWeight:600,fontSize:11}}>
-                    <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ev.status||"발주"}</span>
-                    {ev.supplier&&<span style={{opacity:0.85,fontWeight:500,flexShrink:0}}>· {ev.supplier}</span>}
-                  </div>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:4,marginTop:4}}>
-                    <span style={{fontWeight:700,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{translateItemName(ev.item)}{ev.round?`_${ev.round}`:""}</span>
-                    {ev.qty>0&&<span style={{color:"#0F172A",fontWeight:700,flexShrink:0}}>{ev.qty.toLocaleString()}장</span>}
+                  style={{display:"flex",gap:6,alignItems:"center",padding:"6px 7px",borderRadius:4,marginBottom:2,background:nc.bg,border:"1px solid "+nc.color+"55",fontSize:12,lineHeight:1.3,userSelect:"none"}}>
+                  {ev.image&&<img src={ev.image} alt="" loading="lazy" onError={e=>{e.currentTarget.style.display="none";}} style={{width:26,height:26,borderRadius:4,objectFit:"cover",flexShrink:0,background:"#FFF",border:"1px solid rgba(0,0,0,0.06)"}} />}
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:4,color:nc.color,fontWeight:600,fontSize:11}}>
+                      <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ev.status||"발주"}</span>
+                      {ev.supplier&&<span style={{opacity:0.85,fontWeight:500,flexShrink:0}}>· {ev.supplier}</span>}
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:4,marginTop:4}}>
+                      <span style={{fontWeight:700,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{translateItemName(ev.item)}{ev.round?`_${ev.round}`:""}</span>
+                      {ev.qty>0&&<span style={{color:"#0F172A",fontWeight:700,flexShrink:0}}>{ev.qty.toLocaleString()}장</span>}
+                    </div>
                   </div>
                 </div>);
             })}
@@ -1271,7 +1275,10 @@ function ScheduleTab(){
               const rawId=String(ev.id).replace(/^notion-/,"").replace(/-/g,"");
               return(<div key={ev.id} style={{border:"1px solid #E2E8F0",borderRadius:12,padding:16,marginBottom:14}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:10}}>
-                  <span style={{fontSize:16,fontWeight:700,color:"#1E293B"}}>{translateItemName(ev.item)}{ev.round?`_${ev.round}`:""}</span>
+                  <div style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}>
+                    {ev.image&&<img src={ev.image} alt="" loading="lazy" onError={e=>{e.currentTarget.style.display="none";}} style={{width:44,height:44,borderRadius:8,objectFit:"cover",flexShrink:0,background:"#F8FAFC",border:"1px solid #E2E8F0"}} />}
+                    <span style={{fontSize:16,fontWeight:700,color:"#1E293B"}}>{translateItemName(ev.item)}{ev.round?`_${ev.round}`:""}</span>
+                  </div>
                   {ev.status&&<span style={{fontSize:12,fontWeight:700,color:nc.color,background:nc.bg,border:"1px solid "+nc.color+"55",borderRadius:6,padding:"2px 8px",whiteSpace:"nowrap"}}>{ev.status}</span>}
                 </div>
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:14}}><tbody>
