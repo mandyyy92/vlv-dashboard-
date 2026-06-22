@@ -3243,6 +3243,10 @@ export default function Dashboard(){
   const[dashSchedules,setDashSchedules]=useState([]);
   useEffect(()=>{(async()=>{const data=await sb.get("schedules");setDashSchedules(data||[]);})();},[]);
 
+  // Notion 발주DB(입고 스케줄) — "이번주 입고건" 카드 전용 소스. 실패 시 빈 배열(카드 0건, 대시보드는 정상)
+  const[notionEvents,setNotionEvents]=useState([]);
+  useEffect(()=>{(async()=>{try{const list=await fetchNotionSchedule();setNotionEvents(list||[]);}catch(e){console.warn("[overview] notion fetch 실패",e);setNotionEvents([]);}})();},[]);
+
   // 이번주(오늘~이번주 일요일) kr_date에 잡힌 스케줄 (지난 날짜 제외)
   const thisWeekSchedules=useMemo(()=>{
     const now=new Date();
@@ -3254,6 +3258,19 @@ export default function Dashboard(){
     return dashSchedules.filter(s=>{const d=s.kr_date||s.date;return d&&d>=lo&&d<=hi;}).sort((a,b)=>(a.kr_date||a.date||"").localeCompare(b.kr_date||b.date||""));
   },[dashSchedules]);
   const thisWeekTotalQty=useMemo(()=>thisWeekSchedules.reduce((sum,s)=>sum+(s.qty||0),0),[thisWeekSchedules]);
+
+  // "이번주 입고건" 카드: Notion 발주DB 기준, 이번주=월~금(이미 지난 요일 포함)
+  const thisWeekNotion=useMemo(()=>{
+    const now=new Date();
+    const dow=now.getDay(); // 0=Sun..6=Sat
+    const mondayOffset=dow===0?-6:1-dow;
+    const monday=new Date(now.getFullYear(),now.getMonth(),now.getDate()+mondayOffset);
+    const friday=new Date(monday.getFullYear(),monday.getMonth(),monday.getDate()+4);
+    const ymd=(d)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+    const lo=ymd(monday),hi=ymd(friday);
+    return notionEvents.filter(n=>n.date&&n.date>=lo&&n.date<=hi).sort((a,b)=>(a.date||"").localeCompare(b.date||""));
+  },[notionEvents]);
+  const thisWeekNotionQty=useMemo(()=>thisWeekNotion.reduce((sum,n)=>sum+(n.qty||0),0),[thisWeekNotion]);
 
   // 오늘 이후의 모든 스케줄 (입고대기 현황)
   const pendingSchedules=useMemo(()=>{
@@ -3282,15 +3299,15 @@ export default function Dashboard(){
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
             <div>
               <div style={{fontSize:13,fontWeight:600,color:"#6366F1",letterSpacing:0.5,textTransform:"uppercase",marginBottom:6}}>📦 이번주 입고건</div>
-              <div style={{fontSize:38,fontWeight:800,color:"#3B82F6",letterSpacing:-1.5}}>{thisWeekSchedules.length}<span style={{fontSize:16,fontWeight:500,color:"#93C5FD",marginLeft:4}}>건</span></div>
-              <div style={{fontSize:14,color:"#6B7280",marginTop:6}}>총 {thisWeekTotalQty.toLocaleString()}장 입고 예정</div>
+              <div style={{fontSize:38,fontWeight:800,color:"#3B82F6",letterSpacing:-1.5}}>{thisWeekNotion.length}<span style={{fontSize:16,fontWeight:500,color:"#93C5FD",marginLeft:4}}>건</span></div>
+              <div style={{fontSize:14,color:"#6B7280",marginTop:6}}>총 {thisWeekNotionQty.toLocaleString()}장 입고 예정</div>
             </div>
             <div style={{width:48,height:48,borderRadius:12,background:"#3B82F620",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24}}>📅</div>
           </div>
           <div style={{marginTop:14,display:"flex",gap:6,flexWrap:"wrap"}}>
-            {thisWeekSchedules.slice(0,3).map((s,i)=>(<div key={s.id||i} style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#DBEAFE",color:"#1E40AF",fontWeight:600}}>{(s.item||"").slice(0,8)}… {(s.qty||0).toLocaleString()}장</div>))}
-            {thisWeekSchedules.length>3&&<div style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#E0E7FF",color:"#4338CA",fontWeight:600}}>+{thisWeekSchedules.length-3}건</div>}
-            {thisWeekSchedules.length===0&&<div style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#F1F5F9",color:"#94A3B8",fontWeight:600}}>이번주 입고건 없음</div>}
+            {thisWeekNotion.slice(0,3).map((s,i)=>(<div key={s.id||i} style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#DBEAFE",color:"#1E40AF",fontWeight:600}}>{(s.item||"").slice(0,8)}… {(s.qty||0).toLocaleString()}장</div>))}
+            {thisWeekNotion.length>3&&<div style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#E0E7FF",color:"#4338CA",fontWeight:600}}>+{thisWeekNotion.length-3}건</div>}
+            {thisWeekNotion.length===0&&<div style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#F1F5F9",color:"#94A3B8",fontWeight:600}}>이번주 입고건 없음</div>}
           </div>
         </div>
 
