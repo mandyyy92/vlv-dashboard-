@@ -1581,6 +1581,22 @@ const SAMPLE_STAGE_COLORS={
 const SAMPLE_NOSTAGE_COLOR="#94A3B8";
 function sampleStageColor(stage){return SAMPLE_STAGE_COLORS[stage]||SAMPLE_NOSTAGE_COLOR;}
 
+// 칸반 컬럼: 맨 앞 "미시작" + 6단계
+const SAMPLE_BOARD_COLUMNS=["미시작",...SAMPLE_STAGES];
+function sampleColColor(col){return col==="미시작"?SAMPLE_NOSTAGE_COLOR:sampleStageColor(col);}
+// "미시작" 컬럼으로 드롭하면 stage를 "샘플 의뢰"로(미시작→시작 처리)
+function sampleColToStage(col){return col==="미시작"?SAMPLE_STAGES[0]:col;}
+// row.stage → 칸반 컬럼명. 미지정/미지정값은 "미시작" 컬럼.
+function sampleStageToCol(stage){return stage&&SAMPLE_STAGES.includes(stage)?stage:"미시작";}
+// ISO → "YYYY-MM-DD HH:mm"
+function fmtSampleTime(iso){
+  if(!iso)return "";
+  const d=new Date(iso);
+  if(isNaN(d.getTime()))return String(iso);
+  const p=n=>String(n).padStart(2,"0");
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 // sample_progress 전체 조회 (created_at 없으므로 정렬 없이 select=*; 실패 시 빈 객체)
 async function fetchSampleProgressMap(){
   try{
@@ -1631,6 +1647,26 @@ function SampleProductCard({p,row,onClick}){
           {p.barcode&&<div style={{fontFamily:"monospace",fontSize:13,color:"#475569"}}>{p.barcode}</div>}
           {p.sampleLink&&<a href={p.sampleLink} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} style={{fontSize:13,fontWeight:600,color:"#7C3AED",textDecoration:"none"}}>샘플링크 ↗</a>}
         </div>
+      </div>
+    </div>);
+}
+
+// 칸반(보드)용 소형 카드 — 썸네일 + 제품명 + N차. HTML5 draggable.
+function SampleKanbanCard({p,row,dragging,onClick,onDragStart,onDragEnd}){
+  const[imgError,setImgError]=useState(false);
+  const showImg=p.image&&!imgError;
+  return(
+    <div draggable onClick={onClick}
+      onDragStart={onDragStart} onDragEnd={onDragEnd}
+      style={{display:"flex",gap:8,alignItems:"center",background:"#FFFFFF",borderRadius:8,border:"1px solid #E2E8F0",padding:8,cursor:"grab",boxShadow:"0 1px 2px rgba(0,0,0,0.04)",opacity:dragging?0.4:1}}>
+      <div style={{width:40,height:40,borderRadius:6,overflow:"hidden",background:"#F1F5F9",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
+        {showImg
+          ?<img src={p.image} alt="" referrerPolicy="no-referrer" onError={()=>setImgError(true)} style={{width:"100%",height:"100%",objectFit:"cover"}} />
+          :<span style={{fontSize:16,color:"#CBD5E1"}}>📷</span>}
+      </div>
+      <div style={{minWidth:0,flex:1}}>
+        <div style={{fontSize:13,fontWeight:700,color:"#0F172A",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={p.name}>{p.name||"—"}</div>
+        {row&&row.round_no>1&&<div style={{fontSize:12,color:"#94A3B8"}}>{row.round_no}차</div>}
       </div>
     </div>);
 }
@@ -1714,7 +1750,34 @@ function SampleDetailPanel({p,row,onClose,onSave}){
               placeholder="메모 입력 후 포커스를 벗어나면 저장됩니다"
               style={{width:"100%",minHeight:90,padding:"9px 12px",borderRadius:8,border:"1px solid #E2E8F0",fontSize:14,color:"#1E293B",outline:"none",background:"#F8FAFC",boxSizing:"border-box",resize:"vertical",fontFamily:"inherit"}} />
           </div>
-          <div style={{fontSize:12,color:"#94A3B8"}}>체크리스트·차수·타임라인은 다음 단계에서 제공됩니다.</div>
+
+          <hr style={{border:"none",borderTop:"1px solid #E2E8F0",margin:"18px 0"}} />
+
+          {/* 진행 타임라인 (stage_history) */}
+          <div style={{fontSize:14,fontWeight:800,color:"#0F172A",marginBottom:14}}>진행 타임라인</div>
+          {(()=>{
+            const hist=Array.isArray(row?.stage_history)?[...row.stage_history]:[];
+            hist.sort((a,b)=>String(a?.at||"").localeCompare(String(b?.at||"")));
+            if(hist.length===0)return <div style={{fontSize:13,color:"#94A3B8"}}>이력 없음</div>;
+            return(<div style={{display:"flex",flexDirection:"column"}}>
+              {hist.map((h,i)=>{
+                const c=sampleStageColor(h?.stage);
+                const last=i===hist.length-1;
+                return(<div key={i} style={{display:"flex",gap:10}}>
+                  <div style={{display:"flex",flexDirection:"column",alignItems:"center"}}>
+                    <span style={{width:12,height:12,borderRadius:999,background:c,marginTop:2,flexShrink:0}} />
+                    {!last&&<span style={{flex:1,width:2,background:"#E2E8F0",minHeight:18}} />}
+                  </div>
+                  <div style={{paddingBottom:last?0:14}}>
+                    <div style={{fontSize:13,fontWeight:700,color:"#0F172A"}}>{h?.stage||"—"}</div>
+                    <div style={{fontSize:12,color:"#94A3B8"}}>{fmtSampleTime(h?.at)}</div>
+                  </div>
+                </div>);
+              })}
+            </div>);
+          })()}
+
+          <div style={{fontSize:12,color:"#94A3B8",marginTop:16}}>체크리스트·차수는 다음 단계에서 제공됩니다.</div>
         </div>
       </aside>
     </>);
@@ -1727,6 +1790,9 @@ function SampleTab(){
   const[error,setError]=useState(null);
   const[search,setSearch]=useState("");
   const[selectedId,setSelectedId]=useState(null);
+  const[view,setView]=useState("board"); // 기본 보드
+  const[draggingId,setDraggingId]=useState(null);
+  const[dragOverCol,setDragOverCol]=useState(null);
 
   useEffect(()=>{
     let alive=true;
@@ -1766,41 +1832,106 @@ function SampleTab(){
 
   const selected=useMemo(()=>products.find(p=>p.id===selectedId)||null,[products,selectedId]);
 
+  // 칸반 컬럼별 그룹핑 (검색 필터 적용된 filtered 기준)
+  const grouped=useMemo(()=>{
+    const g={};SAMPLE_BOARD_COLUMNS.forEach(c=>{g[c]=[];});
+    filtered.forEach(p=>{g[sampleStageToCol(progressMap[p.id]?.stage)].push(p);});
+    return g;
+  },[filtered,progressMap]);
+
   // 단계/날짜/메모 저장: 행 없으면 기본값(stage="샘플 의뢰",round_no=1,checklist={})으로 insert, 있으면 update.
-  // upsert(onConflict=product_id) + updated_at=now(). 저장 후 로컬 map 갱신해 카드 배지 즉시 반영.
+  // upsert(onConflict=product_id) + updated_at=now(). 저장 후 로컬 map 갱신해 카드 배지/보드 즉시 반영.
+  // 단계가 (신규 생성 포함) 바뀌면 stage_history 에 {stage,at} 1건 append — 기존 배열 읽어 새 배열로 저장.
   const handleSave=useCallback(async(productId,changes)=>{
     const existing=progressMap[productId];
     const base=existing?{}:{stage:SAMPLE_STAGES[0],round_no:1,checklist:{}};
-    const payload={product_id:productId,...base,...changes,updated_at:new Date().toISOString()};
+    const now=new Date().toISOString();
+    const payload={product_id:productId,...base,...changes,updated_at:now};
+    const resultStage=payload.stage; // 기존 행 + 단계 미변경이면 undefined
+    if(resultStage!==undefined&&resultStage!==existing?.stage){
+      const hist=Array.isArray(existing?.stage_history)?existing.stage_history:[];
+      payload.stage_history=[...hist,{stage:resultStage,at:now}];
+    }
     const saved=await upsertSampleProgress(payload);
     if(saved)setProgressMap(m=>({...m,[productId]:{...(m[productId]||{}),...saved}}));
   },[progressMap]);
 
+  // 드래그 이동 (순수 HTML5 DnD). 비낙관적: 성공 시 progressMap 갱신으로 카드가 새 컬럼에 나타남(실패 시 원위치).
+  const onColDrop=useCallback(async(col)=>{
+    const id=draggingId;
+    setDraggingId(null);setDragOverCol(null);
+    if(id==null)return;
+    const curCol=sampleStageToCol(progressMap[id]?.stage);
+    if(curCol===col)return; // 같은 컬럼이면 no-op
+    await handleSave(id,{stage:sampleColToStage(col)});
+  },[draggingId,progressMap,handleSave]);
+
+  const emptyState=
+    loading?<div style={{textAlign:"center",padding:40,color:"#94A3B8"}}>⏳ 제품 DB 로드 중...</div>
+    :error?<div style={{padding:20,borderRadius:8,background:"#FEF2F2",border:"1px solid #FCA5A5"}}>
+        <div style={{fontWeight:600,color:"#B91C1C",marginBottom:4}}>제품 DB를 불러오지 못했습니다</div>
+        <div style={{fontSize:13,color:"#DC2626"}}>{error}</div>
+      </div>
+    :products.length===0?<div style={{textAlign:"center",padding:40,color:"#94A3B8"}}>샘플진행중 제품이 없습니다</div>
+    :null;
+
+  const toggleBtn=(v,label)=>(
+    <button onClick={()=>setView(v)} style={{padding:"6px 14px",borderRadius:6,border:view===v?"none":"1px solid #CBD5E1",background:view===v?"#1E293B":"#F8FAFC",color:view===v?"#FFF":"#475569",fontSize:14,fontWeight:600,cursor:"pointer"}}>{label}</button>
+  );
+
   return(
     <SectionCard
       title="🧪 샘플 진행중"
-      subtitle="제품DB(swift-service) 진행상태 '샘플진행중' · 카드 클릭으로 단계 추적"
-      actions={<Input value={search} onChange={e=>setSearch(e.target.value)} placeholder="제품명/카테고리/바코드 검색..." style={{width:220}} />}
+      subtitle="제품DB(swift-service) 진행상태 '샘플진행중' · 카드 클릭(상세)·드래그(단계 이동)"
+      actions={<div style={{display:"flex",gap:8,alignItems:"center"}}>
+        {toggleBtn("board","보드")}{toggleBtn("list","리스트")}
+        <Input value={search} onChange={e=>setSearch(e.target.value)} placeholder="제품명/카테고리/바코드 검색..." style={{width:200}} />
+      </div>}
     >
-      {loading?(
-        <div style={{textAlign:"center",padding:40,color:"#94A3B8"}}>⏳ 제품 DB 로드 중...</div>
-      ):error?(
-        <div style={{padding:20,borderRadius:8,background:"#FEF2F2",border:"1px solid #FCA5A5"}}>
-          <div style={{fontWeight:600,color:"#B91C1C",marginBottom:4}}>제품 DB를 불러오지 못했습니다</div>
-          <div style={{fontSize:13,color:"#DC2626"}}>{error}</div>
-        </div>
-      ):products.length===0?(
-        <div style={{textAlign:"center",padding:40,color:"#94A3B8"}}>샘플진행중 제품이 없습니다</div>
-      ):(
+      {emptyState||(
         <>
           <div style={{marginBottom:16,fontSize:14,color:"#475569",fontWeight:600}}>
             샘플 진행중 {filtered.length}건{search&&filtered.length!==products.length?` (전체 ${products.length}건 중)`:""}
           </div>
-          {filtered.length===0?(
-            <div style={{textAlign:"center",padding:40,color:"#94A3B8"}}>검색 조건에 맞는 제품이 없습니다</div>
+
+          {view==="list"?(
+            filtered.length===0?(
+              <div style={{textAlign:"center",padding:40,color:"#94A3B8"}}>검색 조건에 맞는 제품이 없습니다</div>
+            ):(
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill, minmax(200px, 1fr))",gap:16}}>
+                {filtered.map(p=><SampleProductCard key={p.id} p={p} row={progressMap[p.id]} onClick={()=>setSelectedId(p.id)} />)}
+              </div>
+            )
           ):(
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill, minmax(200px, 1fr))",gap:16}}>
-              {filtered.map(p=><SampleProductCard key={p.id} p={p} row={progressMap[p.id]} onClick={()=>setSelectedId(p.id)} />)}
+            <div style={{display:"flex",gap:12,overflowX:"auto",paddingBottom:8}}>
+              {SAMPLE_BOARD_COLUMNS.map(col=>{
+                const items=grouped[col]||[];
+                const cc=sampleColColor(col);
+                const over=dragOverCol===col;
+                return(
+                  <div key={col}
+                    onDragOver={e=>{e.preventDefault();if(dragOverCol!==col)setDragOverCol(col);}}
+                    onDragLeave={()=>setDragOverCol(c=>c===col?null:c)}
+                    onDrop={()=>onColDrop(col)}
+                    style={{flex:"0 0 220px",width:220,background:over?`${cc}10`:"#F8FAFC",borderRadius:10,border:`2px ${over?"dashed":"solid"} ${over?cc:"#E2E8F0"}`,display:"flex",flexDirection:"column",maxHeight:560}}>
+                    <div style={{padding:"10px 12px",borderBottom:"1px solid #E2E8F0",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                      <span style={{display:"flex",alignItems:"center",gap:6,fontSize:13,fontWeight:700,color:"#0F172A"}}>
+                        <span style={{width:8,height:8,borderRadius:999,background:cc}} />{col}
+                      </span>
+                      <span style={{fontSize:12,fontWeight:700,color:cc,background:`${cc}15`,padding:"1px 8px",borderRadius:999}}>{items.length}</span>
+                    </div>
+                    <div style={{padding:10,display:"flex",flexDirection:"column",gap:8,overflowY:"auto"}}>
+                      {items.length===0?(
+                        <div style={{fontSize:12,color:"#CBD5E1",textAlign:"center",padding:"16px 0"}}>비어있음</div>
+                      ):items.map(p=>(
+                        <SampleKanbanCard key={p.id} p={p} row={progressMap[p.id]} dragging={draggingId===p.id}
+                          onClick={()=>setSelectedId(p.id)}
+                          onDragStart={e=>{setDraggingId(p.id);if(e.dataTransfer){e.dataTransfer.effectAllowed="move";try{e.dataTransfer.setData("text/plain",String(p.id));}catch(_){}}}}
+                          onDragEnd={()=>{setDraggingId(null);setDragOverCol(null);}} />
+                      ))}
+                    </div>
+                  </div>);
+              })}
             </div>
           )}
         </>
