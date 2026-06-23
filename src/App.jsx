@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { sb, SUPABASE_URL, SUPABASE_KEY } from "./lib/supabaseClient";
+import { sb, SUPABASE_URL, SUPABASE_KEY, sbHeaders } from "./lib/supabaseClient";
 import { useReorderData, adaptToBasic } from "./hooks/useReorderData";
 import { useReferenceItems } from "./hooks/useReferenceItems";
 import ReferenceItemForm from "./components/ReferenceItemForm";
@@ -1507,7 +1507,9 @@ function ScheduleTab(){
 const SAMPLE_STATUSES=["의뢰완료","원단확인","샘플제작중","배송중","검수완료","승인"];
 const STATUS_COLORS={"의뢰완료":"#94A3B8","원단확인":"#F59E0B","샘플제작중":"#3B82F6","배송중":"#8B5CF6","검수완료":"#10B981","승인":"#059669"};
 
-function SampleTab(){
+// ─── (보존) 구 SampleTab: samples 테이블 기반 6단계 추적 — 더 이상 렌더되지 않음(v80에서 제품DB 리스트로 교체).
+//     향후 단계 추적(쓰기) 재도입 시 참고용으로 함수 통째로 보존. 더미 insert는 호출되지 않음.
+function SampleTabLegacy(){
   const[samples,setSamples]=useState([]);
   const[loading,setLoading]=useState(true);
 
@@ -1553,6 +1555,266 @@ function SampleTab(){
           {i<5&&<span style={{fontSize:12,color:"#CBD5E1",margin:"0 2px"}}>→</span>}
         </div>))}
       </div>
+    </SectionCard>);
+}
+
+// ─── Tab: 샘플 (v80→v81) — 제품DB(swift-service) "샘플진행중" 리스트 + 로컬 단계 추적 ───
+// 제품 목록: ProductDB와 동일하게 swift-service edge function GET (읽기 전용).
+// 단계 추적: public.sample_progress (PK=product_id) 에 직접 PostgREST 접근(영어 컬럼).
+//   ※ sb.get 은 created_at 정렬을 강제하고 sb.update 는 id=eq. 키를 쓰는데,
+//     이 테이블은 created_at 없음 + PK가 product_id 라서 sb 헬퍼를 그대로 못 씀.
+//     새 클라이언트는 만들지 않고 동일 SUPABASE_URL/KEY(sbHeaders)로 직접 fetch + upsert.
+//   sample_progress 외 테이블 쓰기/보호테이블 접근 없음.
+const SAMPLE_PRODUCTS_API=`${SUPABASE_URL}/functions/v1/swift-service`;
+const SAMPLE_TARGET_STATUS="샘플진행중";
+
+// 단계 목록(순서 고정) + 색(진행될수록 진하게)
+const SAMPLE_STAGES=["샘플 의뢰","원단/부자재 확정","샘플 제작중","샘플 입고·검토","수정 진행","최종 컨펌"];
+const SAMPLE_STAGE_COLORS={
+  "샘플 의뢰":"#C4B5FD",
+  "원단/부자재 확정":"#A78BFA",
+  "샘플 제작중":"#8B5CF6",
+  "샘플 입고·검토":"#7C3AED",
+  "수정 진행":"#6D28D9",
+  "최종 컨펌":"#5B21B6",
+};
+const SAMPLE_NOSTAGE_COLOR="#94A3B8";
+function sampleStageColor(stage){return SAMPLE_STAGE_COLORS[stage]||SAMPLE_NOSTAGE_COLOR;}
+
+// sample_progress 전체 조회 (created_at 없으므로 정렬 없이 select=*; 실패 시 빈 객체)
+async function fetchSampleProgressMap(){
+  try{
+    const r=await fetch(`${SUPABASE_URL}/rest/v1/sample_progress?select=*`,{headers:sbHeaders});
+    if(!r.ok)throw new Error(`HTTP ${r.status}`);
+    const rows=await r.json();
+    const map={};
+    (Array.isArray(rows)?rows:[]).forEach(row=>{if(row&&row.product_id!=null)map[row.product_id]=row;});
+    return map;
+  }catch(e){console.error("[sample_progress] 조회 실패:",e);return{};}
+}
+
+// product_id 기준 upsert (onConflict=product_id, merge-duplicates). 저장된 행 반환(없으면 null)
+async function upsertSampleProgress(payload){
+  try{
+    const r=await fetch(`${SUPABASE_URL}/rest/v1/sample_progress?on_conflict=product_id`,{
+      method:"POST",
+      headers:{...sbHeaders,"Prefer":"resolution=merge-duplicates,return=representation"},
+      body:JSON.stringify(payload),
+    });
+    if(!r.ok)throw new Error(`HTTP ${r.status}`);
+    const data=await r.json();
+    return Array.isArray(data)?data[0]:data;
+  }catch(e){console.error("[sample_progress] 저장 실패:",e);return null;}
+}
+
+function SampleProductCard({p,row,onClick}){
+  const[imgError,setImgError]=useState(false);
+  const showImg=p.image&&!imgError;
+  const stage=row?.stage||null;
+  const stageLabel=(stage?stage:"미시작")+(row&&row.round_no>1?` · ${row.round_no}차`:"");
+  const stageColor=stage?sampleStageColor(stage):SAMPLE_NOSTAGE_COLOR;
+  return(
+    <div onClick={onClick} role="button" tabIndex={0}
+      onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();onClick?.();}}}
+      style={{background:"#FFFFFF",borderRadius:12,border:"1px solid #E2E8F0",overflow:"hidden",display:"flex",flexDirection:"column",boxShadow:"0 1px 2px rgba(0,0,0,0.04)",cursor:"pointer"}}>
+      <div style={{position:"relative",width:"100%",aspectRatio:"1 / 1",background:"#F1F5F9",display:"flex",alignItems:"center",justifyContent:"center"}}>
+        {showImg
+          ?<img src={p.image} alt={p.name||""} referrerPolicy="no-referrer" onError={()=>setImgError(true)} style={{width:"100%",height:"100%",objectFit:"cover"}} />
+          :<div style={{fontSize:32,color:"#CBD5E1"}}>📷</div>}
+        <span style={{position:"absolute",top:8,left:8,padding:"3px 8px",borderRadius:6,fontSize:12,fontWeight:700,color:"#7C3AED",background:"#EDE9FE"}}>{SAMPLE_TARGET_STATUS}</span>
+      </div>
+      <div style={{padding:14,display:"flex",flexDirection:"column",gap:6,flex:1}}>
+        <span style={{alignSelf:"flex-start",padding:"3px 10px",borderRadius:999,fontSize:12,fontWeight:700,color:stage?"#FFFFFF":"#64748B",background:stage?stageColor:"#F1F5F9",border:stage?"none":"1px solid #E2E8F0"}}>{stageLabel}</span>
+        <div style={{fontSize:15,fontWeight:700,color:"#0F172A",lineHeight:1.35}} title={p.name}>{p.name||"—"}</div>
+        {(p.category||[]).length>0&&<div style={{fontSize:13,color:"#64748B"}}>{p.category.join(" · ")}</div>}
+        <div style={{marginTop:"auto",display:"flex",flexDirection:"column",gap:4}}>
+          {p.barcode&&<div style={{fontFamily:"monospace",fontSize:13,color:"#475569"}}>{p.barcode}</div>}
+          {p.sampleLink&&<a href={p.sampleLink} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} style={{fontSize:13,fontWeight:600,color:"#7C3AED",textDecoration:"none"}}>샘플링크 ↗</a>}
+        </div>
+      </div>
+    </div>);
+}
+
+// 우측 상세 패널 — 상단 제품정보(읽기) + 진행 관리(단계·날짜·메모 쓰기)
+function SampleDetailPanel({p,row,onClose,onSave}){
+  const[imgError,setImgError]=useState(false);
+  const showImg=p.image&&!imgError;
+  const[stage,setStage]=useState(row?.stage||SAMPLE_STAGES[0]);
+  const[requestDate,setRequestDate]=useState(row?.request_date||"");
+  const[expectedDate,setExpectedDate]=useState(row?.expected_date||"");
+  const[memo,setMemo]=useState(row?.memo||"");
+  const[saving,setSaving]=useState(false);
+
+  // ESC 로 닫기
+  useEffect(()=>{
+    const onKey=e=>{if(e.key==="Escape")onClose();};
+    window.addEventListener("keydown",onKey);
+    return()=>window.removeEventListener("keydown",onKey);
+  },[onClose]);
+
+  const save=async(changes)=>{setSaving(true);await onSave(changes);setSaving(false);};
+
+  const label={fontSize:12,fontWeight:700,color:"#64748B",marginBottom:6,letterSpacing:-0.1};
+  const ro={fontSize:14,color:"#334155"};
+
+  return(
+    <>
+      <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.45)",zIndex:1000}} />
+      <aside style={{position:"fixed",top:0,right:0,bottom:0,width:"min(440px, 92vw)",background:"#FFFFFF",zIndex:1001,boxShadow:"-8px 0 28px rgba(0,0,0,0.12)",display:"flex",flexDirection:"column"}}>
+        <div style={{display:"flex",alignItems:"flex-start",gap:12,padding:"18px 20px",borderBottom:"1px solid #E2E8F0"}}>
+          <div style={{flex:1,minWidth:0}}>
+            {(p.category||[]).length>0&&<div style={{fontSize:12,color:"#94A3B8",marginBottom:4}}>{p.category.join(" · ")}</div>}
+            <div style={{fontSize:18,fontWeight:700,color:"#0F172A",lineHeight:1.3}}>{p.name||"—"}</div>
+          </div>
+          <button onClick={onClose} aria-label="닫기" style={{border:"none",background:"#F1F5F9",borderRadius:8,width:32,height:32,fontSize:16,cursor:"pointer",color:"#475569",flexShrink:0}}>✕</button>
+        </div>
+
+        <div style={{flex:1,overflowY:"auto",padding:20}}>
+          {/* 제품 정보 (읽기) */}
+          <div style={{width:"100%",aspectRatio:"4 / 3",borderRadius:10,overflow:"hidden",background:"#F1F5F9",display:"flex",alignItems:"center",justifyContent:"center",marginBottom:16}}>
+            {showImg
+              ?<img src={p.image} alt={p.name||""} referrerPolicy="no-referrer" onError={()=>setImgError(true)} style={{width:"100%",height:"100%",objectFit:"cover"}} />
+              :<div style={{fontSize:36,color:"#CBD5E1"}}>📷</div>}
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:20}}>
+            {p.barcode&&<div><div style={label}>대표바코드</div><div style={{...ro,fontFamily:"monospace"}}>{p.barcode}</div></div>}
+            {p.sampleLink&&<div><div style={label}>샘플링크</div><a href={p.sampleLink} target="_blank" rel="noreferrer" style={{fontSize:14,fontWeight:600,color:"#7C3AED",textDecoration:"none"}}>링크 열기 ↗</a></div>}
+          </div>
+
+          <hr style={{border:"none",borderTop:"1px solid #E2E8F0",margin:"0 0 18px"}} />
+
+          {/* 진행 관리 (쓰기) */}
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
+            <div style={{fontSize:14,fontWeight:800,color:"#0F172A"}}>진행 관리</div>
+            {saving&&<span style={{fontSize:12,color:"#94A3B8"}}>저장 중…</span>}
+          </div>
+
+          <div style={{marginBottom:16}}>
+            <div style={label}>단계</div>
+            <select value={stage} onChange={e=>{const v=e.target.value;setStage(v);save({stage:v});}}
+              style={{width:"100%",padding:"9px 12px",borderRadius:8,border:`1px solid ${sampleStageColor(stage)}55`,background:`${sampleStageColor(stage)}12`,color:sampleStageColor(stage),fontSize:14,fontWeight:700,cursor:"pointer",outline:"none",boxSizing:"border-box"}}>
+              {SAMPLE_STAGES.map(s=><option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+
+          <div style={{display:"flex",gap:12,marginBottom:16}}>
+            <div style={{flex:1}}>
+              <div style={label}>의뢰일</div>
+              <Input type="date" value={requestDate} onChange={e=>{const v=e.target.value;setRequestDate(v);save({request_date:v||null});}} />
+            </div>
+            <div style={{flex:1}}>
+              <div style={label}>예상완료일</div>
+              <Input type="date" value={expectedDate} onChange={e=>{const v=e.target.value;setExpectedDate(v);save({expected_date:v||null});}} />
+            </div>
+          </div>
+
+          <div style={{marginBottom:8}}>
+            <div style={label}>메모</div>
+            <textarea value={memo} onChange={e=>setMemo(e.target.value)} onBlur={()=>{if((memo||"")!==(row?.memo||""))save({memo});}}
+              placeholder="메모 입력 후 포커스를 벗어나면 저장됩니다"
+              style={{width:"100%",minHeight:90,padding:"9px 12px",borderRadius:8,border:"1px solid #E2E8F0",fontSize:14,color:"#1E293B",outline:"none",background:"#F8FAFC",boxSizing:"border-box",resize:"vertical",fontFamily:"inherit"}} />
+          </div>
+          <div style={{fontSize:12,color:"#94A3B8"}}>체크리스트·차수·타임라인은 다음 단계에서 제공됩니다.</div>
+        </div>
+      </aside>
+    </>);
+}
+
+function SampleTab(){
+  const[products,setProducts]=useState([]);
+  const[progressMap,setProgressMap]=useState({});
+  const[loading,setLoading]=useState(true);
+  const[error,setError]=useState(null);
+  const[search,setSearch]=useState("");
+  const[selectedId,setSelectedId]=useState(null);
+
+  useEffect(()=>{
+    let alive=true;
+    (async()=>{
+      setLoading(true);setError(null);
+      // 단계 추적 맵 먼저 로드(실패해도 리스트는 정상)
+      const pmap=await fetchSampleProgressMap();
+      if(alive)setProgressMap(pmap);
+      try{
+        const r=await fetch(SAMPLE_PRODUCTS_API,{method:"GET",headers:{"Authorization":`Bearer ${SUPABASE_KEY}`,"apikey":SUPABASE_KEY}});
+        const data=await r.json();
+        if(!r.ok)throw new Error(data?.error?JSON.stringify(data.error):`HTTP ${r.status}`);
+        if(!Array.isArray(data))throw new Error("예상치 못한 응답 형식");
+        const sampling=data.filter(p=>p.status===SAMPLE_TARGET_STATUS);
+        if(sampling.length===0){
+          const distinct=[...new Set(data.map(p=>p.status).filter(Boolean))].sort();
+          console.log("[SampleTab] '샘플진행중' 0건 — 제품DB의 distinct 진행상태:",distinct);
+        }
+        if(alive)setProducts(sampling);
+      }catch(e){
+        if(alive){setError(String(e?.message||e));setProducts([]);}
+      }finally{
+        if(alive)setLoading(false);
+      }
+    })();
+    return()=>{alive=false;};
+  },[]);
+
+  const filtered=useMemo(()=>{
+    const q=search.trim().toLowerCase();
+    if(!q)return products;
+    return products.filter(p=>{
+      const hay=`${p.name||""} ${(p.category||[]).join(" ")} ${p.barcode||""}`.toLowerCase();
+      return hay.includes(q);
+    });
+  },[products,search]);
+
+  const selected=useMemo(()=>products.find(p=>p.id===selectedId)||null,[products,selectedId]);
+
+  // 단계/날짜/메모 저장: 행 없으면 기본값(stage="샘플 의뢰",round_no=1,checklist={})으로 insert, 있으면 update.
+  // upsert(onConflict=product_id) + updated_at=now(). 저장 후 로컬 map 갱신해 카드 배지 즉시 반영.
+  const handleSave=useCallback(async(productId,changes)=>{
+    const existing=progressMap[productId];
+    const base=existing?{}:{stage:SAMPLE_STAGES[0],round_no:1,checklist:{}};
+    const payload={product_id:productId,...base,...changes,updated_at:new Date().toISOString()};
+    const saved=await upsertSampleProgress(payload);
+    if(saved)setProgressMap(m=>({...m,[productId]:{...(m[productId]||{}),...saved}}));
+  },[progressMap]);
+
+  return(
+    <SectionCard
+      title="🧪 샘플 진행중"
+      subtitle="제품DB(swift-service) 진행상태 '샘플진행중' · 카드 클릭으로 단계 추적"
+      actions={<Input value={search} onChange={e=>setSearch(e.target.value)} placeholder="제품명/카테고리/바코드 검색..." style={{width:220}} />}
+    >
+      {loading?(
+        <div style={{textAlign:"center",padding:40,color:"#94A3B8"}}>⏳ 제품 DB 로드 중...</div>
+      ):error?(
+        <div style={{padding:20,borderRadius:8,background:"#FEF2F2",border:"1px solid #FCA5A5"}}>
+          <div style={{fontWeight:600,color:"#B91C1C",marginBottom:4}}>제품 DB를 불러오지 못했습니다</div>
+          <div style={{fontSize:13,color:"#DC2626"}}>{error}</div>
+        </div>
+      ):products.length===0?(
+        <div style={{textAlign:"center",padding:40,color:"#94A3B8"}}>샘플진행중 제품이 없습니다</div>
+      ):(
+        <>
+          <div style={{marginBottom:16,fontSize:14,color:"#475569",fontWeight:600}}>
+            샘플 진행중 {filtered.length}건{search&&filtered.length!==products.length?` (전체 ${products.length}건 중)`:""}
+          </div>
+          {filtered.length===0?(
+            <div style={{textAlign:"center",padding:40,color:"#94A3B8"}}>검색 조건에 맞는 제품이 없습니다</div>
+          ):(
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill, minmax(200px, 1fr))",gap:16}}>
+              {filtered.map(p=><SampleProductCard key={p.id} p={p} row={progressMap[p.id]} onClick={()=>setSelectedId(p.id)} />)}
+            </div>
+          )}
+        </>
+      )}
+
+      {selected&&(
+        <SampleDetailPanel
+          key={selected.id}
+          p={selected}
+          row={progressMap[selected.id]}
+          onClose={()=>setSelectedId(null)}
+          onSave={changes=>handleSave(selected.id,changes)}
+        />
+      )}
     </SectionCard>);
 }
 
