@@ -1655,10 +1655,11 @@ function SampleProductCard({p,row,onClick}){
 function SampleKanbanCard({p,row,dragging,onClick,onDragStart,onDragEnd}){
   const[imgError,setImgError]=useState(false);
   const showImg=p.image&&!imgError;
+  const cc=sampleStageColor(row?.stage); // 단계 색(미시작/미지정 → 회색)
   return(
     <div draggable onClick={onClick}
       onDragStart={onDragStart} onDragEnd={onDragEnd}
-      style={{display:"flex",gap:8,alignItems:"center",background:"#FFFFFF",borderRadius:8,border:"1px solid #E2E8F0",padding:8,cursor:"grab",boxShadow:"0 1px 2px rgba(0,0,0,0.04)",opacity:dragging?0.4:1}}>
+      style={{display:"flex",gap:8,alignItems:"center",background:`${cc}14`,borderRadius:8,border:"1px solid #E2E8F0",borderLeft:`4px solid ${cc}`,padding:8,cursor:"grab",boxShadow:"0 1px 2px rgba(0,0,0,0.04)",opacity:dragging?0.4:1}}>
       <div style={{width:40,height:40,borderRadius:6,overflow:"hidden",background:"#F1F5F9",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
         {showImg
           ?<img src={p.image} alt="" referrerPolicy="no-referrer" onError={()=>setImgError(true)} style={{width:"100%",height:"100%",objectFit:"cover"}} />
@@ -1915,7 +1916,7 @@ function SampleTab(){
                     onDrop={()=>onColDrop(col)}
                     style={{flex:"0 0 220px",width:220,background:over?`${cc}10`:"#F8FAFC",borderRadius:10,border:`2px ${over?"dashed":"solid"} ${over?cc:"#E2E8F0"}`,display:"flex",flexDirection:"column",maxHeight:560}}>
                     <div style={{padding:"10px 12px",borderBottom:"1px solid #E2E8F0",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                      <span style={{display:"flex",alignItems:"center",gap:6,fontSize:13,fontWeight:700,color:"#0F172A"}}>
+                      <span style={{display:"flex",alignItems:"center",gap:6,fontSize:19,fontWeight:700,color:"#0F172A",letterSpacing:-0.3}}>
                         <span style={{width:8,height:8,borderRadius:999,background:cc}} />{col}
                       </span>
                       <span style={{fontSize:12,fontWeight:700,color:cc,background:`${cc}15`,padding:"1px 8px",borderRadius:999}}>{items.length}</span>
