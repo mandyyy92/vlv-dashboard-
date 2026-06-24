@@ -1571,14 +1571,14 @@ const SAMPLE_TARGET_STATUS="샘플진행중";
 // 단계 목록(순서 고정) + 색(진행될수록 진하게)
 const SAMPLE_STAGES=["샘플 의뢰","원단/부자재 확정","샘플 제작중","샘플 입고·검토","수정 진행","최종 컨펌"];
 const SAMPLE_STAGE_COLORS={
-  "샘플 의뢰":"#C4B5FD",
-  "원단/부자재 확정":"#A78BFA",
-  "샘플 제작중":"#8B5CF6",
-  "샘플 입고·검토":"#7C3AED",
-  "수정 진행":"#6D28D9",
-  "최종 컨펌":"#5B21B6",
+  "샘플 의뢰":"#3B82F6",        // 블루
+  "원단/부자재 확정":"#06B6D4", // 시안/틸
+  "샘플 제작중":"#F59E0B",      // 앰버
+  "샘플 입고·검토":"#8B5CF6",   // 바이올렛
+  "수정 진행":"#EF4444",        // 로즈/레드
+  "최종 컨펌":"#22C55E",        // 그린
 };
-const SAMPLE_NOSTAGE_COLOR="#94A3B8";
+const SAMPLE_NOSTAGE_COLOR="#94A3B8"; // 미시작 회색
 function sampleStageColor(stage){return SAMPLE_STAGE_COLORS[stage]||SAMPLE_NOSTAGE_COLOR;}
 
 // 칸반 컬럼: 맨 앞 "미시작" + 6단계
@@ -1659,7 +1659,7 @@ function SampleKanbanCard({p,row,dragging,onClick,onDragStart,onDragEnd}){
   return(
     <div draggable onClick={onClick}
       onDragStart={onDragStart} onDragEnd={onDragEnd}
-      style={{display:"flex",gap:8,alignItems:"center",background:`${cc}14`,borderRadius:8,border:"1px solid #E2E8F0",borderLeft:`4px solid ${cc}`,padding:8,cursor:"grab",boxShadow:"0 1px 2px rgba(0,0,0,0.04)",opacity:dragging?0.4:1}}>
+      style={{display:"flex",gap:8,alignItems:"center",background:`${cc}22`,borderRadius:8,border:"1px solid #E2E8F0",borderLeft:`4px solid ${cc}`,padding:8,cursor:"grab",boxShadow:"0 1px 2px rgba(0,0,0,0.04)",opacity:dragging?0.4:1}}>
       <div style={{width:40,height:40,borderRadius:6,overflow:"hidden",background:"#F1F5F9",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
         {showImg
           ?<img src={p.image} alt="" referrerPolicy="no-referrer" onError={()=>setImgError(true)} style={{width:"100%",height:"100%",objectFit:"cover"}} />
