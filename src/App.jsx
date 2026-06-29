@@ -1172,6 +1172,7 @@ function ScheduleTab(){
       ...g,
       name:`${translateItemName(g.rep.item)}${g.rep.round?`_${g.rep.round}`:""}`,
       totalQty:g.events.reduce((s,e)=>s+(Number(e.qty)||0),0),
+      totalReceived:g.events.reduce((s,e)=>s+(Number(e.received)||0),0),
     }));
   };
 
@@ -1247,7 +1248,7 @@ function ScheduleTab(){
         {Array.from({length:daysInMonth},(_,i)=>{
           const day=i+1;const dayStr=`${monthStr}-${String(day).padStart(2,"0")}`;
           const events=getEventsForDay(day);
-          const dayQty=events.reduce((s,ev)=>s+(Number(ev.qty)||0),0);
+          const dayReceived=events.reduce((s,ev)=>s+(Number(ev.received)||0),0);
           const groups=groupEvents(events);
           const isToday=dayStr===today;
           const dow=(firstDayOfWeek+i)%7;
@@ -1260,7 +1261,7 @@ function ScheduleTab(){
               <span style={{fontSize:14,fontWeight:isToday?800:500,color:isToday?"#2563EB":dow===0?"#DC2626":dow===6?"#2563EB":"#334155"}}>{day}</span>
               {groups.length>0&&<span style={{display:"inline-flex",alignItems:"center",gap:4}}>
                 <span style={{fontSize:11,fontWeight:700,color:"#3B82F6",background:"#EFF6FF",border:"1px solid #DBEAFE",borderRadius:10,padding:"1px 7px"}}>{groups.length}건</span>
-                {dayQty>0&&<span style={{fontSize:11,fontWeight:700,color:"#0F766E",background:"#F0FDFA",border:"1px solid #CCFBF1",borderRadius:10,padding:"1px 7px",whiteSpace:"nowrap"}}>총 {dayQty.toLocaleString()}장</span>}
+                {dayReceived>0&&<span style={{fontSize:11,fontWeight:700,color:"#0F766E",background:"#F0FDFA",border:"1px solid #CCFBF1",borderRadius:10,padding:"1px 7px",whiteSpace:"nowrap"}}>실입고 {dayReceived.toLocaleString()}장</span>}
               </span>}
             </div>
             {groups.slice(0,3).map(g=>{
@@ -1277,7 +1278,7 @@ function ScheduleTab(){
                     </div>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:4,marginTop:4}}>
                       <span style={{fontWeight:700,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.name}</span>
-                      {g.totalQty>0&&<span style={{color:"#0F172A",fontWeight:700,flexShrink:0}}>총 {g.totalQty.toLocaleString()}장</span>}
+                      {g.totalReceived>0&&<span style={{color:"#0F172A",fontWeight:700,flexShrink:0}}>실입고 {g.totalReceived.toLocaleString()}장</span>}
                     </div>
                   </div>
                 </div>);
