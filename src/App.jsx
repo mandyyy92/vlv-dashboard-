@@ -1267,6 +1267,15 @@ function ScheduleTab(){
         {key:"amount",label:"금액"},
         {key:"status",label:"진행상태"},
       ];
+      const dayTotalQty=dayEvents.reduce((s,ev)=>s+(Number(ev.qty)||0),0);
+      const summaryMap=new Map();
+      dayEvents.forEach(ev=>{
+        const name=`${translateItemName(ev.item)}${ev.round?`_${ev.round}`:""}`;
+        const g=summaryMap.get(name)||{name,qty:0,count:0};
+        g.qty+=Number(ev.qty)||0;g.count+=1;
+        summaryMap.set(name,g);
+      });
+      const summaryGroups=Array.from(summaryMap.values());
       return(
         <div onClick={()=>setSelectedDay(null)} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.5)",display:"flex",justifyContent:"flex-end",zIndex:1000}}>
           <div onClick={e=>e.stopPropagation()} style={{background:"#FFF",width:440,maxWidth:"94vw",height:"100%",overflowY:"auto",boxShadow:"-8px 0 30px rgba(0,0,0,0.2)",padding:24,boxSizing:"border-box"}}>
@@ -1274,7 +1283,16 @@ function ScheduleTab(){
               <div style={{fontSize:18,fontWeight:700,color:"#0F172A"}}>📅 {selectedDay}</div>
               <button onClick={()=>setSelectedDay(null)} style={{border:"none",background:"#F1F5F9",borderRadius:8,width:32,height:32,fontSize:18,cursor:"pointer",color:"#475569"}}>✕</button>
             </div>
-            <div style={{fontSize:14,color:"#64748B",marginBottom:18}}>입고 예정 {dayEvents.length}건</div>
+            <div style={{fontSize:14,color:"#64748B",marginBottom:dayTotalQty>0||summaryGroups.length>0?10:18}}>입고 예정 {dayEvents.length}건{dayTotalQty>0?` · 총 ${dayTotalQty.toLocaleString()}장`:""}</div>
+            {summaryGroups.length>0&&<div style={{background:"#F8FAFC",border:"1px solid #EEF2F6",borderRadius:10,padding:"10px 12px",marginBottom:18}}>
+              <div style={{fontSize:12,fontWeight:700,color:"#94A3B8",marginBottom:6,letterSpacing:0.3}}>상품별 합계</div>
+              {summaryGroups.map(g=>(
+                <div key={g.name} style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:13,color:"#475569",padding:"2px 0"}}>
+                  <span style={{fontWeight:600,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.name}</span>
+                  <span style={{fontWeight:700,color:"#334155",whiteSpace:"nowrap"}}>총 {g.qty.toLocaleString()}장 ({g.count}건)</span>
+                </div>
+              ))}
+            </div>}
             {dayEvents.map(ev=>{
               const nc=NOTION_STATUS_COLOR[ev.status]||{bg:"#EDE9FE",color:"#6D28D9"};
               const rawId=String(ev.id).replace(/^notion-/,"").replace(/-/g,"");
