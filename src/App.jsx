@@ -1211,6 +1211,7 @@ function ScheduleTab(){
         {Array.from({length:daysInMonth},(_,i)=>{
           const day=i+1;const dayStr=`${monthStr}-${String(day).padStart(2,"0")}`;
           const events=getEventsForDay(day);
+          const dayQty=events.reduce((s,ev)=>s+(Number(ev.qty)||0),0);
           const isToday=dayStr===today;
           const dow=(firstDayOfWeek+i)%7;
           const isDragOver=dragOverDay===dayStr;
@@ -1220,7 +1221,10 @@ function ScheduleTab(){
             onClick={()=>{if(events.length>0)setSelectedDay(dayStr);}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
               <span style={{fontSize:14,fontWeight:isToday?800:500,color:isToday?"#2563EB":dow===0?"#DC2626":dow===6?"#2563EB":"#334155"}}>{day}</span>
-              {events.length>0&&<span style={{fontSize:11,fontWeight:700,color:"#3B82F6",background:"#EFF6FF",border:"1px solid #DBEAFE",borderRadius:10,padding:"1px 7px"}}>{events.length}건</span>}
+              {events.length>0&&<span style={{display:"inline-flex",alignItems:"center",gap:4}}>
+                <span style={{fontSize:11,fontWeight:700,color:"#3B82F6",background:"#EFF6FF",border:"1px solid #DBEAFE",borderRadius:10,padding:"1px 7px"}}>{events.length}건</span>
+                {dayQty>0&&<span style={{fontSize:11,fontWeight:700,color:"#0F766E",background:"#F0FDFA",border:"1px solid #CCFBF1",borderRadius:10,padding:"1px 7px",whiteSpace:"nowrap"}}>총 {dayQty.toLocaleString()}장</span>}
+              </span>}
             </div>
             {events.slice(0,3).map(ev=>{
               const nc=NOTION_STATUS_COLOR[ev.status]||{bg:"#EDE9FE",color:"#6D28D9"};
