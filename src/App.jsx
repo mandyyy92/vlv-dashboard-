@@ -1160,6 +1160,21 @@ function ScheduleTab(){
     return{bg:"#FDE8E8",color:"#DC2626",icon:"📦"};
   };
 
+  // 상품(제품명+차수) 단위 그룹핑 — 그룹 순서·내부 순서 모두 원본 배열 순서 유지. 대표=첫 행.
+  const groupEvents=(list)=>{
+    const m=new Map();
+    list.forEach(ev=>{
+      const key=`${ev.item||""}__${ev.round||""}`;
+      if(!m.has(key))m.set(key,{key,rep:ev,events:[]});
+      m.get(key).events.push(ev);
+    });
+    return Array.from(m.values()).map(g=>({
+      ...g,
+      name:`${translateItemName(g.rep.item)}${g.rep.round?`_${g.rep.round}`:""}`,
+      totalQty:g.events.reduce((s,e)=>s+(Number(e.qty)||0),0),
+    }));
+  };
+
   // 노션 댓글·첨부 토글 (이미 불러왔으면 펼침/접힘만, 중복 GET 안 함)
   const toggleComments=async(pageId)=>{
     const cur=commentData[pageId];
@@ -1233,6 +1248,7 @@ function ScheduleTab(){
           const day=i+1;const dayStr=`${monthStr}-${String(day).padStart(2,"0")}`;
           const events=getEventsForDay(day);
           const dayQty=events.reduce((s,ev)=>s+(Number(ev.qty)||0),0);
+          const groups=groupEvents(events);
           const isToday=dayStr===today;
           const dow=(firstDayOfWeek+i)%7;
           const isDragOver=dragOverDay===dayStr;
@@ -1242,15 +1258,16 @@ function ScheduleTab(){
             onClick={()=>{if(events.length>0)setSelectedDay(dayStr);}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
               <span style={{fontSize:14,fontWeight:isToday?800:500,color:isToday?"#2563EB":dow===0?"#DC2626":dow===6?"#2563EB":"#334155"}}>{day}</span>
-              {events.length>0&&<span style={{display:"inline-flex",alignItems:"center",gap:4}}>
-                <span style={{fontSize:11,fontWeight:700,color:"#3B82F6",background:"#EFF6FF",border:"1px solid #DBEAFE",borderRadius:10,padding:"1px 7px"}}>{events.length}건</span>
+              {groups.length>0&&<span style={{display:"inline-flex",alignItems:"center",gap:4}}>
+                <span style={{fontSize:11,fontWeight:700,color:"#3B82F6",background:"#EFF6FF",border:"1px solid #DBEAFE",borderRadius:10,padding:"1px 7px"}}>{groups.length}건</span>
                 {dayQty>0&&<span style={{fontSize:11,fontWeight:700,color:"#0F766E",background:"#F0FDFA",border:"1px solid #CCFBF1",borderRadius:10,padding:"1px 7px",whiteSpace:"nowrap"}}>총 {dayQty.toLocaleString()}장</span>}
               </span>}
             </div>
-            {events.slice(0,3).map(ev=>{
+            {groups.slice(0,3).map(g=>{
+              const ev=g.rep;
               const nc=NOTION_STATUS_COLOR[ev.status]||{bg:"#EDE9FE",color:"#6D28D9"};
               return(
-                <div key={ev.id} title={`${ev.status||"발주"}${ev.supplier?" · "+ev.supplier:""}${ev.code?" · "+ev.code:""}`}
+                <div key={g.key} title={`${ev.status||"발주"}${ev.supplier?" · "+ev.supplier:""}${ev.code?" · "+ev.code:""}`}
                   style={{display:"flex",gap:6,alignItems:"center",padding:"6px 7px",borderRadius:4,marginBottom:2,background:nc.bg,border:"1px solid "+nc.color+"55",fontSize:12,lineHeight:1.3,userSelect:"none"}}>
                   {ev.image&&<img src={ev.image} alt="" loading="lazy" onError={e=>{e.currentTarget.style.display="none";}} style={{width:26,height:26,borderRadius:4,objectFit:"cover",flexShrink:0,background:"#FFF",border:"1px solid rgba(0,0,0,0.06)"}} />}
                   <div style={{flex:1,minWidth:0}}>
@@ -1259,13 +1276,13 @@ function ScheduleTab(){
                       {ev.supplier&&<span style={{opacity:0.85,fontWeight:500,flexShrink:0}}>· {ev.supplier}</span>}
                     </div>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:4,marginTop:4}}>
-                      <span style={{fontWeight:700,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{translateItemName(ev.item)}{ev.round?`_${ev.round}`:""}</span>
-                      {ev.qty>0&&<span style={{color:"#0F172A",fontWeight:700,flexShrink:0}}>{ev.qty.toLocaleString()}장</span>}
+                      <span style={{fontWeight:700,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.name}</span>
+                      {g.totalQty>0&&<span style={{color:"#0F172A",fontWeight:700,flexShrink:0}}>총 {g.totalQty.toLocaleString()}장</span>}
                     </div>
                   </div>
                 </div>);
             })}
-            {events.length>3&&<div style={{fontSize:11,fontWeight:600,color:"#64748B",padding:"2px 4px"}}>+{events.length-3}개 더</div>}
+            {groups.length>3&&<div style={{fontSize:11,fontWeight:600,color:"#64748B",padding:"2px 4px"}}>+{groups.length-3}개 더</div>}
           </div>);
         })}
       </div>
@@ -1275,28 +1292,10 @@ function ScheduleTab(){
     {selectedDay&&(()=>{
       const dayEvents=notionEvents.filter(n=>n.date===selectedDay&&matchesCalSearch(n));
       const has=(v)=>v!==null&&v!==undefined&&v!=="";
-      const fieldDefs=[
-        {key:"date",label:"입고 예정일"},
-        {key:"orderDate",label:"발주일"},
-        {key:"round",label:"차수"},
-        {key:"option",label:"옵션"},
-        {key:"category",label:"카테고리"},
-        {key:"code",label:"상품코드"},
-        {key:"supplier",label:"업체"},
-        {key:"qty",label:"수량",fmt:v=>Number(v).toLocaleString()+"장"},
-        {key:"received",label:"실입고",fmt:v=>Number(v).toLocaleString()+"장"},
-        {key:"amount",label:"금액"},
-        {key:"status",label:"진행상태"},
-      ];
       const dayTotalQty=dayEvents.reduce((s,ev)=>s+(Number(ev.qty)||0),0);
-      const summaryMap=new Map();
-      dayEvents.forEach(ev=>{
-        const name=`${translateItemName(ev.item)}${ev.round?`_${ev.round}`:""}`;
-        const g=summaryMap.get(name)||{name,qty:0,count:0};
-        g.qty+=Number(ev.qty)||0;g.count+=1;
-        summaryMap.set(name,g);
-      });
-      const summaryGroups=Array.from(summaryMap.values());
+      const dayGroups=groupEvents(dayEvents);
+      const colTh={padding:"6px 6px",textAlign:"left",fontSize:11,fontWeight:700,color:"#94A3B8",borderBottom:"1px solid #E2E8F0",whiteSpace:"nowrap"};
+      const colTd={padding:"6px 6px",fontSize:12,color:"#334155",borderBottom:"1px solid #F1F5F9",verticalAlign:"top"};
       return(
         <div onClick={()=>setSelectedDay(null)} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.5)",display:"flex",justifyContent:"flex-end",zIndex:1000}}>
           <div onClick={e=>e.stopPropagation()} style={{background:"#FFF",width:440,maxWidth:"94vw",height:"100%",overflowY:"auto",boxShadow:"-8px 0 30px rgba(0,0,0,0.2)",padding:24,boxSizing:"border-box"}}>
@@ -1304,46 +1303,47 @@ function ScheduleTab(){
               <div style={{fontSize:18,fontWeight:700,color:"#0F172A"}}>📅 {selectedDay}</div>
               <button onClick={()=>setSelectedDay(null)} style={{border:"none",background:"#F1F5F9",borderRadius:8,width:32,height:32,fontSize:18,cursor:"pointer",color:"#475569"}}>✕</button>
             </div>
-            <div style={{fontSize:14,color:"#64748B",marginBottom:dayTotalQty>0||summaryGroups.length>0?10:18}}>입고 예정 {dayEvents.length}건{dayTotalQty>0?` · 총 ${dayTotalQty.toLocaleString()}장`:""}</div>
-            {summaryGroups.length>0&&<div style={{background:"#F8FAFC",border:"1px solid #EEF2F6",borderRadius:10,padding:"10px 12px",marginBottom:18}}>
-              <div style={{fontSize:12,fontWeight:700,color:"#94A3B8",marginBottom:6,letterSpacing:0.3}}>상품별 합계</div>
-              {summaryGroups.map(g=>(
-                <div key={g.name} style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:13,color:"#475569",padding:"2px 0"}}>
-                  <span style={{fontWeight:600,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.name}</span>
-                  <span style={{fontWeight:700,color:"#334155",whiteSpace:"nowrap"}}>총 {g.qty.toLocaleString()}장 ({g.count}건)</span>
-                </div>
-              ))}
-            </div>}
-            {dayEvents.map(ev=>{
+            <div style={{fontSize:14,color:"#64748B",marginBottom:16}}>입고 예정 {dayEvents.length}건(상품 {dayGroups.length}종){dayTotalQty>0?` · 총 ${dayTotalQty.toLocaleString()}장`:""}</div>
+            {dayGroups.map(g=>{
+              const ev=g.rep;
               const nc=NOTION_STATUS_COLOR[ev.status]||{bg:"#EDE9FE",color:"#6D28D9"};
               const rawId=String(ev.id).replace(/^notion-/,"").replace(/-/g,"");
-              return(<div key={ev.id} style={{border:"1px solid #E2E8F0",borderRadius:12,padding:16,marginBottom:14}}>
+              return(<div key={g.key} style={{border:"1px solid #E2E8F0",borderRadius:12,padding:16,marginBottom:14}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:10}}>
                   <div style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}>
                     {ev.image&&<img src={ev.image} alt="" loading="lazy" onError={e=>{e.currentTarget.style.display="none";}} style={{width:44,height:44,borderRadius:8,objectFit:"cover",flexShrink:0,background:"#F8FAFC",border:"1px solid #E2E8F0"}} />}
-                    <span style={{fontSize:16,fontWeight:700,color:"#1E293B"}}>{translateItemName(ev.item)}{ev.round?`_${ev.round}`:""}</span>
+                    <div style={{minWidth:0}}>
+                      <div style={{fontSize:16,fontWeight:700,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.name}</div>
+                      <div style={{fontSize:12,color:"#94A3B8",marginTop:2}}>총 {g.totalQty.toLocaleString()}장 · {g.events.length}옵션</div>
+                    </div>
                   </div>
-                  {ev.status&&<span style={{fontSize:12,fontWeight:700,color:nc.color,background:nc.bg,border:"1px solid "+nc.color+"55",borderRadius:6,padding:"2px 8px",whiteSpace:"nowrap"}}>{ev.status}</span>}
+                  {ev.status&&<span style={{fontSize:12,fontWeight:700,color:nc.color,background:nc.bg,border:"1px solid "+nc.color+"55",borderRadius:6,padding:"2px 8px",whiteSpace:"nowrap",flexShrink:0}}>{ev.status}</span>}
                 </div>
-                <table style={{width:"100%",borderCollapse:"collapse",fontSize:14}}><tbody>
-                  {fieldDefs.filter(f=>has(ev[f.key])).map(f=>(
-                    <tr key={f.key}>
-                      <td style={{padding:"5px 8px 5px 0",color:"#94A3B8",fontWeight:600,whiteSpace:"nowrap",verticalAlign:"top",width:90}}>{f.label}</td>
-                      <td style={{padding:"5px 0",color:"#334155",fontWeight:600}}>{f.fmt?f.fmt(ev[f.key]):String(ev[f.key])}</td>
-                    </tr>
-                  ))}
-                  {has(ev.colorSize)&&(ev.colorSize.includes("/")?(()=>{
-                    const i=ev.colorSize.indexOf("/");
-                    const color=ev.colorSize.slice(0,i).trim();
-                    const size=ev.colorSize.slice(i+1).trim();
-                    return(<>
-                      {has(color)&&<tr><td style={{padding:"5px 8px 5px 0",color:"#94A3B8",fontWeight:600,whiteSpace:"nowrap",verticalAlign:"top",width:90}}>색상</td><td style={{padding:"5px 0",color:"#334155",fontWeight:600}}>{color}</td></tr>}
-                      {has(size)&&<tr><td style={{padding:"5px 8px 5px 0",color:"#94A3B8",fontWeight:600,whiteSpace:"nowrap",verticalAlign:"top",width:90}}>사이즈</td><td style={{padding:"5px 0",color:"#334155",fontWeight:600}}>{size}</td></tr>}
-                    </>);
-                  })():(
-                    <tr><td style={{padding:"5px 8px 5px 0",color:"#94A3B8",fontWeight:600,whiteSpace:"nowrap",verticalAlign:"top",width:90}}>색상/사이즈</td><td style={{padding:"5px 0",color:"#334155",fontWeight:600}}>{ev.colorSize}</td></tr>
-                  ))}
-                </tbody></table>
+                <div style={{overflowX:"auto",borderRadius:8,border:"1px solid #EEF2F6"}}>
+                  <table style={{width:"100%",borderCollapse:"collapse"}}>
+                    <thead><tr style={{background:"#F8FAFC"}}>
+                      <th style={colTh}>발주일</th><th style={colTh}>입고일</th><th style={colTh}>차수</th><th style={colTh}>옵션</th>
+                      <th style={{...colTh,textAlign:"right"}}>수량</th><th style={{...colTh,textAlign:"right"}}>금액</th>
+                    </tr></thead>
+                    <tbody>
+                      {g.events.map((o,oi)=>(
+                        <tr key={o.id||oi}>
+                          <td style={colTd}>{has(o.orderDate)?o.orderDate:"-"}</td>
+                          <td style={colTd}>{has(o.date)?o.date:"-"}</td>
+                          <td style={colTd}>{has(o.round)?o.round:"-"}</td>
+                          <td style={colTd}>{has(o.colorSize)?o.colorSize:"-"}</td>
+                          <td style={{...colTd,textAlign:"right",fontWeight:700,color:"#0F172A",whiteSpace:"nowrap"}}>{(Number(o.qty)||0).toLocaleString()}</td>
+                          <td style={{...colTd,textAlign:"right",whiteSpace:"nowrap"}}>{has(o.amount)?(Number.isFinite(Number(o.amount))?Number(o.amount).toLocaleString()+"원":String(o.amount)):"-"}</td>
+                        </tr>
+                      ))}
+                      <tr style={{background:"#FAFAF9"}}>
+                        <td style={{...colTd,fontWeight:700,color:"#475569",borderBottom:"none"}} colSpan={4}>합계</td>
+                        <td style={{...colTd,textAlign:"right",fontWeight:800,color:"#0F172A",borderBottom:"none",whiteSpace:"nowrap"}}>{g.totalQty.toLocaleString()}</td>
+                        <td style={{...colTd,borderBottom:"none"}}></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
                 <div style={{marginTop:12,display:"flex",alignItems:"center",gap:14}}>
                   <a href={`https://www.notion.so/${rawId}`} target="_blank" rel="noreferrer" style={{fontSize:13,fontWeight:600,color:"#2563EB",textDecoration:"none"}}>↗ 노션 열기</a>
                   <button onClick={()=>toggleComments(rawId)} style={{border:"none",background:"none",padding:0,fontSize:13,fontWeight:600,color:"#7C3AED",cursor:"pointer"}}>
@@ -1384,7 +1384,7 @@ function ScheduleTab(){
                 })()}
               </div>);
             })}
-            {dayEvents.length===0&&<div style={{textAlign:"center",color:"#94A3B8",padding:30}}>표시할 발주가 없습니다.</div>}
+            {dayGroups.length===0&&<div style={{textAlign:"center",color:"#94A3B8",padding:30}}>표시할 발주가 없습니다.</div>}
           </div>
         </div>);
     })()}
