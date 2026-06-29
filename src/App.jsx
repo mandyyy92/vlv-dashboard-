@@ -57,6 +57,7 @@ async function fetchNotionSchedule(){
       category:n.category||"",
       code:n.code||"",
       image:n.image||null,
+      colorSize:n.colorSize??"",
     })).filter(n=>n.date);
   }catch(e){console.warn("[super-worker] 호출 실패",e);return[];}
 }
@@ -1287,6 +1288,17 @@ function ScheduleTab(){
                       <td style={{padding:"5px 8px 5px 0",color:"#94A3B8",fontWeight:600,whiteSpace:"nowrap",verticalAlign:"top",width:90}}>{f.label}</td>
                       <td style={{padding:"5px 0",color:"#334155",fontWeight:600}}>{f.fmt?f.fmt(ev[f.key]):String(ev[f.key])}</td>
                     </tr>
+                  ))}
+                  {has(ev.colorSize)&&(ev.colorSize.includes("/")?(()=>{
+                    const i=ev.colorSize.indexOf("/");
+                    const color=ev.colorSize.slice(0,i).trim();
+                    const size=ev.colorSize.slice(i+1).trim();
+                    return(<>
+                      {has(color)&&<tr><td style={{padding:"5px 8px 5px 0",color:"#94A3B8",fontWeight:600,whiteSpace:"nowrap",verticalAlign:"top",width:90}}>색상</td><td style={{padding:"5px 0",color:"#334155",fontWeight:600}}>{color}</td></tr>}
+                      {has(size)&&<tr><td style={{padding:"5px 8px 5px 0",color:"#94A3B8",fontWeight:600,whiteSpace:"nowrap",verticalAlign:"top",width:90}}>사이즈</td><td style={{padding:"5px 0",color:"#334155",fontWeight:600}}>{size}</td></tr>}
+                    </>);
+                  })():(
+                    <tr><td style={{padding:"5px 8px 5px 0",color:"#94A3B8",fontWeight:600,whiteSpace:"nowrap",verticalAlign:"top",width:90}}>색상/사이즈</td><td style={{padding:"5px 0",color:"#334155",fontWeight:600}}>{ev.colorSize}</td></tr>
                   ))}
                 </tbody></table>
                 <div style={{marginTop:12}}>
