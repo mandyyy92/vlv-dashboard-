@@ -754,6 +754,7 @@ function ScheduleTab(){
   const[statusFilter,setStatusFilter]=useState("all"); // all | confirming | confirmed
   const[calSearch,setCalSearch]=useState(""); // v77: 캘린더 Notion 검색
   const[selectedDay,setSelectedDay]=useState(null); // v77: 날짜 상세 패널(dayStr)
+  const[commentData,setCommentData]=useState({}); // { [eventId]: {loading, data, error, open} } 노션 댓글·첨부
 
   const SUPPLIERS=["인도","코니키즈","성은교역","오중"];
   const SUP_STYLES=SCHEDULE_SUP_STYLES;
@@ -1159,6 +1160,26 @@ function ScheduleTab(){
     return{bg:"#FDE8E8",color:"#DC2626",icon:"📦"};
   };
 
+  // 노션 댓글·첨부 토글 (이미 불러왔으면 펼침/접힘만, 중복 GET 안 함)
+  const toggleComments=async(pageId)=>{
+    const cur=commentData[pageId];
+    if(cur&&cur.data){setCommentData(p=>({...p,[pageId]:{...cur,open:!cur.open}}));return;}
+    if(cur&&cur.loading)return;
+    setCommentData(p=>({...p,[pageId]:{loading:true,open:true}}));
+    try{
+      const r=await fetch(`${SUPABASE_URL}/functions/v1/super-worker?comments=${encodeURIComponent(pageId)}`,{
+        method:"GET",
+        headers:{"Authorization":`Bearer ${SUPABASE_KEY}`,"apikey":SUPABASE_KEY},
+      });
+      if(!r.ok){setCommentData(p=>({...p,[pageId]:{loading:false,open:true,error:`불러오기 실패(${r.status})`}}));return;}
+      const data=await r.json();
+      setCommentData(p=>({...p,[pageId]:{loading:false,open:true,data}}));
+    }catch(e){
+      console.warn("[super-worker] 댓글 호출 실패",e);
+      setCommentData(p=>({...p,[pageId]:{loading:false,open:true,error:"불러오기 실패"}}));
+    }
+  };
+
   // D-day 계산
   const dday=(dateStr)=>{if(!dateStr)return"";const d=Math.ceil((new Date(dateStr)-new Date())/(86400000));return d<0?`${Math.abs(d)}일 지남`:d===0?"오늘":`D-${d}`;};
   const ddayColor=(dateStr)=>{if(!dateStr)return"#94A3B8";const d=Math.ceil((new Date(dateStr)-new Date())/(86400000));return d<0?"#DC2626":d<=3?"#D97706":"#2563EB";};
@@ -1323,9 +1344,44 @@ function ScheduleTab(){
                     <tr><td style={{padding:"5px 8px 5px 0",color:"#94A3B8",fontWeight:600,whiteSpace:"nowrap",verticalAlign:"top",width:90}}>색상/사이즈</td><td style={{padding:"5px 0",color:"#334155",fontWeight:600}}>{ev.colorSize}</td></tr>
                   ))}
                 </tbody></table>
-                <div style={{marginTop:12}}>
+                <div style={{marginTop:12,display:"flex",alignItems:"center",gap:14}}>
                   <a href={`https://www.notion.so/${rawId}`} target="_blank" rel="noreferrer" style={{fontSize:13,fontWeight:600,color:"#2563EB",textDecoration:"none"}}>↗ 노션 열기</a>
+                  <button onClick={()=>toggleComments(rawId)} style={{border:"none",background:"none",padding:0,fontSize:13,fontWeight:600,color:"#7C3AED",cursor:"pointer"}}>
+                    💬 댓글·첨부 {commentData[rawId]?.open?"접기":"보기"}
+                  </button>
                 </div>
+                {commentData[rawId]?.open&&(()=>{
+                  const cd=commentData[rawId];
+                  const thumb={width:84,height:84,borderRadius:8,objectFit:"cover",background:"#F1F5F9",border:"1px solid #E2E8F0",cursor:"pointer",flexShrink:0};
+                  return(<div style={{marginTop:10,background:"#FAFAF9",border:"1px solid #EEF2F6",borderRadius:10,padding:"10px 12px"}}>
+                    {cd.loading&&<div style={{fontSize:13,color:"#94A3B8"}}>불러오는 중…</div>}
+                    {!cd.loading&&cd.error&&<div style={{fontSize:13,color:"#DC2626"}}>{cd.error}</div>}
+                    {!cd.loading&&!cd.error&&cd.data&&(()=>{
+                      const{comments=[],bodyImages=[],commentsError}=cd.data;
+                      return(<>
+                        {commentsError&&<div style={{fontSize:12,color:"#B45309",background:"#FFFBEB",border:"1px solid #FDE68A",borderRadius:6,padding:"4px 8px",marginBottom:8}}>댓글 권한 미설정</div>}
+                        <div style={{fontSize:12,fontWeight:700,color:"#94A3B8",marginBottom:6,letterSpacing:0.3}}>💬 댓글</div>
+                        {comments.length===0?(
+                          <div style={{fontSize:13,color:"#94A3B8",marginBottom:bodyImages.length>0?10:0}}>댓글 없음</div>
+                        ):comments.map((c,ci)=>(
+                          <div key={ci} style={{marginBottom:8,paddingBottom:8,borderBottom:ci<comments.length-1?"1px solid #F1F5F9":"none"}}>
+                            {c.text&&<div style={{fontSize:13,color:"#334155",whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{c.text}</div>}
+                            {c.at&&<div style={{fontSize:11,color:"#94A3B8",marginTop:2}}>{String(c.at).replace("T"," ").slice(0,16)}</div>}
+                            {Array.isArray(c.images)&&c.images.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:6}}>
+                              {c.images.map((src,ii)=>(<img key={ii} src={src} alt="" loading="lazy" referrerPolicy="no-referrer" onError={e=>{e.currentTarget.style.display="none";}} onClick={()=>window.open(src,"_blank","noopener")} style={thumb} />))}
+                            </div>}
+                          </div>
+                        ))}
+                        {bodyImages.length>0&&<>
+                          <div style={{fontSize:12,fontWeight:700,color:"#94A3B8",margin:"10px 0 6px",letterSpacing:0.3}}>🖼 본문 이미지</div>
+                          <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                            {bodyImages.map((src,bi)=>(<img key={bi} src={src} alt="" loading="lazy" referrerPolicy="no-referrer" onError={e=>{e.currentTarget.style.display="none";}} onClick={()=>window.open(src,"_blank","noopener")} style={thumb} />))}
+                          </div>
+                        </>}
+                      </>);
+                    })()}
+                  </div>);
+                })()}
               </div>);
             })}
             {dayEvents.length===0&&<div style={{textAlign:"center",color:"#94A3B8",padding:30}}>표시할 발주가 없습니다.</div>}
