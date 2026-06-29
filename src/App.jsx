@@ -1294,8 +1294,8 @@ function ScheduleTab(){
       const has=(v)=>v!==null&&v!==undefined&&v!=="";
       const dayTotalQty=dayEvents.reduce((s,ev)=>s+(Number(ev.qty)||0),0);
       const dayGroups=groupEvents(dayEvents);
-      const colTh={padding:"6px 6px",textAlign:"left",fontSize:11,fontWeight:700,color:"#94A3B8",borderBottom:"1px solid #E2E8F0",whiteSpace:"nowrap"};
-      const colTd={padding:"6px 6px",fontSize:12,color:"#334155",borderBottom:"1px solid #F1F5F9",verticalAlign:"top"};
+      const colTh={padding:"5px 4px",textAlign:"left",fontSize:10,fontWeight:700,color:"#94A3B8",borderBottom:"1px solid #E2E8F0",whiteSpace:"nowrap"};
+      const colTd={padding:"5px 4px",fontSize:11,color:"#334155",borderBottom:"1px solid #F1F5F9",verticalAlign:"top"};
       return(
         <div onClick={()=>setSelectedDay(null)} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.5)",display:"flex",justifyContent:"flex-end",zIndex:1000}}>
           <div onClick={e=>e.stopPropagation()} style={{background:"#FFF",width:440,maxWidth:"94vw",height:"100%",overflowY:"auto",boxShadow:"-8px 0 30px rgba(0,0,0,0.2)",padding:24,boxSizing:"border-box"}}>
@@ -1323,22 +1323,26 @@ function ScheduleTab(){
                   <table style={{width:"100%",borderCollapse:"collapse"}}>
                     <thead><tr style={{background:"#F8FAFC"}}>
                       <th style={colTh}>발주일</th><th style={colTh}>입고일</th><th style={colTh}>차수</th><th style={colTh}>옵션</th>
-                      <th style={{...colTh,textAlign:"right"}}>수량</th><th style={{...colTh,textAlign:"right"}}>금액</th>
+                      <th style={{...colTh,textAlign:"right"}}>발주수량</th><th style={{...colTh,textAlign:"right"}}>실입고수량</th><th style={{...colTh,textAlign:"right"}}>금액</th>
                     </tr></thead>
                     <tbody>
-                      {g.events.map((o,oi)=>(
+                      {g.events.map((o,oi)=>{
+                        const recNum=has(o.received)&&Number.isFinite(Number(o.received))?Number(o.received):null;
+                        return(
                         <tr key={o.id||oi}>
                           <td style={colTd}>{has(o.orderDate)?o.orderDate:"-"}</td>
                           <td style={colTd}>{has(o.date)?o.date:"-"}</td>
                           <td style={colTd}>{has(o.round)?o.round:"-"}</td>
                           <td style={colTd}>{has(o.colorSize)?o.colorSize:"-"}</td>
                           <td style={{...colTd,textAlign:"right",fontWeight:700,color:"#0F172A",whiteSpace:"nowrap"}}>{(Number(o.qty)||0).toLocaleString()}</td>
+                          <td style={{...colTd,textAlign:"right",fontWeight:700,color:recNum!==null?"#0F766E":"#94A3B8",whiteSpace:"nowrap"}}>{recNum!==null?recNum.toLocaleString():"-"}</td>
                           <td style={{...colTd,textAlign:"right",whiteSpace:"nowrap"}}>{has(o.amount)?(Number.isFinite(Number(o.amount))?Number(o.amount).toLocaleString()+"원":String(o.amount)):"-"}</td>
-                        </tr>
-                      ))}
+                        </tr>);
+                      })}
                       <tr style={{background:"#FAFAF9"}}>
                         <td style={{...colTd,fontWeight:700,color:"#475569",borderBottom:"none"}} colSpan={4}>합계</td>
                         <td style={{...colTd,textAlign:"right",fontWeight:800,color:"#0F172A",borderBottom:"none",whiteSpace:"nowrap"}}>{g.totalQty.toLocaleString()}</td>
+                        <td style={{...colTd,textAlign:"right",fontWeight:800,color:"#0F766E",borderBottom:"none",whiteSpace:"nowrap"}}>{g.events.reduce((s,o)=>s+(has(o.received)&&Number.isFinite(Number(o.received))?Number(o.received):0),0).toLocaleString()}</td>
                         <td style={{...colTd,borderBottom:"none"}}></td>
                       </tr>
                     </tbody>
