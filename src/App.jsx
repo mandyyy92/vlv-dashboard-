@@ -1200,6 +1200,18 @@ function ScheduleTab(){
   const dday=(dateStr)=>{if(!dateStr)return"";const d=Math.ceil((new Date(dateStr)-new Date())/(86400000));return d<0?`${Math.abs(d)}일 지남`:d===0?"오늘":`D-${d}`;};
   const ddayColor=(dateStr)=>{if(!dateStr)return"#94A3B8";const d=Math.ceil((new Date(dateStr)-new Date())/(86400000));return d<0?"#DC2626":d<=3?"#D97706":"#2563EB";};
 
+  // v78: 캘린더 검색 드롭다운 — notionEvents 전체(현재 달 무관)에서 검색, "입고 완료" 제외, (제품명+차수) 그룹, date 오름차순
+  const calSearchResults=(()=>{
+    if(!calSearch.trim())return null;
+    const isDone=(s)=>String(s||"").replace(/\s/g,"")==="입고완료";
+    const matched=notionEvents.filter(n=>n.date&&matchesCalSearch(n)&&!isDone(n.status));
+    return groupEvents(matched).sort((a,b)=>String(a.rep.date||"").localeCompare(String(b.rep.date||"")));
+  })();
+  const gotoSearchResult=(ev)=>{
+    if(ev.date){const[y,mo]=ev.date.split("-").map(Number);setCurrentMonth({year:y,month:mo-1});setSelectedDay(ev.date);}
+    setCalSearch("");
+  };
+
   if(loading)return <SectionCard title="📅 입고 스케줄 관리"><div style={{textAlign:"center",padding:40,color:"#94A3B8"}}>⏳ 데이터 불러오는 중...</div></SectionCard>;
 
   return(<>
@@ -1236,10 +1248,36 @@ function ScheduleTab(){
         </div>
       </div>
     }>
-      {/* v77: 캘린더 검색 (제품명·상품코드·차수·업체) */}
-      <div style={{marginBottom:12}}>
+      {/* v77: 캘린더 검색 (제품명·상품코드·차수·업체) + v78: 결과 드롭다운(전체 일정 네비게이션) */}
+      <div style={{marginBottom:12,position:"relative",maxWidth:340}}>
         <input value={calSearch} onChange={e=>setCalSearch(e.target.value)} placeholder="제품명·상품코드·차수·업체 검색..."
-          style={{width:"100%",maxWidth:340,padding:"8px 12px",borderRadius:8,border:"1px solid #E2E8F0",fontSize:14,outline:"none",background:"#F8FAFC",boxSizing:"border-box"}} />
+          style={{width:"100%",padding:"8px 12px",borderRadius:8,border:"1px solid #E2E8F0",fontSize:14,outline:"none",background:"#F8FAFC",boxSizing:"border-box"}} />
+        {calSearchResults&&(
+          <div style={{position:"absolute",top:"calc(100% + 4px)",left:0,width:360,maxWidth:"90vw",maxHeight:360,overflowY:"auto",background:"#FFF",border:"1px solid #E2E8F0",borderRadius:10,boxShadow:"0 12px 32px rgba(15,23,42,0.16)",zIndex:50}}>
+            {calSearchResults.length===0&&<div style={{padding:"14px 12px",fontSize:13,color:"#94A3B8"}}>검색 결과가 없습니다 (입고 완료 제외)</div>}
+            {calSearchResults.slice(0,20).map(g=>{
+              const ev=g.rep;
+              const nc=NOTION_STATUS_COLOR[ev.status]||{bg:"#EDE9FE",color:"#6D28D9"};
+              return(
+                <div key={g.key} onClick={()=>gotoSearchResult(ev)}
+                  style={{display:"flex",gap:10,alignItems:"center",padding:"9px 12px",borderBottom:"1px solid #F1F5F9",cursor:"pointer"}}
+                  onMouseEnter={e=>e.currentTarget.style.background="#F8FAFC"} onMouseLeave={e=>e.currentTarget.style.background="#FFF"}>
+                  {ev.image
+                    ?<img src={ev.image} alt="" loading="lazy" onError={e=>{e.currentTarget.style.display="none";}} style={{width:34,height:34,borderRadius:6,objectFit:"cover",flexShrink:0,background:"#FFF",border:"1px solid rgba(0,0,0,0.06)"}} />
+                    :<div style={{width:34,height:34,borderRadius:6,flexShrink:0,background:"#F1F5F9"}} />}
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:13,fontWeight:700,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.name}</div>
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginTop:3,fontSize:11,color:"#64748B"}}>
+                      <span>📅 {ev.date}</span>
+                      {g.totalQty>0&&<span>· 발주 {g.totalQty.toLocaleString()}장</span>}
+                    </div>
+                  </div>
+                  <span style={{flexShrink:0,fontSize:10,fontWeight:700,color:nc.color,background:nc.bg,border:"1px solid "+nc.color+"55",borderRadius:10,padding:"2px 8px",whiteSpace:"nowrap"}}>{ev.status||"발주"}</span>
+                </div>);
+            })}
+            {calSearchResults.length>20&&<div style={{padding:"8px 12px",fontSize:11,fontWeight:600,color:"#64748B",background:"#F8FAFC"}}>그 외 {calSearchResults.length-20}건</div>}
+          </div>
+        )}
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:1,background:"#E2E8F0",borderRadius:10,overflow:"hidden"}}>
         {["일","월","화","수","목","금","토"].map((d,i)=>(<div key={d} style={{textAlign:"center",padding:"8px 4px",fontSize:14,fontWeight:700,color:i===0?"#DC2626":i===6?"#2563EB":"#64748B",background:"#F8FAFC"}}>{d}</div>))}
