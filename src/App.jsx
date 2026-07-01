@@ -1337,7 +1337,7 @@ function ScheduleTab(){
       const colTd={padding:"5px 4px",fontSize:11,color:"#334155",borderBottom:"1px solid #F1F5F9",verticalAlign:"top"};
       return(
         <div onClick={()=>setSelectedDay(null)} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.5)",display:"flex",justifyContent:"flex-end",zIndex:1000}}>
-          <div onClick={e=>e.stopPropagation()} style={{background:"#FFF",width:440,maxWidth:"94vw",height:"100%",overflowY:"auto",boxShadow:"-8px 0 30px rgba(0,0,0,0.2)",padding:24,boxSizing:"border-box"}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"#FFF",width:"min(560px, 92vw)",height:"100%",overflowY:"auto",boxShadow:"-8px 0 30px rgba(0,0,0,0.2)",padding:24,boxSizing:"border-box"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
               <div style={{fontSize:18,fontWeight:700,color:"#0F172A"}}>📅 {selectedDay}</div>
               <button onClick={()=>setSelectedDay(null)} style={{border:"none",background:"#F1F5F9",borderRadius:8,width:32,height:32,fontSize:18,cursor:"pointer",color:"#475569"}}>✕</button>
@@ -1369,8 +1369,8 @@ function ScheduleTab(){
                         const recNum=has(o.received)&&Number.isFinite(Number(o.received))?Number(o.received):null;
                         return(
                         <tr key={o.id||oi}>
-                          <td style={colTd}>{has(o.orderDate)?o.orderDate:"-"}</td>
-                          <td style={colTd}>{has(o.date)?o.date:"-"}</td>
+                          <td style={{...colTd,whiteSpace:"nowrap"}}>{has(o.orderDate)?o.orderDate:"-"}</td>
+                          <td style={{...colTd,whiteSpace:"nowrap"}}>{has(o.date)?o.date:"-"}</td>
                           <td style={colTd}>{has(o.round)?o.round:"-"}</td>
                           <td style={colTd}>{has(o.colorSize)?o.colorSize:"-"}</td>
                           <td style={{...colTd,textAlign:"right",fontWeight:700,color:"#0F172A",whiteSpace:"nowrap"}}>{(Number(o.qty)||0).toLocaleString()}</td>
