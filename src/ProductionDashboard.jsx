@@ -922,7 +922,8 @@ export default function ProductionDashboard() {
   const [vendorFilter, setVendorFilter] = useState("all"); // 'all' | 업체명
   const [seasonFilter, setSeasonFilter] = useState("all"); // 'all' | 시즌(26SS 등)
   const [search, setSearch] = useState(""); // 상품명/스타일NO/오더NO 검색
-  const [collapsedVendors, setCollapsedVendors] = useState({}); // { 업체명: true=접힘 }
+  const [collapsedVendors, setCollapsedVendors] = useState({}); // { 그룹키: true=접힘 }
+  const [groupBy, setGroupBy] = useState("vendor"); // 'vendor'=업체별 | 'month'=입고월별
 
   // 데이터 로드
   const reload = async () => {
@@ -1066,13 +1067,40 @@ export default function ProductionDashboard() {
         const sortedList = clusterByProduct(list);
         const total = sortedList.reduce((s, o) => s + o.total_qty, 0);
         const received = sortedList.reduce((s, o) => s + o.received_qty, 0);
-        return { vendor, list: sortedList, total, received, rate: total ? (received / total) * 100 : 0 };
+        return { key: vendor, label: vendor, list: sortedList, total, received, rate: total ? (received / total) * 100 : 0 };
       })
-      .sort((a, b) => a.vendor.localeCompare(b.vendor, "ko"));
+      .sort((a, b) => a.label.localeCompare(b.label, "ko"));
   }, [filtered]);
 
-  const toggleVendor = (vendor) =>
-    setCollapsedVendors(prev => ({ ...prev, [vendor]: !prev[vendor] }));
+  // 입고월별 그룹핑: 최종 입고일(actual_final_date)의 연-월(YYYY-MM) 기준.
+  // 최신 월이 위(내림차순), 최종입고일 없는 오더는 "미입고" 그룹으로 맨 아래.
+  const groupedByMonth = useMemo(() => {
+    const map = {};
+    filtered.forEach(o => {
+      const m = String(o.actual_final_date || "").match(/^(\d{4})-(\d{2})/);
+      const key = m ? `${m[1]}-${m[2]}` : "미입고";
+      (map[key] = map[key] || []).push(o);
+    });
+    return Object.entries(map)
+      .map(([key, list]) => {
+        const sortedList = clusterByProduct(list);
+        const total = sortedList.reduce((s, o) => s + o.total_qty, 0);
+        const received = sortedList.reduce((s, o) => s + o.received_qty, 0);
+        const label = key === "미입고" ? "미입고" : `${key.slice(0, 4)}년 ${parseInt(key.slice(5, 7), 10)}월`;
+        return { key, label, list: sortedList, total, received, rate: total ? (received / total) * 100 : 0 };
+      })
+      .sort((a, b) => {
+        if (a.key === "미입고") return 1;   // 미입고는 항상 맨 아래
+        if (b.key === "미입고") return -1;
+        return b.key.localeCompare(a.key);   // 최신 월 위로 (내림차순)
+      });
+  }, [filtered]);
+
+  // 현재 선택된 그룹 기준
+  const groups = groupBy === "month" ? groupedByMonth : grouped;
+
+  const toggleVendor = (key) =>
+    setCollapsedVendors(prev => ({ ...prev, [key]: !prev[key] }));
 
   const kpi = useMemo(() => {
     const total = scoped.reduce((s, o) => s + o.total_qty, 0);
@@ -1233,8 +1261,19 @@ export default function ProductionDashboard() {
         <AnalyticsPanel orders={scoped} kpi={kpi} />
       ) : (
         <>
-          {/* 업체 드롭다운 + 상품명 검색 */}
+          {/* 그룹 기준 토글 + 업체 드롭다운 + 상품명 검색 */}
           <div style={S.filterBar}>
+            <label style={S.filterLabel}>그룹</label>
+            <div style={S.groupToggle}>
+              <button
+                style={{ ...S.groupToggleBtn, ...(groupBy === "vendor" ? S.groupToggleBtnActive : {}) }}
+                onClick={() => setGroupBy("vendor")}
+              >업체별</button>
+              <button
+                style={{ ...S.groupToggleBtn, ...(groupBy === "month" ? S.groupToggleBtnActive : {}) }}
+                onClick={() => setGroupBy("month")}
+              >입고월별</button>
+            </div>
             <label style={S.filterLabel}>업체</label>
             <select style={S.filterSelect} value={vendorFilter} onChange={(e) => setVendorFilter(e.target.value)}>
               <option value="all">전체 업체</option>
@@ -1272,15 +1311,15 @@ export default function ProductionDashboard() {
                 </tr>
               </thead>
               <tbody>
-                {grouped.map(g => {
-                  const collapsed = !!collapsedVendors[g.vendor];
+                {groups.map(g => {
+                  const collapsed = !!collapsedVendors[g.key];
                   return (
-                    <Fragment key={g.vendor}>
-                      <tr style={S.groupRow} onClick={() => toggleVendor(g.vendor)}>
+                    <Fragment key={g.key}>
+                      <tr style={S.groupRow} onClick={() => toggleVendor(g.key)}>
                         <td colSpan={13} style={S.groupCell}>
                           <div style={S.groupInner}>
                             <span style={S.groupCaret}>{collapsed ? "▶" : "▼"}</span>
-                            <span style={S.groupName}>{g.vendor}</span>
+                            <span style={S.groupName}>{g.label}</span>
                             <span style={S.groupCount}>{g.list.length}건</span>
                             <span style={S.groupMeta}>
                               발주 <b>{fmt(g.total)}</b> · 입고 <b style={{ color: "#0369A1" }}>{fmt(g.received)}</b> · 입고율 <b style={{ color: g.rate >= 100 ? "#15803D" : "#0F172A" }}>{pct(g.rate)}</b>
@@ -3667,6 +3706,10 @@ const S = {
   tab: { background: "transparent", border: "none", padding: "9px 18px", borderRadius: 6, fontSize: 14, fontWeight: 500, color: "#64748B", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 },
   tabActive: { background: "#0F172A", color: "white" },
   tabCount: { background: "rgba(0,0,0,0.08)", padding: "1px 7px", borderRadius: 8, fontSize: 12, fontWeight: 600 },
+
+  groupToggle: { display: "inline-flex", gap: 2, background: "#F1F5F9", padding: 3, borderRadius: 6, border: "1px solid #E2E8F0" },
+  groupToggleBtn: { background: "transparent", border: "none", padding: "6px 14px", borderRadius: 4, fontSize: 13, fontWeight: 500, color: "#64748B", cursor: "pointer", fontFamily: "inherit" },
+  groupToggleBtnActive: { background: "#0F172A", color: "white" },
 
   // 제품 DB
   productError: { background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10, padding: 24, color: "#7F1D1D" },
