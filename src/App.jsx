@@ -3805,6 +3805,21 @@ export default function Dashboard(){
     return notionEvents.filter(n=>n.date&&n.date>=lo&&n.date<=hi).sort((a,b)=>(a.date||"").localeCompare(b.date||""));
   },[notionEvents]);
   const thisWeekNotionQty=useMemo(()=>thisWeekNotion.reduce((sum,n)=>sum+(n.qty||0),0),[thisWeekNotion]);
+  // 캘린더와 동일한 (title+round) 그룹핑 → "품목 그룹" 단위. 생산건 / 프린팅 외주 분리.
+  const thisWeekNotionGroups=useMemo(()=>{
+    const m=new Map();
+    thisWeekNotion.forEach(ev=>{
+      const key=`${ev.item||""}__${ev.round||""}`;
+      if(!m.has(key))m.set(key,{key,rep:ev,qty:0});
+      m.get(key).qty+=(Number(ev.qty)||0);
+    });
+    const groups=Array.from(m.values());
+    const isOutsource=g=>{const t=(g.rep.item||"").toLowerCase();return t.includes("프린팅")||t.includes("외주");};
+    const outsource=groups.filter(isOutsource);
+    const production=groups.filter(g=>!isOutsource(g));
+    const sumQty=arr=>arr.reduce((s,g)=>s+g.qty,0);
+    return {all:groups,production,outsource,productionQty:sumQty(production),outsourceQty:sumQty(outsource)};
+  },[thisWeekNotion]);
 
   // 오늘 이후의 모든 스케줄 (입고대기 현황)
   const pendingSchedules=useMemo(()=>{
@@ -3833,15 +3848,28 @@ export default function Dashboard(){
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
             <div>
               <div style={{fontSize:13,fontWeight:600,color:"#6366F1",letterSpacing:0.5,textTransform:"uppercase",marginBottom:6}}>📦 이번주 입고건</div>
-              <div style={{fontSize:38,fontWeight:800,color:"#3B82F6",letterSpacing:-1.5}}>{thisWeekNotion.length}<span style={{fontSize:16,fontWeight:500,color:"#93C5FD",marginLeft:4}}>건</span></div>
+              <div style={{fontSize:38,fontWeight:800,color:"#3B82F6",letterSpacing:-1.5}}>{thisWeekNotionGroups.all.length}<span style={{fontSize:16,fontWeight:500,color:"#93C5FD",marginLeft:4}}>건</span></div>
               <div style={{fontSize:14,color:"#6B7280",marginTop:6}}>총 {thisWeekNotionQty.toLocaleString()}장 입고 예정</div>
             </div>
             <div style={{width:48,height:48,borderRadius:12,background:"#3B82F620",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24}}>📅</div>
           </div>
-          <div style={{marginTop:14,display:"flex",gap:6,flexWrap:"wrap"}}>
-            {thisWeekNotion.slice(0,3).map((s,i)=>(<div key={s.id||i} style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#DBEAFE",color:"#1E40AF",fontWeight:600}}>{(s.item||"").slice(0,8)}… {(s.qty||0).toLocaleString()}장</div>))}
-            {thisWeekNotion.length>3&&<div style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#E0E7FF",color:"#4338CA",fontWeight:600}}>+{thisWeekNotion.length-3}건</div>}
-            {thisWeekNotion.length===0&&<div style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#F1F5F9",color:"#94A3B8",fontWeight:600}}>이번주 입고건 없음</div>}
+          {/* 생산건 / 프린팅 외주 분리 (품목 그룹 기준) */}
+          <div style={{marginTop:14,display:"flex",gap:10}}>
+            <div style={{flex:1,padding:"10px 12px",borderRadius:8,background:"rgba(255,255,255,0.6)",border:"1px solid #BFDBFE"}}>
+              <div style={{fontSize:12,fontWeight:700,color:"#2563EB"}}>🏭 생산건</div>
+              <div style={{fontSize:22,fontWeight:800,color:"#1E40AF",marginTop:2,letterSpacing:-0.5}}>{thisWeekNotionGroups.production.length}<span style={{fontSize:12,fontWeight:600,color:"#93C5FD",marginLeft:2}}>건</span></div>
+              <div style={{fontSize:12,color:"#6B7280",marginTop:1}}>{thisWeekNotionGroups.productionQty.toLocaleString()}장</div>
+            </div>
+            <div style={{flex:1,padding:"10px 12px",borderRadius:8,background:"rgba(255,255,255,0.6)",border:"1px solid #DDD6FE"}}>
+              <div style={{fontSize:12,fontWeight:700,color:"#7C3AED"}}>🖨 프린팅 외주</div>
+              <div style={{fontSize:22,fontWeight:800,color:"#5B21B6",marginTop:2,letterSpacing:-0.5}}>{thisWeekNotionGroups.outsource.length}<span style={{fontSize:12,fontWeight:600,color:"#C4B5FD",marginLeft:2}}>건</span></div>
+              <div style={{fontSize:12,color:"#6B7280",marginTop:1}}>{thisWeekNotionGroups.outsourceQty.toLocaleString()}장</div>
+            </div>
+          </div>
+          <div style={{marginTop:12,display:"flex",gap:6,flexWrap:"wrap"}}>
+            {thisWeekNotionGroups.all.slice(0,3).map((g,i)=>(<div key={g.key||i} style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#DBEAFE",color:"#1E40AF",fontWeight:600}}>{(g.rep.item||"").slice(0,8)}… {g.qty.toLocaleString()}장</div>))}
+            {thisWeekNotionGroups.all.length>3&&<div style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#E0E7FF",color:"#4338CA",fontWeight:600}}>+{thisWeekNotionGroups.all.length-3}건</div>}
+            {thisWeekNotionGroups.all.length===0&&<div style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#F1F5F9",color:"#94A3B8",fontWeight:600}}>이번주 입고건 없음</div>}
           </div>
         </div>
 
