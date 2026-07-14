@@ -2095,6 +2095,122 @@ const WO_STATUS_STYLE={
   "완료":{color:"#15803D",bg:"#DCFCE7"},
 };
 
+// SheetJS(XLSX) CDN 동적 로드 (프로젝트 기존 패턴 재사용, 의존성 추가 없음)
+async function loadWorkorderXLSX(){
+  if(typeof XLSX==="undefined"){
+    await new Promise((res,rej)=>{const s=document.createElement("script");s.src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";s.onload=res;s.onerror=()=>rej(new Error("XLSX 로드 실패"));document.head.appendChild(s);});
+  }
+  return XLSX;
+}
+
+// 작업지시서 시트(2D 배열, 0-based) → 폼 필드 매핑. 병합/빈칸/구조 불일치에도 예외 없이 최대한 파싱.
+function parseWorkOrderSheet(rows){
+  const cell=(r,c)=>{const row=rows[r]; if(!row)return ""; const v=row[c]; return v==null?"":v;};
+  const str=(r,c)=>String(cell(r,c)).trim();
+  const digits=v=>String(v==null?"":v).replace(/[^0-9]/g,"");
+  const stripSp=s=>String(s==null?"":s).replace(/\s/g,"");
+  const normDate=v=>{
+    if(v==null||v==="")return "";
+    if(typeof v==="number"&&isFinite(v)){ // Excel serial → YYYY-MM-DD (UTC 자정 기준)
+      const d=new Date(Math.round((v-25569)*86400*1000));
+      return isNaN(d.getTime())?"":d.toISOString().slice(0,10);
+    }
+    const m=String(v).trim().match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
+    return m?`${m[1]}-${String(m[2]).padStart(2,"0")}-${String(m[3]).padStart(2,"0")}`:"";
+  };
+  const findCell=pred=>{
+    for(let r=0;r<rows.length;r++){const row=rows[r]||[];
+      for(let c=0;c<row.length;c++){ if(pred(String(row[c]==null?"":row[c]).trim()))return{r,c}; }
+    } return null;
+  };
+  const findByLabel=re=>findCell(s=>re.test(stripSp(s)));
+  const rightRaw=(r,c)=>{const row=rows[r]||[]; for(let j=c+1;j<row.length;j++){if(String(row[j]==null?"":row[j]).trim()!=="")return row[j];} return "";};
+  const rightDate=(r,c)=>{const row=rows[r]||[];
+    for(let j=c+1;j<row.length;j++){const raw=row[j]; if(String(raw==null?"":raw).trim()==="")continue; const nd=normDate(raw); if(/^\d{4}-\d{2}-\d{2}$/.test(nd))return nd;}
+    return normDate(rightRaw(r,c));
+  };
+  const belowRaw=(r,c)=>{for(let i=r+1;i<rows.length;i++){if(str(i,c)!=="")return cell(i,c);}return "";};
+
+  const out={style_no:"",product_name:"",vendor:"",unit_cost:"",director:"",work_date:"",prod_transfer_date:"",delivery_date:"",total_qty:"",notes:"",size_spec:null,order_matrix:null};
+
+  // 고정 셀: B4/C4/D4/E4 (0-based row3)
+  out.style_no=str(3,1);
+  out.product_name=str(3,2);
+  out.vendor=str(3,3);
+  out.unit_cost=digits(cell(3,4));
+
+  // 담당(→ director/디자이너): "담당" 라벨 아래칸, 실패 시 row3,col12
+  const dam=findByLabel(/^담당/);
+  if(dam)out.director=String(belowRaw(dam.r,dam.c)||"").trim();
+  if(!out.director)out.director=str(3,12);
+
+  // 날짜: 라벨 같은 행 오른쪽 값 정규화
+  const wd=findByLabel(/작성일/); if(wd)out.work_date=rightDate(wd.r,wd.c);
+  const pt=findByLabel(/생산이관일/); if(pt)out.prod_transfer_date=rightDate(pt.r,pt.c);
+  const dl=findByLabel(/납품예정일/); if(dl)out.delivery_date=rightDate(dl.r,dl.c);
+
+  // 총수량: 라벨 행의 마지막 숫자
+  const tq=findByLabel(/총수량/);
+  if(tq){const row=rows[tq.r]||[]; let last=""; for(let j=0;j<row.length;j++){const d=digits(row[j]); if(d!=="")last=d;} out.total_qty=last;}
+
+  // 준수사항: 라벨 오른쪽 + 아래 텍스트 줄들 → 줄바꿈 합침
+  const rule=findByLabel(/준수사항/);
+  if(rule){const lines=[]; const sr=String(rightRaw(rule.r,rule.c)||"").trim(); if(sr)lines.push(sr);
+    for(let i=rule.r+1;i<rows.length;i++){const row=rows[i]||[]; const txt=row.map(v=>String(v==null?"":v).trim()).filter(Boolean).join(" ").trim(); if(txt)lines.push(txt);}
+    out.notes=lines.join("\n").trim();
+  }
+
+  // SIZE 스펙 표: "SIZE"~"편차" 헤더행 → {columns, deviation_label, rows:[{item,values,deviation}]}
+  const sizePos=findCell(s=>stripSp(s).toUpperCase()==="SIZE");
+  if(sizePos){
+    let hr=-1;
+    for(let i=sizePos.r;i<Math.min(sizePos.r+5,rows.length);i++){ if((rows[i]||[]).some(v=>/편\s*차/.test(String(v==null?"":v)))){hr=i;break;} }
+    if(hr<0)hr=sizePos.r;
+    const header=(rows[hr]||[]).map(v=>String(v==null?"":v).trim());
+    const devCol=header.findIndex(v=>/편차/.test(v.replace(/\s/g,"")));
+    const labeled=[]; for(let c=0;c<header.length;c++){ if(header[c]!==""&&c!==devCol)labeled.push(c); }
+    const firstMeasure=labeled.length?labeled[0]:sizePos.c+1;
+    const itemCol=Math.max(0,firstMeasure-1);
+    const measureCols=labeled.filter(c=>c!==itemCol);
+    const columns=measureCols.map(c=>header[c]||`col${c}`);
+    const specRows=[];
+    for(let i=hr+1;i<rows.length;i++){
+      const item=str(i,itemCol);
+      const values=measureCols.map(c=>cell(i,c));
+      const deviation=devCol>=0?cell(i,devCol):"";
+      const allEmpty=item===""&&values.every(v=>String(v).trim()==="")&&String(deviation).trim()==="";
+      if(allEmpty)break;
+      if(/COLOR|준수사항|총수량/i.test(stripSp(item)))break;
+      if(item==="")continue;
+      specRows.push({item,values,deviation});
+    }
+    if(specRows.length)out.size_spec={columns,deviation_label:devCol>=0?(header[devCol]||"편차"):null,rows:specRows};
+  }
+
+  // COLOR/SIZE/Q'ty 발주표 → order_matrix [{color, sizes:{size:qty}, qty}]
+  const colorPos=findCell(s=>stripSp(s).toUpperCase()==="COLOR");
+  if(colorPos){
+    const hr=colorPos.r;
+    const header=(rows[hr]||[]).map(v=>String(v==null?"":v).trim());
+    const qtyCol=header.findIndex(v=>/Q'?TY|QTY|수량|합계|TOTAL/i.test(v.replace(/\s/g,"")));
+    const colorCol=colorPos.c;
+    const end=qtyCol>colorCol?qtyCol:header.length;
+    const sizeCols=[]; for(let c=colorCol+1;c<end;c++){ if(header[c]!=="")sizeCols.push(c); }
+    const matrix=[];
+    for(let i=hr+1;i<rows.length;i++){
+      const color=str(i,colorCol);
+      if(color===""){ const anyVal=sizeCols.some(c=>String(cell(i,c)).trim()!=="")||(qtyCol>=0&&String(cell(i,qtyCol)).trim()!==""); if(!anyVal)break; else continue; }
+      if(/총수량|합계|TOTAL/i.test(stripSp(color)))break;
+      const sizes={}; sizeCols.forEach(c=>{const d=digits(cell(i,c)); sizes[header[c]||`s${c}`]=d===""?"":Number(d);});
+      const q=qtyCol>=0?digits(cell(i,qtyCol)):"";
+      matrix.push({color,sizes,qty:q===""?"":Number(q)});
+    }
+    if(matrix.length)out.order_matrix=matrix;
+  }
+
+  return out;
+}
+
 function SampleTabWorkorder(){
   const[sub,setSub]=useState("list"); // list | create | order
   const[editingRow,setEditingRow]=useState(null); // null=신규, 객체=수정
@@ -2355,10 +2471,15 @@ function WorkorderForm({editingRow,onSaved,onCancel}){
       manager:r.manager||"",director:r.director||"",work_date:r.work_date||today,
       prod_transfer_date:r.prod_transfer_date||"",delivery_date:r.delivery_date||"",
       unit_cost:sv(r.unit_cost),sale_price:sv(r.sale_price),notes:r.notes||"",
+      total_qty:sv(r.total_qty),size_spec:r.size_spec||null,order_matrix:r.order_matrix||null,
     };
   });
   const[saving,setSaving]=useState(false);
-  const[msg,setMsg]=useState(null); // {type:"err",text}
+  const[msg,setMsg]=useState(null);       // 저장 메시지 {type,text}
+  const fileRef=useRef(null);
+  const[parseMsg,setParseMsg]=useState(null);   // 엑셀 파싱 메시지 {type:"ok"|"err"|"info",text}
+  const[sheetInfo,setSheetInfo]=useState(null);  // 다중 시트 {count,names}
+  const[specSummary,setSpecSummary]=useState(null); // 파싱 요약 {specRows,matrixRows}
 
   const isEdit=!!(editingRow&&editingRow.id!=null);
   const setField=(k,v)=>setF(p=>({...p,[k]:v}));
@@ -2391,14 +2512,17 @@ function WorkorderForm({editingRow,onSaved,onCancel}){
       manager:s(f.manager),director:s(f.director),
       work_date:s(f.work_date),prod_transfer_date:s(f.prod_transfer_date),delivery_date:s(f.delivery_date),
       unit_cost:s(f.unit_cost),sale_price:s(f.sale_price),notes:s(f.notes),
+      size_spec:f.size_spec||null,order_matrix:f.order_matrix||null, // jsonb (엑셀 파싱분)
       updated_at:now,
     };
+    const tq=s(f.total_qty); // 엑셀에서 채워진 총수량(없으면 null)
     try{
       let r;
       if(isEdit){
+        if(tq!=null)payload.total_qty=tq;
         r=await fetch(`${SUPABASE_URL}/rest/v1/work_orders?id=eq.${editingRow.id}`,{method:"PATCH",headers:sbHeaders,body:JSON.stringify(payload)});
       }else{
-        payload.total_qty=0; // 발주표 단계에서 계산
+        payload.total_qty=tq!=null?tq:0; // 없으면 0(발주표 단계에서 계산)
         r=await fetch(`${SUPABASE_URL}/rest/v1/work_orders`,{method:"POST",headers:sbHeaders,body:JSON.stringify(payload)});
       }
       if(!r.ok){const e=await r.json().catch(()=>null);throw new Error(e?.message||`HTTP ${r.status}`);}
@@ -2407,6 +2531,40 @@ function WorkorderForm({editingRow,onSaved,onCancel}){
     }catch(e){
       setMsg({type:"err",text:`저장 실패: ${String(e?.message||e)}`});
       setSaving(false);
+    }
+  };
+
+  // 엑셀 업로드 → 파싱 → 폼 자동 채움(자동 저장 금지, 검수 후 저장)
+  const parseExcel=async(file)=>{
+    if(!file)return;
+    setParseMsg({type:"info",text:"엑셀 분석 중..."});setSheetInfo(null);setSpecSummary(null);
+    try{
+      const X=await loadWorkorderXLSX();
+      const buf=await file.arrayBuffer();
+      const wb=X.read(new Uint8Array(buf),{type:"array"});
+      const names=wb.SheetNames||[];
+      if(names.length===0)throw new Error("시트가 없습니다.");
+      const rows=X.utils.sheet_to_json(wb.Sheets[names[0]],{header:1,defval:""});
+      const parsed=parseWorkOrderSheet(rows);
+      if(!parsed.style_no&&!parsed.product_name&&!parsed.size_spec&&!parsed.order_matrix){
+        setParseMsg({type:"err",text:"자동 인식 실패 — 수동 입력 바랍니다."});
+        return;
+      }
+      // 빈 값은 덮어쓰지 않고 폼에 채움
+      setF(p=>{const next={...p}; Object.entries(parsed).forEach(([k,v])=>{ if(v!==""&&v!=null)next[k]=v; }); return next;});
+      // 인식 못한 필드 콘솔 경고
+      const want=["style_no","product_name","vendor","unit_cost","director","work_date","prod_transfer_date","delivery_date","total_qty","notes","size_spec","order_matrix"];
+      const empty=want.filter(k=>parsed[k]===""||parsed[k]==null);
+      if(empty.length)console.warn("[작업지시서 엑셀] 자동 인식 못한 필드:",empty.join(", "));
+      setSpecSummary({specRows:parsed.size_spec?.rows?.length||0,matrixRows:Array.isArray(parsed.order_matrix)?parsed.order_matrix.length:0});
+      if(names.length>1){
+        setSheetInfo({count:names.length,names});
+        setParseMsg({type:"ok",text:`첫 시트 "${names[0]}" 자동 채움 완료.`});
+      }else{
+        setParseMsg({type:"ok",text:"자동 채움 완료 · 확인 후 저장하세요."});
+      }
+    }catch(e){
+      setParseMsg({type:"err",text:`엑셀 분석 실패: ${String(e?.message||e)}`});
     }
   };
 
@@ -2420,6 +2578,28 @@ function WorkorderForm({editingRow,onSaved,onCancel}){
           <SmallBtn primary onClick={saving?undefined:handleSave}>{saving?"저장 중...":"저장"}</SmallBtn>
         </div>
       </div>
+
+      {/* 엑셀 업로드 자동 채움 */}
+      <SectionCard title="📤 작업지시서 엑셀 업로드" subtitle="양식(.xlsx)을 올리면 폼이 자동으로 채워집니다 · 검수 후 저장하세요">
+        <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:"none"}}
+          onChange={e=>{const file=e.target.files&&e.target.files[0]; if(file)parseExcel(file); e.target.value="";}}/>
+        <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+          <SmallBtn primary onClick={()=>fileRef.current&&fileRef.current.click()}>📎 엑셀 파일 선택 (.xlsx)</SmallBtn>
+          {parseMsg&&<span style={{fontSize:14,fontWeight:600,color:parseMsg.type==="err"?"#DC2626":parseMsg.type==="ok"?"#15803D":"#64748B"}}>{parseMsg.text}</span>}
+        </div>
+        {(specSummary&&(specSummary.specRows>0||specSummary.matrixRows>0))&&(
+          <div style={{marginTop:10,fontSize:13,color:"#475569"}}>
+            {specSummary.specRows>0&&<span style={{marginRight:12}}>📐 사이즈 스펙 {specSummary.specRows}행 인식</span>}
+            {specSummary.matrixRows>0&&<span>🎨 발주표(컬러) {specSummary.matrixRows}행 인식</span>}
+          </div>
+        )}
+        {sheetInfo&&(
+          <div style={{marginTop:12,padding:"10px 14px",borderRadius:8,background:"#FFFBEB",border:"1px solid #FDE68A",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+            <span style={{fontSize:13,color:"#92400E",fontWeight:600}}>이 파일에 {sheetInfo.count}개 시트가 있습니다. 첫 시트를 채웠어요. 나머지도 등록하시겠어요?</span>
+            <SmallBtn onClick={()=>alert("나머지 시트 일괄 등록은 다음 단계에서 지원됩니다.")}>나머지 {sheetInfo.count-1}개 등록 (다음 단계)</SmallBtn>
+          </div>
+        )}
+      </SectionCard>
 
       {/* 제품 기본 정보 */}
       <SectionCard title="🧾 제품 기본 정보" subtitle={isEdit?`수정 · ID ${editingRow.id}`:"신규 작성"}>
@@ -2461,7 +2641,7 @@ function WorkorderForm({editingRow,onSaved,onCancel}){
       <SectionCard title="👤 담당자 & 일정">
         <div style={grid}>
           {L("담당자",T("manager","담당자명"))}
-          {L("실장",T("director","실장명"))}
+          {L("디자이너",T("director","디자이너명"))}
           {L("작성일",T("work_date",null,"date"))}
           {L("생산이관일",T("prod_transfer_date",null,"date"))}
           {L("납품예정일",T("delivery_date",null,"date"))}
@@ -2473,6 +2653,7 @@ function WorkorderForm({editingRow,onSaved,onCancel}){
         <div style={grid}>
           {L("원가 (VAT 포함)",T("unit_cost","숫자","number"))}
           {L("판매가",T("sale_price","숫자","number"))}
+          {L("총수량 (엑셀 자동)",T("total_qty","발주표 합계","number"))}
         </div>
       </SectionCard>
 
@@ -2483,9 +2664,16 @@ function WorkorderForm({editingRow,onSaved,onCancel}){
           style={{...inputStyle,resize:"vertical",fontFamily:"inherit"}}/>
       </SectionCard>
 
-      {/* 사이즈 스펙 / 발주표: 다음 단계 자리표시 */}
+      {/* 사이즈 스펙 / 발주표: 편집 UI는 다음 단계. 엑셀 파싱분은 저장됨(자리표시 + 요약) */}
       <SectionCard title="📐 사이즈 스펙 · 컬러×사이즈 발주표">
-        <div style={{textAlign:"center",padding:40,color:"#94A3B8",fontSize:14}}>다음 단계에서 구현됩니다 (size_spec · order_matrix)</div>
+        {(f.size_spec&&Array.isArray(f.size_spec.rows)&&f.size_spec.rows.length>0)||(Array.isArray(f.order_matrix)&&f.order_matrix.length>0)?(
+          <div style={{fontSize:14,color:"#475569"}}>
+            {f.size_spec?.rows?.length>0&&<div style={{marginBottom:6}}>📐 사이즈 스펙 {f.size_spec.rows.length}행 · 컬럼 [{(f.size_spec.columns||[]).join(", ")}] — <b>엑셀에서 인식됨</b> (저장 시 함께 저장, 편집 UI는 다음 단계)</div>}
+            {Array.isArray(f.order_matrix)&&f.order_matrix.length>0&&<div>🎨 발주표 {f.order_matrix.length}개 컬러 — <b>엑셀에서 인식됨</b> (저장 시 함께 저장, 편집 UI는 다음 단계)</div>}
+          </div>
+        ):(
+          <div style={{textAlign:"center",padding:40,color:"#94A3B8",fontSize:14}}>다음 단계에서 구현됩니다 (size_spec · order_matrix) · 엑셀 업로드 시 자동 인식됩니다</div>
+        )}
       </SectionCard>
     </>
   );
