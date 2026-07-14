@@ -2085,8 +2085,10 @@ function SampleKanbanLegacy(){
 }
 
 // ─── 작업지시서 (public.work_orders · PostgREST 직접 접근, 영어 컬럼) ───
-// 1단계: 읽기/표시만. work_orders 외 테이블 접근 없음. 쓰기 없음.
+// 목록: 읽기. 작성(2a): 기본정보/담당자/비용 insert·update. work_orders 외 테이블 접근 없음.
 const WORKORDER_STATUSES=["작성중","컨펌대기","완료"];
+const WORKORDER_SEASONS=["봄","여름","가을","겨울"];
+const WORKORDER_YEARS=["2024","2025","2026","2027"];
 const WO_STATUS_STYLE={
   "작성중":{color:"#B45309",bg:"#FEF3C7"},
   "컨펌대기":{color:"#7C3AED",bg:"#EDE9FE"},
@@ -2095,6 +2097,8 @@ const WO_STATUS_STYLE={
 
 function SampleTabWorkorder(){
   const[sub,setSub]=useState("list"); // list | create | order
+  const[editingRow,setEditingRow]=useState(null); // null=신규, 객체=수정
+  const[listNonce,setListNonce]=useState(0);       // 저장 후 목록 재조회 트리거
 
   const subTabs=[
     {id:"list",label:"작업지시서 목록"},
@@ -2102,24 +2106,28 @@ function SampleTabWorkorder(){
     {id:"order",label:"발주 관리"},
   ];
 
+  const goNew=()=>{setEditingRow(null);setSub("create");};
+  const goEdit=(row)=>{setEditingRow(row);setSub("create");};
+  const goList=()=>{setEditingRow(null);setSub("list");};
+  const afterSave=()=>{setEditingRow(null);setListNonce(n=>n+1);setSub("list");};
+
+  // 서브탭 버튼 직접 클릭: "작성"은 항상 신규 폼으로 시작
+  const onSubClick=(id)=>{ if(id==="create"){goNew();return;} setSub(id); };
+
   return(
     <>
       {/* 서브탭 */}
       <div style={{display:"flex",gap:6,marginBottom:20,flexWrap:"wrap"}}>
         {subTabs.map(t=>(
-          <button key={t.id} onClick={()=>setSub(t.id)}
+          <button key={t.id} onClick={()=>onSubClick(t.id)}
             style={{padding:"9px 18px",borderRadius:8,border:sub===t.id?"none":"1px solid #CBD5E1",background:sub===t.id?"#1E293B":"#FFF",color:sub===t.id?"#F8FAFC":"#475569",fontSize:15,fontWeight:sub===t.id?700:600,cursor:"pointer",letterSpacing:-0.2,transition:"all 0.15s"}}>
             {t.label}
           </button>
         ))}
       </div>
 
-      {sub==="list"&&<WorkorderList />}
-      {sub==="create"&&(
-        <SectionCard title="📝 작업지시서 작성">
-          <div style={{textAlign:"center",padding:60,color:"#94A3B8",fontSize:15}}>준비 중입니다</div>
-        </SectionCard>
-      )}
+      {sub==="list"&&<WorkorderList nonce={listNonce} onNew={goNew} onEdit={goEdit} />}
+      {sub==="create"&&<WorkorderForm key={editingRow?editingRow.id:"new"} editingRow={editingRow} onSaved={afterSave} onCancel={goList} />}
       {sub==="order"&&(
         <SectionCard title="📦 발주 관리">
           <div style={{textAlign:"center",padding:60,color:"#94A3B8",fontSize:15}}>준비 중입니다</div>
@@ -2130,7 +2138,7 @@ function SampleTabWorkorder(){
 }
 
 // 작업지시서 목록: work_orders 전체 GET → 카운트/검색/필터/표
-function WorkorderList(){
+function WorkorderList({onNew,onEdit,nonce}){
   const[rows,setRows]=useState([]);
   const[loading,setLoading]=useState(true);
   const[error,setError]=useState(null);
@@ -2158,7 +2166,7 @@ function WorkorderList(){
       }
     })();
     return()=>{alive=false;};
-  },[]);
+  },[nonce]);
 
   // 필터 셀렉트 값: 데이터에서 distinct
   const distinct=useCallback((key)=>[...new Set(rows.map(r=>r[key]).filter(v=>v!==null&&v!==undefined&&v!==""))].sort(),[rows]);
@@ -2213,7 +2221,7 @@ function WorkorderList(){
         ))}
       </div>
 
-      <SectionCard title="📝 작업지시서 목록">
+      <SectionCard title="📝 작업지시서 목록" actions={<SmallBtn primary onClick={onNew}>+ 새 작업지시서</SmallBtn>}>
         {/* 검색 + 필터 */}
         <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:18}}>
           <input
@@ -2309,9 +2317,9 @@ function WorkorderList(){
                         {r.approved?<span style={{color:"#15803D",fontWeight:700}}>✓</span>:<span style={{color:"#CBD5E1"}}>–</span>}
                       </td>
                       <td style={{...td,textAlign:"center",whiteSpace:"nowrap"}}>
-                        <span style={{display:"inline-flex",gap:8,color:"#94A3B8"}}>
+                        <span style={{display:"inline-flex",gap:10,color:"#94A3B8"}}>
                           <span title="보기 (준비 중)" style={{cursor:"not-allowed"}}>👁</span>
-                          <span title="수정 (준비 중)" style={{cursor:"not-allowed"}}>✏️</span>
+                          <span title="수정" onClick={()=>onEdit&&onEdit(r)} style={{cursor:"pointer",color:"#2563EB"}}>✏️</span>
                           <span title="삭제 (준비 중)" style={{cursor:"not-allowed"}}>🗑</span>
                         </span>
                       </td>
@@ -2328,6 +2336,156 @@ function WorkorderList(){
             {filtered.length.toLocaleString()}개 작업지시서 · 총 {totalQty.toLocaleString()}장
           </div>
         )}
+      </SectionCard>
+    </>
+  );
+}
+
+// 작업지시서 작성/수정 폼 (2a: 기본정보·담당자·비용·주의사항). 사이즈스펙/발주표는 다음 단계.
+function WorkorderForm({editingRow,onSaved,onCancel}){
+  const[f,setF]=useState(()=>{
+    const r=editingRow||{};
+    const today=new Date().toISOString().slice(0,10);
+    const curYear=String(new Date().getFullYear());
+    const sv=v=>(v!==null&&v!==undefined&&v!=="")?String(v):"";
+    return {
+      style_no:r.style_no||"",product_name:r.product_name||"",category:r.category||"",vendor:r.vendor||"",
+      year:sv(r.year)||curYear,season:r.season||"",sample_no:r.sample_no||"",round_no:sv(r.round_no),
+      status:r.status||"작성중",notion_url:r.notion_url||"",image_url:r.image_url||"",
+      manager:r.manager||"",director:r.director||"",work_date:r.work_date||today,
+      prod_transfer_date:r.prod_transfer_date||"",delivery_date:r.delivery_date||"",
+      unit_cost:sv(r.unit_cost),sale_price:sv(r.sale_price),notes:r.notes||"",
+    };
+  });
+  const[saving,setSaving]=useState(false);
+  const[msg,setMsg]=useState(null); // {type:"err",text}
+
+  const isEdit=!!(editingRow&&editingRow.id!=null);
+  const setField=(k,v)=>setF(p=>({...p,[k]:v}));
+
+  const labelStyle={fontSize:13,fontWeight:700,color:"#475569",marginBottom:6,display:"block"};
+  const inputStyle={width:"100%",padding:"9px 12px",borderRadius:8,border:"1px solid #CBD5E1",fontSize:14,outline:"none",boxSizing:"border-box"};
+  const grid={display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:16};
+
+  // 라벨+필드 래퍼(컴포넌트가 아닌 함수라 입력 포커스 유지에 안전)
+  const L=(label,node,req)=>(<div><label style={labelStyle}>{label}{req&&<span style={{color:"#DC2626",marginLeft:2}}>*</span>}</label>{node}</div>);
+  const T=(k,ph,type)=><input type={type||"text"} value={f[k]} onChange={e=>setField(k,e.target.value)} placeholder={ph||""} style={inputStyle}/>;
+
+  // 년도: 편집중 값이 기본 목록 밖이면 옵션에 추가
+  const yearOpts=f.year&&!WORKORDER_YEARS.includes(f.year)?[f.year,...WORKORDER_YEARS]:WORKORDER_YEARS;
+
+  const handleSave=async()=>{
+    if(!f.style_no.trim()||!f.product_name.trim()){
+      setMsg({type:"err",text:"스타일넘버와 품명은 필수 입력입니다."});
+      return;
+    }
+    setSaving(true);setMsg(null);
+    const now=new Date().toISOString();
+    // 숫자성 컬럼도 문자열로 전송(int/numeric/text 어떤 타입이어도 안전). 빈값은 null.
+    const s=v=>{const t=String(v==null?"":v).trim();return t===""?null:t;};
+    const payload={
+      style_no:f.style_no.trim(),product_name:f.product_name.trim(),
+      category:s(f.category),vendor:s(f.vendor),year:s(f.year),season:s(f.season),
+      sample_no:s(f.sample_no),round_no:s(f.round_no),status:f.status||"작성중",
+      notion_url:s(f.notion_url),image_url:s(f.image_url),
+      manager:s(f.manager),director:s(f.director),
+      work_date:s(f.work_date),prod_transfer_date:s(f.prod_transfer_date),delivery_date:s(f.delivery_date),
+      unit_cost:s(f.unit_cost),sale_price:s(f.sale_price),notes:s(f.notes),
+      updated_at:now,
+    };
+    try{
+      let r;
+      if(isEdit){
+        r=await fetch(`${SUPABASE_URL}/rest/v1/work_orders?id=eq.${editingRow.id}`,{method:"PATCH",headers:sbHeaders,body:JSON.stringify(payload)});
+      }else{
+        payload.total_qty=0; // 발주표 단계에서 계산
+        r=await fetch(`${SUPABASE_URL}/rest/v1/work_orders`,{method:"POST",headers:sbHeaders,body:JSON.stringify(payload)});
+      }
+      if(!r.ok){const e=await r.json().catch(()=>null);throw new Error(e?.message||`HTTP ${r.status}`);}
+      alert("저장되었습니다.");
+      onSaved();
+    }catch(e){
+      setMsg({type:"err",text:`저장 실패: ${String(e?.message||e)}`});
+      setSaving(false);
+    }
+  };
+
+  return(
+    <>
+      {/* 상단 바: 목록으로 / 저장 */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,gap:10,flexWrap:"wrap"}}>
+        <SmallBtn onClick={onCancel}>← 목록으로</SmallBtn>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          {msg&&<span style={{color:msg.type==="err"?"#DC2626":"#15803D",fontSize:14,fontWeight:600}}>{msg.text}</span>}
+          <SmallBtn primary onClick={saving?undefined:handleSave}>{saving?"저장 중...":"저장"}</SmallBtn>
+        </div>
+      </div>
+
+      {/* 제품 기본 정보 */}
+      <SectionCard title="🧾 제품 기본 정보" subtitle={isEdit?`수정 · ID ${editingRow.id}`:"신규 작성"}>
+        <div style={grid}>
+          {L("스타일넘버",T("style_no","예: VLV-2601"),true)}
+          {L("품명",T("product_name","제품명"),true)}
+          {L("카테고리",T("category","예: 아우터"))}
+          {L("작업처",T("vendor","생산/외주처"))}
+          {L("연도",
+            <select value={f.year} onChange={e=>setField("year",e.target.value)} style={inputStyle}>
+              <option value="">선택</option>
+              {yearOpts.map(y=><option key={y} value={y}>{y}</option>)}
+            </select>)}
+          {L("시즌",
+            <select value={f.season} onChange={e=>setField("season",e.target.value)} style={inputStyle}>
+              <option value="">선택</option>
+              {WORKORDER_SEASONS.map(sn=><option key={sn} value={sn}>{sn}</option>)}
+            </select>)}
+          {L("SAMPLE NO.",T("sample_no","샘플 번호"))}
+          {L("차수",T("round_no","숫자","number"))}
+          {L("상태",
+            <select value={f.status} onChange={e=>setField("status",e.target.value)} style={inputStyle}>
+              {WORKORDER_STATUSES.map(st=><option key={st} value={st}>{st}</option>)}
+            </select>)}
+          {L("노션 제품DB 링크",T("notion_url","https://notion.so/..."))}
+          {L("제품 사진 URL",T("image_url","https://... (이미지 주소)"))}
+          <div>
+            <label style={labelStyle}>미리보기</label>
+            {f.image_url?(
+              <img src={f.image_url} alt="" referrerPolicy="no-referrer"
+                onError={e=>{e.currentTarget.style.display="none";}}
+                style={{width:64,height:64,objectFit:"cover",borderRadius:8,border:"1px solid #E2E8F0"}}/>
+            ):(<div style={{fontSize:13,color:"#94A3B8",paddingTop:8}}>URL 입력 시 표시</div>)}
+          </div>
+        </div>
+      </SectionCard>
+
+      {/* 담당자 & 일정 */}
+      <SectionCard title="👤 담당자 & 일정">
+        <div style={grid}>
+          {L("담당자",T("manager","담당자명"))}
+          {L("실장",T("director","실장명"))}
+          {L("작성일",T("work_date",null,"date"))}
+          {L("생산이관일",T("prod_transfer_date",null,"date"))}
+          {L("납품예정일",T("delivery_date",null,"date"))}
+        </div>
+      </SectionCard>
+
+      {/* 비용 및 원가 */}
+      <SectionCard title="💰 비용 및 원가">
+        <div style={grid}>
+          {L("원가 (VAT 포함)",T("unit_cost","숫자","number"))}
+          {L("판매가",T("sale_price","숫자","number"))}
+        </div>
+      </SectionCard>
+
+      {/* 주의사항 */}
+      <SectionCard title="⚠️ 주의사항">
+        <textarea value={f.notes} onChange={e=>setField("notes",e.target.value)} rows={4}
+          placeholder="작업 시 주의사항, 특이사항 등"
+          style={{...inputStyle,resize:"vertical",fontFamily:"inherit"}}/>
+      </SectionCard>
+
+      {/* 사이즈 스펙 / 발주표: 다음 단계 자리표시 */}
+      <SectionCard title="📐 사이즈 스펙 · 컬러×사이즈 발주표">
+        <div style={{textAlign:"center",padding:40,color:"#94A3B8",fontSize:14}}>다음 단계에서 구현됩니다 (size_spec · order_matrix)</div>
       </SectionCard>
     </>
   );
