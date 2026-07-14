@@ -1636,7 +1636,8 @@ function ScheduleTab(){
   </>);
 }
 
-// ─── Tab 4: 샘플 진행 (Supabase) ───
+// ─── Tab 4: 작업지시서 (Supabase) ───
+// (라우팅은 SampleTabWorkorder 로 교체됨. 아래 SampleKanbanLegacy 는 구 제품DB 샘플 칸반 — 보존용, 현재 미렌더)
 const SAMPLE_STATUSES=["의뢰완료","원단확인","샘플제작중","배송중","검수완료","승인"];
 const STATUS_COLORS={"의뢰완료":"#94A3B8","원단확인":"#F59E0B","샘플제작중":"#3B82F6","배송중":"#8B5CF6","검수완료":"#10B981","승인":"#059669"};
 
@@ -1917,7 +1918,7 @@ function SampleDetailPanel({p,row,onClose,onSave}){
     </>);
 }
 
-function SampleTab(){
+function SampleKanbanLegacy(){
   const[products,setProducts]=useState([]);
   const[progressMap,setProgressMap]=useState({});
   const[loading,setLoading]=useState(true);
@@ -2081,6 +2082,255 @@ function SampleTab(){
         />
       )}
     </SectionCard>);
+}
+
+// ─── 작업지시서 (public.work_orders · PostgREST 직접 접근, 영어 컬럼) ───
+// 1단계: 읽기/표시만. work_orders 외 테이블 접근 없음. 쓰기 없음.
+const WORKORDER_STATUSES=["작성중","컨펌대기","완료"];
+const WO_STATUS_STYLE={
+  "작성중":{color:"#B45309",bg:"#FEF3C7"},
+  "컨펌대기":{color:"#7C3AED",bg:"#EDE9FE"},
+  "완료":{color:"#15803D",bg:"#DCFCE7"},
+};
+
+function SampleTabWorkorder(){
+  const[sub,setSub]=useState("list"); // list | create | order
+
+  const subTabs=[
+    {id:"list",label:"작업지시서 목록"},
+    {id:"create",label:"작업지시서 작성"},
+    {id:"order",label:"발주 관리"},
+  ];
+
+  return(
+    <>
+      {/* 서브탭 */}
+      <div style={{display:"flex",gap:6,marginBottom:20,flexWrap:"wrap"}}>
+        {subTabs.map(t=>(
+          <button key={t.id} onClick={()=>setSub(t.id)}
+            style={{padding:"9px 18px",borderRadius:8,border:sub===t.id?"none":"1px solid #CBD5E1",background:sub===t.id?"#1E293B":"#FFF",color:sub===t.id?"#F8FAFC":"#475569",fontSize:15,fontWeight:sub===t.id?700:600,cursor:"pointer",letterSpacing:-0.2,transition:"all 0.15s"}}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {sub==="list"&&<WorkorderList />}
+      {sub==="create"&&(
+        <SectionCard title="📝 작업지시서 작성">
+          <div style={{textAlign:"center",padding:60,color:"#94A3B8",fontSize:15}}>준비 중입니다</div>
+        </SectionCard>
+      )}
+      {sub==="order"&&(
+        <SectionCard title="📦 발주 관리">
+          <div style={{textAlign:"center",padding:60,color:"#94A3B8",fontSize:15}}>준비 중입니다</div>
+        </SectionCard>
+      )}
+    </>
+  );
+}
+
+// 작업지시서 목록: work_orders 전체 GET → 카운트/검색/필터/표
+function WorkorderList(){
+  const[rows,setRows]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[error,setError]=useState(null);
+
+  const[search,setSearch]=useState("");
+  const[fYear,setFYear]=useState("");
+  const[fSeason,setFSeason]=useState("");
+  const[fVendor,setFVendor]=useState("");
+  const[fStatus,setFStatus]=useState("");
+
+  useEffect(()=>{
+    let alive=true;
+    (async()=>{
+      setLoading(true);setError(null);
+      try{
+        const r=await fetch(`${SUPABASE_URL}/rest/v1/work_orders?select=*&order=created_at.desc`,{headers:sbHeaders});
+        const data=await r.json();
+        if(!r.ok)throw new Error(data?.message?data.message:`HTTP ${r.status}`);
+        if(!Array.isArray(data))throw new Error("예상치 못한 응답 형식");
+        if(alive)setRows(data);
+      }catch(e){
+        if(alive){setError(String(e?.message||e));setRows([]);}
+      }finally{
+        if(alive)setLoading(false);
+      }
+    })();
+    return()=>{alive=false;};
+  },[]);
+
+  // 필터 셀렉트 값: 데이터에서 distinct
+  const distinct=useCallback((key)=>[...new Set(rows.map(r=>r[key]).filter(v=>v!==null&&v!==undefined&&v!==""))].sort(),[rows]);
+  const years=useMemo(()=>distinct("year"),[distinct]);
+  const seasons=useMemo(()=>distinct("season"),[distinct]);
+  const vendors=useMemo(()=>distinct("vendor"),[distinct]);
+
+  // 상태 카운트 (전체 rows 기준)
+  const counts=useMemo(()=>{
+    const c={all:rows.length};
+    WORKORDER_STATUSES.forEach(s=>{c[s]=rows.filter(r=>r.status===s).length;});
+    return c;
+  },[rows]);
+
+  const filtered=useMemo(()=>{
+    const q=search.trim().toLowerCase();
+    return rows.filter(r=>{
+      if(q){
+        const hay=`${r.style_no||""} ${r.product_name||""} ${r.vendor||""}`.toLowerCase();
+        if(!hay.includes(q))return false;
+      }
+      if(fYear&&String(r.year)!==String(fYear))return false;
+      if(fSeason&&r.season!==fSeason)return false;
+      if(fVendor&&r.vendor!==fVendor)return false;
+      if(fStatus&&r.status!==fStatus)return false;
+      return true;
+    });
+  },[rows,search,fYear,fSeason,fVendor,fStatus]);
+
+  const totalQty=useMemo(()=>filtered.reduce((s,r)=>s+(Number(r.total_qty)||0),0),[filtered]);
+
+  const cards=[
+    {key:"all",label:"전체",value:counts.all,color:"#1E293B",bg:"#F1F5F9"},
+    {key:"작성중",label:"작성중",value:counts["작성중"],color:WO_STATUS_STYLE["작성중"].color,bg:WO_STATUS_STYLE["작성중"].bg},
+    {key:"컨펌대기",label:"컨펌대기",value:counts["컨펌대기"],color:WO_STATUS_STYLE["컨펌대기"].color,bg:WO_STATUS_STYLE["컨펌대기"].bg},
+    {key:"완료",label:"완료",value:counts["완료"],color:WO_STATUS_STYLE["완료"].color,bg:WO_STATUS_STYLE["완료"].bg},
+  ];
+
+  const selectStyle={padding:"8px 12px",borderRadius:8,border:"1px solid #CBD5E1",background:"#FFF",color:"#475569",fontSize:14,fontWeight:600,cursor:"pointer",outline:"none"};
+  const th={padding:"11px 12px",textAlign:"left",fontSize:12,fontWeight:700,color:"#64748B",whiteSpace:"nowrap",borderBottom:"2px solid #E2E8F0",textTransform:"uppercase",letterSpacing:0.3};
+  const td={padding:"11px 12px",fontSize:14,color:"#1E293B",borderBottom:"1px solid #F1F5F9",verticalAlign:"middle"};
+
+  return(
+    <>
+      {/* 카운트 카드 4개 */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14,marginBottom:20}}>
+        {cards.map(c=>(
+          <div key={c.key} style={{padding:"18px 20px",borderRadius:12,background:c.bg,border:`1px solid ${c.color}22`}}>
+            <div style={{fontSize:13,fontWeight:700,color:c.color,letterSpacing:0.3}}>{c.label}</div>
+            <div style={{fontSize:32,fontWeight:800,color:c.color,letterSpacing:-1,marginTop:4}}>{loading?"–":(c.value||0)}<span style={{fontSize:14,fontWeight:600,marginLeft:3,opacity:0.7}}>건</span></div>
+          </div>
+        ))}
+      </div>
+
+      <SectionCard title="📝 작업지시서 목록">
+        {/* 검색 + 필터 */}
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:18}}>
+          <input
+            value={search} onChange={e=>setSearch(e.target.value)}
+            placeholder="스타일넘버 · 품명 · 업체 검색"
+            style={{flex:"1 1 240px",minWidth:200,padding:"8px 14px",borderRadius:8,border:"1px solid #CBD5E1",fontSize:14,outline:"none"}}/>
+          <select value={fYear} onChange={e=>setFYear(e.target.value)} style={selectStyle}>
+            <option value="">년도 전체</option>
+            {years.map(y=><option key={y} value={y}>{y}</option>)}
+          </select>
+          <select value={fSeason} onChange={e=>setFSeason(e.target.value)} style={selectStyle}>
+            <option value="">시즌 전체</option>
+            {seasons.map(s=><option key={s} value={s}>{s}</option>)}
+          </select>
+          <select value={fVendor} onChange={e=>setFVendor(e.target.value)} style={selectStyle}>
+            <option value="">작업처 전체</option>
+            {vendors.map(v=><option key={v} value={v}>{v}</option>)}
+          </select>
+          <select value={fStatus} onChange={e=>setFStatus(e.target.value)} style={selectStyle}>
+            <option value="">진행상태 전체</option>
+            {WORKORDER_STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+
+        {loading?(
+          <div style={{textAlign:"center",padding:40,color:"#94A3B8"}}>⏳ 작업지시서 불러오는 중...</div>
+        ):error?(
+          <div style={{padding:20,borderRadius:8,background:"#FEF2F2",border:"1px solid #FCA5A5"}}>
+            <div style={{fontWeight:600,color:"#B91C1C",marginBottom:4}}>작업지시서를 불러오지 못했습니다</div>
+            <div style={{fontSize:13,color:"#DC2626"}}>{error}</div>
+          </div>
+        ):rows.length===0?(
+          <div style={{textAlign:"center",padding:50,color:"#94A3B8",fontSize:15}}>
+            <div style={{fontSize:36,marginBottom:8}}>📭</div>
+            등록된 작업지시서가 없습니다
+          </div>
+        ):filtered.length===0?(
+          <div style={{textAlign:"center",padding:50,color:"#94A3B8",fontSize:15}}>검색·필터 조건에 맞는 작업지시서가 없습니다</div>
+        ):(
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",minWidth:1000}}>
+              <thead>
+                <tr>
+                  <th style={th}>스타일넘버</th>
+                  <th style={th}>품명</th>
+                  <th style={{...th,textAlign:"center"}}>이미지</th>
+                  <th style={th}>시즌</th>
+                  <th style={{...th,textAlign:"center"}}>차수</th>
+                  <th style={{...th,textAlign:"right"}}>총수량</th>
+                  <th style={th}>작업처</th>
+                  <th style={th}>담당</th>
+                  <th style={th}>납품예정일</th>
+                  <th style={{...th,textAlign:"center"}}>상태</th>
+                  <th style={{...th,textAlign:"center"}}>실장승인</th>
+                  <th style={{...th,textAlign:"center"}}>액션</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(r=>{
+                  const st=WO_STATUS_STYLE[r.status]||{color:"#64748B",bg:"#F1F5F9"};
+                  return(
+                    <tr key={r.id}>
+                      <td style={{...td,fontWeight:700,whiteSpace:"nowrap"}}>{r.style_no||"-"}</td>
+                      <td style={td}>
+                        {r.notion_url?(
+                          <a href={r.notion_url} target="_blank" rel="noreferrer" style={{color:"#7C3AED",fontWeight:600,textDecoration:"none"}}>
+                            {r.product_name||"(품명 없음)"} <span style={{fontSize:12}}>↗</span>
+                          </a>
+                        ):(
+                          <span style={{fontWeight:600}}>{r.product_name||"(품명 없음)"}</span>
+                        )}
+                        {(r.season||r.year)&&<div style={{fontSize:11,color:"#94A3B8",marginTop:2}}>{[r.year,r.season].filter(Boolean).join(" ")}</div>}
+                      </td>
+                      <td style={{...td,textAlign:"center"}}>
+                        {r.image_url?(
+                          <img src={r.image_url} alt="" referrerPolicy="no-referrer"
+                            onError={e=>{e.currentTarget.style.display="none";}}
+                            style={{width:40,height:40,objectFit:"cover",borderRadius:6,border:"1px solid #E2E8F0"}}/>
+                        ):(
+                          <span style={{color:"#CBD5E1",fontSize:12}}>—</span>
+                        )}
+                      </td>
+                      <td style={{...td,whiteSpace:"nowrap"}}>{r.season||"-"}</td>
+                      <td style={{...td,textAlign:"center",whiteSpace:"nowrap"}}>{r.round_no?`${r.round_no}차`:"-"}</td>
+                      <td style={{...td,textAlign:"right",fontWeight:700,whiteSpace:"nowrap"}}>{r.total_qty!=null?Number(r.total_qty).toLocaleString():"-"}</td>
+                      <td style={{...td,whiteSpace:"nowrap"}}>{r.vendor||"-"}</td>
+                      <td style={{...td,whiteSpace:"nowrap"}}>{r.manager||"-"}</td>
+                      <td style={{...td,whiteSpace:"nowrap"}}>{r.delivery_date||"-"}</td>
+                      <td style={{...td,textAlign:"center"}}>
+                        <span style={{display:"inline-block",padding:"3px 10px",borderRadius:20,fontSize:12,fontWeight:700,color:st.color,background:st.bg,whiteSpace:"nowrap"}}>{r.status||"-"}</span>
+                      </td>
+                      <td style={{...td,textAlign:"center"}}>
+                        {r.approved?<span style={{color:"#15803D",fontWeight:700}}>✓</span>:<span style={{color:"#CBD5E1"}}>–</span>}
+                      </td>
+                      <td style={{...td,textAlign:"center",whiteSpace:"nowrap"}}>
+                        <span style={{display:"inline-flex",gap:8,color:"#94A3B8"}}>
+                          <span title="보기 (준비 중)" style={{cursor:"not-allowed"}}>👁</span>
+                          <span title="수정 (준비 중)" style={{cursor:"not-allowed"}}>✏️</span>
+                          <span title="삭제 (준비 중)" style={{cursor:"not-allowed"}}>🗑</span>
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {!loading&&!error&&filtered.length>0&&(
+          <div style={{marginTop:16,textAlign:"right",fontSize:14,color:"#64748B",fontWeight:600}}>
+            {filtered.length.toLocaleString()}개 작업지시서 · 총 {totalQty.toLocaleString()}장
+          </div>
+        )}
+      </SectionCard>
+    </>
+  );
 }
 
 // ─── Tab 6: 실측 사이즈 (Supabase) ───
@@ -3834,7 +4084,7 @@ export default function Dashboard(){
     {id:"ordertrack",label:"오더 입고현황",icon:"📊"},
     {id:"productdb",label:"제품 DB",icon:"🗃"},
     {id:"planning",label:"아이템 기획",icon:"💡"},
-    {id:"sample",label:"샘플 진행",icon:"🧪"},
+    {id:"sample",label:"작업지시서",icon:"📝"},
     {id:"measure",label:"실측 사이즈",icon:"📐"},
     {id:"products",label:"상품 마스터",icon:"📋"},
   ];
@@ -3946,7 +4196,7 @@ export default function Dashboard(){
         {activeTab==="packing"&&<PackingListTab />}
         {activeTab==="schedule"&&<ScheduleTab />}
         {activeTab==="price"&&<PriceTab />}
-        {activeTab==="sample"&&<SampleTab />}
+        {activeTab==="sample"&&<SampleTabWorkorder />}
         {activeTab==="reorder"&&<ReorderTab />}
         {activeTab==="ordertrack"&&<ProductionDashboard />}
         {activeTab==="productdb"&&<ProductDB />}
