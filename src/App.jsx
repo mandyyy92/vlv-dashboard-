@@ -4078,15 +4078,16 @@ export default function Dashboard(){
   },[dashSchedules]);
   const pendingTotalQty=useMemo(()=>pendingSchedules.reduce((sum,s)=>sum+(s.qty||0),0),[pendingSchedules]);
 
+  // hidden:true 인 탭은 메뉴에서만 숨김(컴포넌트/라우팅/데이터는 그대로 보존). 되돌릴 땐 hidden 제거.
   const tabs=[
     {id:"overview",label:"대시보드",icon:"⬡"},
     {id:"schedule",label:"입고 스케줄",icon:"📅"},
     {id:"ordertrack",label:"오더 입고현황",icon:"📊"},
     {id:"productdb",label:"제품 DB",icon:"🗃"},
-    {id:"planning",label:"아이템 기획",icon:"💡"},
+    {id:"planning",label:"아이템 기획",icon:"💡",hidden:true},
     {id:"sample",label:"작업지시서",icon:"📝"},
-    {id:"measure",label:"실측 사이즈",icon:"📐"},
-    {id:"products",label:"상품 마스터",icon:"📋"},
+    {id:"measure",label:"실측 사이즈",icon:"📐",hidden:true},
+    {id:"products",label:"상품 마스터",icon:"📋",hidden:true},
   ];
 
   const renderOverview=()=>(
@@ -4186,7 +4187,7 @@ export default function Dashboard(){
     <div style={{minHeight:"100vh",background:"#F1F5F9",fontFamily:"'Pretendard','Apple SD Gothic Neo',-apple-system,sans-serif"}}>
 
       <div style={{background:"#FFFFFF",padding:"6px 20px",display:"flex",gap:4,borderBottom:"1px solid #E2E8F0",overflowX:"auto"}}>
-        {tabs.map(t=>(<TabBtn key={t.id} active={activeTab===t.id} onClick={()=>setActiveTab(t.id)} icon={t.icon}>{t.label}</TabBtn>))}
+        {tabs.filter(t=>!t.hidden).map(t=>(<TabBtn key={t.id} active={activeTab===t.id} onClick={()=>setActiveTab(t.id)} icon={t.icon}>{t.label}</TabBtn>))}
       </div>
 
       <div style={{padding:"20px 16px"}}>
