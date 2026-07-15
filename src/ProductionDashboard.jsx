@@ -607,6 +607,32 @@ async function lookupImagesByNames(nameKeys) {
   }
 }
 
+// 바코드 정규화(공백 제거 + 대문자) — 오더 바코드 ↔ 제품DB 바코드 매칭용
+const normBarcode = (s) => String(s || "").replace(/\s/g, "").toUpperCase();
+
+// 제품DB(swift-service) 목록을 1회 GET → { 정규화바코드: image } 맵.
+// barcode·image 둘 다 있는 항목만. 실패 시 빈 맵({}) 반환(목록은 정상 동작 유지).
+async function fetchBarcodeImageMap() {
+  try {
+    const r = await fetch(PRODUCTS_API, {
+      method: "GET",
+      headers: { "Authorization": `Bearer ${SUPABASE_KEY}`, "apikey": SUPABASE_KEY },
+    });
+    if (!r.ok) { console.error("[바코드 이미지 조회] 실패", r.status); return {}; }
+    const data = await r.json();
+    if (!Array.isArray(data)) return {};
+    const map = {};
+    for (const p of data) {
+      const key = normBarcode(p.barcode);
+      if (key && p.image && !map[key]) map[key] = p.image;
+    }
+    return map;
+  } catch (e) {
+    console.error("[바코드 이미지 조회] 예외", e);
+    return {};
+  }
+}
+
 // ============================================================
 // 엑셀 파서 (PowerShell 스크립트와 동일 로직)
 // ============================================================
@@ -919,6 +945,7 @@ export default function ProductionDashboard() {
   const [showPacking, setShowPacking] = useState(false);
   const [showUploads, setShowUploads] = useState(false); // 업로드 내역 모달
   const [imageMap, setImageMap] = useState({});            // { name_key: image_url }
+  const [barcodeImageMap, setBarcodeImageMap] = useState({}); // { 정규화바코드: image } — 제품DB 1회 조회
   const [vendorFilter, setVendorFilter] = useState("all"); // 'all' | 업체명
   const [seasonFilter, setSeasonFilter] = useState("all"); // 'all' | 시즌(26SS 등)
   const [search, setSearch] = useState(""); // 상품명/스타일NO/오더NO 검색
@@ -949,6 +976,13 @@ export default function ProductionDashboard() {
   };
 
   useEffect(() => { reload(); }, []);
+
+  // 제품DB(swift-service) 바코드→이미지 맵 1회 조회. 실패해도 목록은 정상(기존 상품명 매칭 유지).
+  useEffect(() => {
+    let cancelled = false;
+    fetchBarcodeImageMap().then(m => { if (!cancelled) setBarcodeImageMap(m); });
+    return () => { cancelled = true; };
+  }, []);
 
   // 시즌 추출: season 컬럼 우선, 없으면 오더 NO에서 파싱(PO-26SS-024 → 26SS)
   const seasonOf = (o) => (o.season || String(o.order_no || "").split("-")[1] || "").trim() || "미지정";
@@ -1328,7 +1362,10 @@ export default function ProductionDashboard() {
                         </td>
                       </tr>
                       {!collapsed && g.list.map((o, idx) => {
-                        const imgUrl = imageMap[stripSpaces(o.items[0]?.product_name)];
+                        // 우선순위: (a) 바코드 매칭(제품DB) → (b) 상품명 매칭(lookup_image_by_name) → (c) 없으면 📷
+                        const bcKey = normBarcode(o.items[0]?.matched_barcode || o.items[0]?.sku_code);
+                        const imgUrl = (bcKey && barcodeImageMap[bcKey])
+                          || imageMap[stripSpaces(o.items[0]?.product_name)];
                         // 상품명 묶음 경계: 직전 행과 상품명이 다르면 얇은 구분선(그룹 첫 행 제외)
                         const curName = o.items[0]?.product_name || "—";
                         const prevName = idx > 0 ? (g.list[idx - 1].items[0]?.product_name || "—") : null;
@@ -2012,6 +2049,7 @@ function ProductThumb({ url }) {
       src={url}
       alt=""
       loading="lazy"
+      referrerPolicy="no-referrer"
       style={S.thumbImg}
       onError={() => setError(true)}
     />
