@@ -4773,7 +4773,7 @@ export default function Dashboard(){
     {id:"productdb",label:"제품 DB",icon:"🗃"},
     {id:"planning",label:"아이템 기획",icon:"💡",hidden:true},
     {id:"sample",label:"작업지시서",icon:"📝"},
-    {id:"print",label:"전사프린팅 외주",icon:"🖨️"},
+    {id:"print",label:"프린팅 외주",icon:"🖨️"},
     {id:"measure",label:"실측 사이즈",icon:"📐",hidden:true},
     {id:"products",label:"상품 마스터",icon:"📋",hidden:true},
   ];
