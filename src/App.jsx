@@ -3121,6 +3121,100 @@ function PrintHistory(){
   );
 }
 
+// 프린팅 외주 발주서 작성 (UI 뼈대 · state만, DB 저장 없음). 추천·엑셀은 다음 단계.
+function PrintOrderCreate(){
+  const[head,setHead]=useState({supplier:"",round_no:"",season:"",order_date:"",expected_date:""});
+  const emptyItem=()=>({product_code:"",product_name:"",option:"",qty:"",unit_cost:"",note:""});
+  const[items,setItems]=useState([]);
+
+  const setHeadField=(k,v)=>setHead(p=>({...p,[k]:v}));
+  const itemEdit=(ri,key,val)=>setItems(rows=>rows.map((r,i)=>i===ri?{...r,[key]:val}:r));
+  const itemAddRow=()=>setItems(rows=>[...rows,emptyItem()]);
+  const itemRemoveRow=ri=>setItems(rows=>rows.filter((_,i)=>i!==ri));
+
+  const nToNum=v=>{const d=String(v==null?"":v).replace(/[^\d.]/g,"");return d===""?0:Number(d);};
+  const amount=r=>nToNum(r.qty)*nToNum(r.unit_cost);
+  const totalQty=useMemo(()=>items.reduce((s,r)=>s+nToNum(r.qty),0),[items]);
+  const totalAmount=useMemo(()=>items.reduce((s,r)=>s+amount(r),0),[items]);
+  const fmt=n=>Number(n||0).toLocaleString();
+
+  // 스타일 헬퍼(WorkorderForm 패턴 재사용)
+  const labelStyle={fontSize:13,fontWeight:700,color:"#475569",marginBottom:6,display:"block"};
+  const inputStyle={width:"100%",padding:"9px 12px",borderRadius:8,border:"1px solid #CBD5E1",fontSize:14,outline:"none",boxSizing:"border-box"};
+  const grid={display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:16};
+  const specTh={padding:"8px 10px",textAlign:"left",fontSize:12,fontWeight:700,color:"#475569",background:"#F8FAFC",borderBottom:"1px solid #E2E8F0",whiteSpace:"nowrap"};
+  const specTd={padding:"4px 6px",borderBottom:"1px solid #F1F5F9"};
+  const specCell={width:"100%",padding:"6px 8px",borderRadius:6,border:"1px solid #CBD5E1",fontSize:13,outline:"none",boxSizing:"border-box",textAlign:"center"};
+  const specIconBtn={border:"none",background:"none",cursor:"pointer",fontSize:15,padding:"2px 4px",lineHeight:1};
+
+  return(
+    <>
+      {/* 발주 기본정보 */}
+      <SectionCard title="🧾 발주 기본정보"
+        actions={<div style={{display:"flex",gap:8}}>
+          <span title="자동 추천 (준비 중)" style={{padding:"8px 14px",borderRadius:8,border:"1px solid #CBD5E1",background:"#F8FAFC",color:"#94A3B8",fontSize:14,fontWeight:600,cursor:"not-allowed"}}>✨ 자동 추천</span>
+          <span title="엑셀 다운로드 (준비 중)" style={{padding:"8px 14px",borderRadius:8,border:"1px solid #CBD5E1",background:"#F8FAFC",color:"#94A3B8",fontSize:14,fontWeight:600,cursor:"not-allowed"}}>📊 엑셀 다운로드</span>
+        </div>}>
+        <div style={grid}>
+          <div><label style={labelStyle}>업체</label><input value={head.supplier} onChange={e=>setHeadField("supplier",e.target.value)} placeholder="외주 업체명" style={inputStyle}/></div>
+          <div><label style={labelStyle}>차수</label><input type="number" value={head.round_no} onChange={e=>setHeadField("round_no",e.target.value)} placeholder="숫자" style={inputStyle}/></div>
+          <div><label style={labelStyle}>시즌</label><input value={head.season} onChange={e=>setHeadField("season",e.target.value)} placeholder="예: 26FW" style={inputStyle}/></div>
+          <div><label style={labelStyle}>발주일</label><input type="date" value={head.order_date} onChange={e=>setHeadField("order_date",e.target.value)} style={inputStyle}/></div>
+          <div><label style={labelStyle}>입고예정일</label><input type="date" value={head.expected_date} onChange={e=>setHeadField("expected_date",e.target.value)} style={inputStyle}/></div>
+        </div>
+      </SectionCard>
+
+      {/* 발주 품목 표 */}
+      <SectionCard title="📦 발주 품목">
+        {items.length===0?(
+          <div style={{textAlign:"center",padding:40,color:"#94A3B8",fontSize:14}}>품목을 추가하세요 · “+ 품목 추가”</div>
+        ):(
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+              <thead>
+                <tr>
+                  <th style={{...specTh,minWidth:110}}>상품코드</th>
+                  <th style={{...specTh,minWidth:140}}>상품명</th>
+                  <th style={{...specTh,minWidth:110}}>색상·사이즈</th>
+                  <th style={{...specTh,textAlign:"center",minWidth:80}}>의뢰수량</th>
+                  <th style={{...specTh,textAlign:"center",minWidth:90}}>원가</th>
+                  <th style={{...specTh,textAlign:"right",minWidth:100}}>금액</th>
+                  <th style={{...specTh,minWidth:100}}>비고</th>
+                  <th style={{...specTh,width:56,textAlign:"center"}}>삭제</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((r,ri)=>(
+                  <tr key={ri}>
+                    <td style={specTd}><input value={r.product_code} onChange={e=>itemEdit(ri,"product_code",e.target.value)} style={{...specCell,textAlign:"left",fontFamily:"monospace"}}/></td>
+                    <td style={specTd}><input value={r.product_name} onChange={e=>itemEdit(ri,"product_name",e.target.value)} style={{...specCell,textAlign:"left"}}/></td>
+                    <td style={specTd}><input value={r.option} onChange={e=>itemEdit(ri,"option",e.target.value)} style={{...specCell,textAlign:"left"}}/></td>
+                    <td style={specTd}><input value={r.qty} onChange={e=>itemEdit(ri,"qty",e.target.value)} style={specCell}/></td>
+                    <td style={specTd}><input value={r.unit_cost} onChange={e=>itemEdit(ri,"unit_cost",e.target.value)} style={specCell}/></td>
+                    <td style={{...specTd,textAlign:"right",fontWeight:700,color:"#1E293B",whiteSpace:"nowrap",padding:"4px 10px"}}>{fmt(amount(r))}</td>
+                    <td style={specTd}><input value={r.note} onChange={e=>itemEdit(ri,"note",e.target.value)} style={{...specCell,textAlign:"left"}}/></td>
+                    <td style={{...specTd,textAlign:"center",whiteSpace:"nowrap"}}>
+                      <button type="button" title="행 삭제" onClick={()=>itemRemoveRow(ri)} style={{...specIconBtn,color:"#DC2626"}}>🗑</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div style={{marginTop:12,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+          <SmallBtn onClick={itemAddRow}>+ 품목 추가</SmallBtn>
+          {items.length>0&&(
+            <div style={{fontSize:14,color:"#64748B",fontWeight:600}}>
+              총 수량 {fmt(totalQty)} · 총 금액 {fmt(totalAmount)}
+            </div>
+          )}
+        </div>
+      </SectionCard>
+    </>
+  );
+}
+
 // ─── 전사프린팅 외주 (UI 틀 · 발주 히스토리 표) ───
 // 소메뉴 3개: 발주서 작성 / 업체·단가·샘플 관리 / 발주 히스토리.
 function PrintOutsourcingTab(){
@@ -3144,11 +3238,7 @@ function PrintOutsourcingTab(){
         ))}
       </div>
 
-      {sub==="order"&&(
-        <SectionCard title="🖨️ 발주서 작성">
-          <div style={{textAlign:"center",padding:60,color:"#94A3B8",fontSize:15}}>발주서 작성 &amp; 자동 추천 (준비 중)</div>
-        </SectionCard>
-      )}
+      {sub==="order"&&<PrintOrderCreate />}
       {sub==="supplier"&&(
         <SectionCard title="🏢 업체·단가·샘플 관리">
           <div style={{textAlign:"center",padding:60,color:"#94A3B8",fontSize:15}}>외주 업체별 가능상품 · 단가 · 샘플 관리 (준비 중)</div>
