@@ -2978,8 +2978,151 @@ function WorkorderForm({editingRow,onSaved,onCancel}){
   );
 }
 
-// ─── 전사프린팅 외주 (UI 틀만 · DB 연결 없음) ───
-// 소메뉴 3개: 발주서 작성 / 업체·단가·샘플 관리 / 발주 히스토리. 본문은 준비중 placeholder.
+// 프린팅 외주 발주 히스토리: print_order_items GET(읽기 전용) → 검색/차수/업체 필터 + 표
+function PrintHistory(){
+  const[rows,setRows]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[error,setError]=useState(null);
+  const[search,setSearch]=useState("");
+  const[fRound,setFRound]=useState("");
+  const[fSupplier,setFSupplier]=useState("");
+
+  useEffect(()=>{
+    let alive=true;
+    (async()=>{
+      setLoading(true);setError(null);
+      try{
+        const r=await fetch(`${SUPABASE_URL}/rest/v1/print_order_items?select=*&order=round_no.desc,product_code.asc`,{headers:sbHeaders});
+        const data=await r.json();
+        if(!r.ok)throw new Error(data?.message?data.message:`HTTP ${r.status}`);
+        if(!Array.isArray(data))throw new Error("예상치 못한 응답 형식");
+        if(alive)setRows(data);
+      }catch(e){
+        if(alive){setError(String(e?.message||e));setRows([]);}
+      }finally{
+        if(alive)setLoading(false);
+      }
+    })();
+    return()=>{alive=false;};
+  },[]);
+
+  // 필터 셀렉트 값: 데이터에서 distinct
+  const distinct=useCallback((key)=>[...new Set(rows.map(r=>r[key]).filter(v=>v!==null&&v!==undefined&&v!==""))],[rows]);
+  const rounds=useMemo(()=>distinct("round_no").sort((a,b)=>Number(b)-Number(a)),[distinct]);
+  const suppliers=useMemo(()=>distinct("supplier_name").sort(),[distinct]);
+
+  const filtered=useMemo(()=>{
+    const q=search.trim().toLowerCase();
+    return rows.filter(r=>{
+      if(q){
+        const hay=`${r.product_name||""} ${r.product_code||""} ${r.supplier_name||""}`.toLowerCase();
+        if(!hay.includes(q))return false;
+      }
+      if(fRound&&String(r.round_no)!==String(fRound))return false;
+      if(fSupplier&&r.supplier_name!==fSupplier)return false;
+      return true;
+    });
+  },[rows,search,fRound,fSupplier]);
+
+  const totalReq=useMemo(()=>filtered.reduce((s,r)=>s+(Number(r.req_qty)||0),0),[filtered]);
+
+  // 서식 헬퍼
+  const num=v=>(v!==null&&v!==undefined&&v!=="")?Number(v).toLocaleString():"-";
+  const dateFmt=v=>{if(!v)return "-";const s=String(v);return s.length>=10?s.slice(0,10):s;};
+
+  const selectStyle={padding:"8px 12px",borderRadius:8,border:"1px solid #CBD5E1",background:"#FFF",color:"#475569",fontSize:14,fontWeight:600,cursor:"pointer",outline:"none"};
+  const th={padding:"11px 12px",textAlign:"left",fontSize:12,fontWeight:700,color:"#64748B",whiteSpace:"nowrap",borderBottom:"2px solid #E2E8F0",textTransform:"uppercase",letterSpacing:0.3};
+  const td={padding:"11px 12px",fontSize:14,color:"#1E293B",borderBottom:"1px solid #F1F5F9",verticalAlign:"middle"};
+
+  return(
+    <SectionCard title="📚 발주 히스토리">
+      {/* 검색 + 필터 */}
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:18}}>
+        <input
+          value={search} onChange={e=>setSearch(e.target.value)}
+          placeholder="상품명 · 상품코드 · 업체 검색"
+          style={{flex:"1 1 240px",minWidth:200,padding:"8px 14px",borderRadius:8,border:"1px solid #CBD5E1",fontSize:14,outline:"none"}}/>
+        <select value={fRound} onChange={e=>setFRound(e.target.value)} style={selectStyle}>
+          <option value="">차수 전체</option>
+          {rounds.map(r=><option key={r} value={r}>{r}차</option>)}
+        </select>
+        <select value={fSupplier} onChange={e=>setFSupplier(e.target.value)} style={selectStyle}>
+          <option value="">업체 전체</option>
+          {suppliers.map(s=><option key={s} value={s}>{s}</option>)}
+        </select>
+      </div>
+
+      {loading?(
+        <div style={{textAlign:"center",padding:40,color:"#94A3B8"}}>⏳ 발주 히스토리 불러오는 중...</div>
+      ):error?(
+        <div style={{padding:20,borderRadius:8,background:"#FEF2F2",border:"1px solid #FCA5A5"}}>
+          <div style={{fontWeight:600,color:"#B91C1C",marginBottom:4}}>발주 히스토리를 불러오지 못했습니다</div>
+          <div style={{fontSize:13,color:"#DC2626"}}>{error}</div>
+        </div>
+      ):rows.length===0?(
+        <div style={{textAlign:"center",padding:50,color:"#94A3B8",fontSize:15}}>
+          <div style={{fontSize:36,marginBottom:8}}>📭</div>
+          발주 이력이 없습니다
+        </div>
+      ):filtered.length===0?(
+        <div style={{textAlign:"center",padding:50,color:"#94A3B8",fontSize:15}}>검색·필터 조건에 맞는 발주 이력이 없습니다</div>
+      ):(
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",minWidth:1100}}>
+            <thead>
+              <tr>
+                <th style={{...th,textAlign:"center"}}>차수</th>
+                <th style={th}>업체</th>
+                <th style={th}>시즌</th>
+                <th style={th}>상품코드</th>
+                <th style={th}>상품명</th>
+                <th style={th}>색상·사이즈</th>
+                <th style={{...th,textAlign:"right"}}>의뢰수량</th>
+                <th style={th}>발주일</th>
+                <th style={th}>입고예정일</th>
+                <th style={{...th,textAlign:"right"}}>실입고총수량</th>
+                <th style={{...th,textAlign:"right"}}>원가</th>
+                <th style={{...th,textAlign:"right"}}>발주총액</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((r,i)=>{
+                const req=Number(r.req_qty)||0;
+                const recv=Number(r.recv_total)||0;
+                const recvDone=r.recv_total!=null&&recv>=req&&req>0;
+                return(
+                  <tr key={r.id!=null?r.id:i}>
+                    <td style={{...td,textAlign:"center",whiteSpace:"nowrap"}}>{r.round_no!=null?`${r.round_no}차`:"-"}</td>
+                    <td style={{...td,whiteSpace:"nowrap"}}>{r.supplier_name||"-"}</td>
+                    <td style={{...td,whiteSpace:"nowrap"}}>{r.season||"-"}</td>
+                    <td style={{...td,fontFamily:"monospace",whiteSpace:"nowrap"}}>{r.product_code||"-"}</td>
+                    <td style={{...td,fontWeight:600}}>{r.product_name||"-"}</td>
+                    <td style={{...td,whiteSpace:"nowrap"}}>{r.option_name||"-"}</td>
+                    <td style={{...td,textAlign:"right",fontWeight:700,whiteSpace:"nowrap"}}>{num(r.req_qty)}</td>
+                    <td style={{...td,whiteSpace:"nowrap"}}>{dateFmt(r.order_date)}</td>
+                    <td style={{...td,whiteSpace:"nowrap"}}>{dateFmt(r.expected_date)}</td>
+                    <td style={{...td,textAlign:"right",fontWeight:700,whiteSpace:"nowrap",color:recvDone?"#15803D":"#64748B"}}>{num(r.recv_total)}</td>
+                    <td style={{...td,textAlign:"right",whiteSpace:"nowrap"}}>{num(r.unit_cost)}</td>
+                    <td style={{...td,textAlign:"right",whiteSpace:"nowrap"}}>{num(r.order_amount)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {!loading&&!error&&filtered.length>0&&(
+        <div style={{marginTop:16,textAlign:"right",fontSize:14,color:"#64748B",fontWeight:600}}>
+          {filtered.length.toLocaleString()}건 · 의뢰수량 합계 {totalReq.toLocaleString()}
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
+// ─── 전사프린팅 외주 (UI 틀 · 발주 히스토리 표) ───
+// 소메뉴 3개: 발주서 작성 / 업체·단가·샘플 관리 / 발주 히스토리.
 function PrintOutsourcingTab(){
   const [sub,setSub]=useState("order"); // order | supplier | history
 
@@ -3011,11 +3154,7 @@ function PrintOutsourcingTab(){
           <div style={{textAlign:"center",padding:60,color:"#94A3B8",fontSize:15}}>외주 업체별 가능상품 · 단가 · 샘플 관리 (준비 중)</div>
         </SectionCard>
       )}
-      {sub==="history"&&(
-        <SectionCard title="📚 발주 히스토리">
-          <div style={{textAlign:"center",padding:60,color:"#94A3B8",fontSize:15}}>발주 차수 히스토리 (준비 중)</div>
-        </SectionCard>
-      )}
+      {sub==="history"&&<PrintHistory />}
     </>
   );
 }
