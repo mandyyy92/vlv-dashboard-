@@ -2518,6 +2518,13 @@ function WorkorderForm({editingRow,onSaved,onCancel}){
       prod_transfer_date:r.prod_transfer_date||"",delivery_date:r.delivery_date||"",
       unit_cost:sv(r.unit_cost),sale_price:sv(r.sale_price),notes:r.notes||"",
       total_qty:sv(r.total_qty),size_list:r.size_list||"",size_spec:r.size_spec||null,order_matrix:r.order_matrix||null,
+      // 아래 필드는 자리만(저장 payload 연결은 다음 단계 — 컬럼 추가 시)
+      materials: editingRow?.materials || [],
+      material_vendors: editingRow?.material_vendors || [],
+      schematic_image: editingRow?.schematic_image || "",
+      label_diagram: editingRow?.label_diagram || {},
+      fixed_notes: editingRow?.fixed_notes || "",
+      attachments: editingRow?.attachments || {},
     };
   });
   const[saving,setSaving]=useState(false);
@@ -2526,6 +2533,15 @@ function WorkorderForm({editingRow,onSaved,onCancel}){
   const[parseMsg,setParseMsg]=useState(null);   // 엑셀 파싱 메시지 {type:"ok"|"err"|"info",text}
   const[sheetInfo,setSheetInfo]=useState(null);  // 다중 시트 {count,names}
   const[specSummary,setSpecSummary]=useState(null); // 파싱 요약 {specRows,matrixRows}
+
+  // ── 4탭 구조 얼개 (탭 전환 UI + form state 뼈대. 각 탭 내용/저장 연결은 다음 단계) ──
+  const [activeTab, setActiveTab] = useState("basic");
+  const TABS = [
+    {key:"basic",  label:"기본정보"},
+    {key:"material", label:"원부자재"},
+    {key:"label",  label:"라벨·기타"},
+    {key:"files",  label:"첨부파일"},
+  ];
 
   const isEdit=!!(editingRow&&editingRow.id!=null);
   const setField=(k,v)=>setF(p=>({...p,[k]:v}));
@@ -2570,6 +2586,24 @@ function WorkorderForm({editingRow,onSaved,onCancel}){
     writeSpec(specRows.map((x,i)=>i===ri?{...x,values}:x));
   };
 
+  // ── 원단·부자재 표 편집 (f.materials = [{item,name,color,spec,yield,unit,price,order_unit,note}]) ──
+  const MATERIAL_UNITS=["EA","야드","M","개","set"];
+  const DEFAULT_MATERIAL_ITEMS=["메인라벨","케어라벨","품질보증택","가격택","바코드택","폴리백","택끈"];
+  const emptyMat=item=>({item:item||"",name:"",color:"",spec:"",yield:"",unit:"EA",price:"",order_unit:"",note:""});
+  // 저장 데이터 없으면 기본 품목을 빈 행으로 표시(편집·추가 시 state에 반영됨)
+  const matRows=(Array.isArray(f.materials)&&f.materials.length)?f.materials:DEFAULT_MATERIAL_ITEMS.map(emptyMat);
+  const writeMat=rows=>setField("materials",rows);
+  const matEdit=(ri,key,val)=>writeMat(matRows.map((r,i)=>i===ri?{...r,[key]:val}:r));
+  const matAddRow=()=>writeMat([...matRows,emptyMat("")]);
+  const matRemoveRow=ri=>writeMat(matRows.filter((_,i)=>i!==ri));
+
+  // ── 원부자재 업체 정보 (f.material_vendors = [{type,company,manager,contact,note}]) ──
+  const venRows=Array.isArray(f.material_vendors)?f.material_vendors:[];
+  const writeVen=rows=>setField("material_vendors",rows);
+  const venEdit=(ri,key,val)=>writeVen(venRows.map((r,i)=>i===ri?{...r,[key]:val}:r));
+  const venAddRow=()=>writeVen([...venRows,{type:"",company:"",manager:"",contact:"",note:""}]);
+  const venRemoveRow=ri=>writeVen(venRows.filter((_,i)=>i!==ri));
+
   const handleSave=async()=>{
     if(!f.style_no.trim()||!f.product_name.trim()){
       setMsg({type:"err",text:"스타일넘버와 품명은 필수 입력입니다."});
@@ -2591,6 +2625,8 @@ function WorkorderForm({editingRow,onSaved,onCancel}){
       unit_cost:num(f.unit_cost),sale_price:num(f.sale_price),notes:s(f.notes),
       size_list:s(f.size_list), // text: "M,L,XL,2XL" (사이즈 스펙표 컬럼)
       size_spec:f.size_spec||[],order_matrix:f.order_matrix||[], // jsonb (엑셀 파싱분) — null/undefined면 빈 배열로(not-null 위반 방지)
+      materials:f.materials||[],material_vendors:f.material_vendors||[], // jsonb (원부자재 표·업체) — 빈 배열로 not-null 방지
+      schematic_image:s(f.schematic_image), // text (도식화 이미지 URL)
       updated_at:now,
     };
     const tq=s(f.total_qty); // 엑셀에서 채워진 총수량(없으면 null)
@@ -2650,15 +2686,35 @@ function WorkorderForm({editingRow,onSaved,onCancel}){
 
   return(
     <>
-      {/* 상단 바: 목록으로 / 저장 */}
+      {/* 헤더: 목록으로 / 제목 · 생산유형·PDF·저장 */}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,gap:10,flexWrap:"wrap"}}>
-        <SmallBtn onClick={onCancel}>← 목록으로</SmallBtn>
         <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <SmallBtn onClick={onCancel}>‹ 목록으로</SmallBtn>
+          <span style={{fontSize:18,fontWeight:800,color:"#0F172A",letterSpacing:-0.3}}>{isEdit?"작업지시서 수정":"새 작업지시서"}</span>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
           {msg&&<span style={{color:msg.type==="err"?"#DC2626":"#15803D",fontSize:14,fontWeight:600}}>{msg.text}</span>}
+          <span title="생산 유형 (다음 단계)" style={{padding:"8px 14px",borderRadius:8,border:"1px solid #CBD5E1",background:"#F8FAFC",color:"#94A3B8",fontSize:14,fontWeight:600,cursor:"not-allowed"}}>완사입(기본) ▾</span>
+          <SmallBtn>PDF 미리보기</SmallBtn>
           <SmallBtn primary onClick={saving?undefined:handleSave}>{saving?"저장 중...":"저장"}</SmallBtn>
         </div>
       </div>
 
+      {/* 4탭 네비 */}
+      <div style={{display:"flex",gap:4,borderBottom:"2px solid #E2E8F0",marginBottom:20,flexWrap:"wrap"}}>
+        {TABS.map(t=>{
+          const on=activeTab===t.key;
+          return(
+            <button key={t.key} type="button" onClick={()=>setActiveTab(t.key)}
+              style={{padding:"10px 22px",border:"none",borderBottom:on?"3px solid #7C3AED":"3px solid transparent",background:on?"#FFF":"transparent",color:on?"#7C3AED":"#64748B",fontSize:14,fontWeight:on?700:600,cursor:"pointer",marginBottom:-2,borderTopLeftRadius:8,borderTopRightRadius:8,letterSpacing:-0.2,transition:"all 0.15s"}}>
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ── 기본정보 탭 (기존 입력 필드 이동) ── */}
+      {activeTab==="basic"&&(<>
       {/* 엑셀 업로드 자동 채움 */}
       <SectionCard title="📤 작업지시서 엑셀 업로드" subtitle="양식(.xlsx)을 올리면 폼이 자동으로 채워집니다 · 검수 후 저장하세요">
         <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:"none"}}
@@ -2800,6 +2856,124 @@ function WorkorderForm({editingRow,onSaved,onCancel}){
           <div style={{textAlign:"center",padding:40,color:"#94A3B8",fontSize:14}}>다음 단계에서 구현됩니다 (order_matrix) · 엑셀 업로드 시 자동 인식됩니다</div>
         )}
       </SectionCard>
+      </>)}
+
+      {/* ── 원부자재 탭 ── */}
+      {activeTab==="material"&&(<>
+        {/* 카드1: 원단 및 부자재 표 */}
+        <SectionCard title="🧵 원단 및 부자재" subtitle="라벨·부자재 품목별 자재명·규격·요척·단가 관리">
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+              <thead>
+                <tr>
+                  <th style={{...specTh,minWidth:96}}>품목</th>
+                  <th style={{...specTh,minWidth:120}}>자재명</th>
+                  <th style={{...specTh,minWidth:80}}>색상</th>
+                  <th style={{...specTh,minWidth:100}}>규격</th>
+                  <th style={{...specTh,textAlign:"center",minWidth:64}}>요척</th>
+                  <th style={{...specTh,textAlign:"center",minWidth:78}}>단위</th>
+                  <th style={{...specTh,textAlign:"center",minWidth:80}}>단가</th>
+                  <th style={{...specTh,textAlign:"center",minWidth:90}}>원단발주</th>
+                  <th style={{...specTh,minWidth:100}}>비고</th>
+                  <th style={{...specTh,width:56,textAlign:"center"}}>삭제</th>
+                </tr>
+              </thead>
+              <tbody>
+                {matRows.map((r,ri)=>(
+                  <tr key={ri}>
+                    <td style={specTd}><input value={r.item||""} onChange={e=>matEdit(ri,"item",e.target.value)} placeholder="품목" style={{...specCell,textAlign:"left"}}/></td>
+                    <td style={specTd}><input value={r.name||""} onChange={e=>matEdit(ri,"name",e.target.value)} style={{...specCell,textAlign:"left"}}/></td>
+                    <td style={specTd}><input value={r.color||""} onChange={e=>matEdit(ri,"color",e.target.value)} style={{...specCell,textAlign:"left"}}/></td>
+                    <td style={specTd}><input value={r.spec||""} onChange={e=>matEdit(ri,"spec",e.target.value)} style={{...specCell,textAlign:"left"}}/></td>
+                    <td style={specTd}><input value={r.yield||""} onChange={e=>matEdit(ri,"yield",e.target.value)} style={specCell}/></td>
+                    <td style={specTd}>
+                      <select value={r.unit||"EA"} onChange={e=>matEdit(ri,"unit",e.target.value)} style={specCell}>
+                        {MATERIAL_UNITS.map(u=><option key={u} value={u}>{u}</option>)}
+                      </select>
+                    </td>
+                    <td style={specTd}><input value={r.price||""} onChange={e=>matEdit(ri,"price",e.target.value)} style={specCell}/></td>
+                    <td style={specTd}><input value={r.order_unit||""} onChange={e=>matEdit(ri,"order_unit",e.target.value)} style={specCell}/></td>
+                    <td style={specTd}><input value={r.note||""} onChange={e=>matEdit(ri,"note",e.target.value)} style={{...specCell,textAlign:"left"}}/></td>
+                    <td style={{...specTd,textAlign:"center",whiteSpace:"nowrap"}}>
+                      <button type="button" title="행 삭제" onClick={()=>matRemoveRow(ri)} style={{...specIconBtn,color:"#DC2626"}}>🗑</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{marginTop:12}}>
+            <SmallBtn onClick={matAddRow}>+ 항목 추가</SmallBtn>
+          </div>
+        </SectionCard>
+
+        {/* 카드2: 원부자재 업체 정보 */}
+        <SectionCard title="🏢 원부자재 업체 정보">
+          {venRows.length===0?(
+            <div style={{textAlign:"center",padding:24,color:"#94A3B8",fontSize:14}}>등록된 업체가 없습니다 · “+ 행 추가”로 입력하세요</div>
+          ):(
+            <div style={{overflowX:"auto"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+                <thead>
+                  <tr>
+                    <th style={{...specTh,minWidth:100}}>종류</th>
+                    <th style={{...specTh,minWidth:140}}>업체명</th>
+                    <th style={{...specTh,minWidth:100}}>담당자</th>
+                    <th style={{...specTh,minWidth:120}}>연락처</th>
+                    <th style={{...specTh,minWidth:120}}>비고</th>
+                    <th style={{...specTh,width:56,textAlign:"center"}}>삭제</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {venRows.map((r,ri)=>(
+                    <tr key={ri}>
+                      <td style={specTd}><input value={r.type||""} onChange={e=>venEdit(ri,"type",e.target.value)} placeholder="예: 원단/라벨" style={{...specCell,textAlign:"left"}}/></td>
+                      <td style={specTd}><input value={r.company||""} onChange={e=>venEdit(ri,"company",e.target.value)} style={{...specCell,textAlign:"left"}}/></td>
+                      <td style={specTd}><input value={r.manager||""} onChange={e=>venEdit(ri,"manager",e.target.value)} style={{...specCell,textAlign:"left"}}/></td>
+                      <td style={specTd}><input value={r.contact||""} onChange={e=>venEdit(ri,"contact",e.target.value)} style={{...specCell,textAlign:"left"}}/></td>
+                      <td style={specTd}><input value={r.note||""} onChange={e=>venEdit(ri,"note",e.target.value)} style={{...specCell,textAlign:"left"}}/></td>
+                      <td style={{...specTd,textAlign:"center",whiteSpace:"nowrap"}}>
+                        <button type="button" title="행 삭제" onClick={()=>venRemoveRow(ri)} style={{...specIconBtn,color:"#DC2626"}}>🗑</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div style={{marginTop:12}}>
+            <SmallBtn onClick={venAddRow}>+ 행 추가</SmallBtn>
+          </div>
+        </SectionCard>
+
+        {/* 카드3: 도식화 이미지 */}
+        <SectionCard title="✏️ 도식화 이미지">
+          <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:16,alignItems:"start"}}>
+            <div>
+              <label style={labelStyle}>도식화 이미지 URL</label>
+              <input value={f.schematic_image||""} onChange={e=>setField("schematic_image",e.target.value)} placeholder="https://... (이미지 주소)" style={inputStyle}/>
+            </div>
+            <div>
+              <label style={labelStyle}>미리보기</label>
+              {f.schematic_image?(
+                <img src={f.schematic_image} alt="" referrerPolicy="no-referrer"
+                  onError={e=>{e.currentTarget.style.display="none";}}
+                  style={{width:120,height:120,objectFit:"cover",borderRadius:8,border:"1px solid #E2E8F0"}}/>
+              ):(<div style={{fontSize:13,color:"#94A3B8",paddingTop:8}}>URL 입력 시 표시</div>)}
+            </div>
+          </div>
+        </SectionCard>
+      </>)}
+
+      {/* ── 라벨·기타 탭 (준비 중) ── */}
+      {activeTab==="label"&&(
+        <div style={{background:"#FFF",borderRadius:12,border:"1px solid #E2E8F0",padding:48,textAlign:"center",color:"#94A3B8",fontSize:14}}>라벨·기타 (준비 중)</div>
+      )}
+
+      {/* ── 첨부파일 탭 (준비 중) ── */}
+      {activeTab==="files"&&(
+        <div style={{background:"#FFF",borderRadius:12,border:"1px solid #E2E8F0",padding:48,textAlign:"center",color:"#94A3B8",fontSize:14}}>첨부파일 (준비 중)</div>
+      )}
     </>
   );
 }
