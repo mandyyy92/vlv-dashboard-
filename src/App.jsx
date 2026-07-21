@@ -2103,19 +2103,21 @@ async function loadWorkorderXLSX(){
   return XLSX;
 }
 
-// 작업지시서 시트(2D 배열, 0-based) → 폼 필드 매핑. 병합/빈칸/구조 불일치에도 예외 없이 최대한 파싱.
+// 작업지시서 시트(2D 배열, 0-based) → 폼 필드 매핑. VLVD 표준 양식(코니키즈 26FW) 기준.
+// 좌표는 라벨 텍스트 탐색 우선, 실패 시 고정 셀(엑셀 셀 기준) fallback. 시트마다 행 수가 달라 하드코딩 대신 라벨 기준.
 function parseWorkOrderSheet(rows){
   const cell=(r,c)=>{const row=rows[r]; if(!row)return ""; const v=row[c]; return v==null?"":v;};
   const str=(r,c)=>String(cell(r,c)).trim();
   const digits=v=>String(v==null?"":v).replace(/[^0-9]/g,"");
   const stripSp=s=>String(s==null?"":s).replace(/\s/g,"");
+  const col=L=>{let n=0;for(const ch of String(L).toUpperCase())n=n*26+(ch.charCodeAt(0)-64);return n-1;}; // 'A'→0,'B'→1,'L'→11,'S'→18
   const normDate=v=>{
     if(v==null||v==="")return "";
     if(typeof v==="number"&&isFinite(v)){ // Excel serial → YYYY-MM-DD (UTC 자정 기준)
       const d=new Date(Math.round((v-25569)*86400*1000));
       return isNaN(d.getTime())?"":d.toISOString().slice(0,10);
     }
-    const m=String(v).trim().match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
+    const m=String(v).trim().match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/); // "2026.3.10" → 2026-03-10
     return m?`${m[1]}-${String(m[2]).padStart(2,"0")}-${String(m[3]).padStart(2,"0")}`:"";
   };
   const findCell=pred=>{
@@ -2131,71 +2133,96 @@ function parseWorkOrderSheet(rows){
   };
   const belowRaw=(r,c)=>{for(let i=r+1;i<rows.length;i++){if(str(i,c)!=="")return cell(i,c);}return "";};
 
-  const out={style_no:"",product_name:"",vendor:"",unit_cost:"",director:"",work_date:"",prod_transfer_date:"",delivery_date:"",total_qty:"",notes:"",size_spec:null,order_matrix:null};
+  const out={style_no:"",round_no:"",product_name:"",vendor:"",unit_cost:"",director:"",work_date:"",prod_transfer_date:"",delivery_date:"",total_qty:"",notes:"",size_list:"",size_spec:null,order_matrix:null,materials:null};
 
-  // 고정 셀: B4/C4/D4/E4 (0-based row3)
-  out.style_no=str(3,1);
-  out.product_name=str(3,2);
-  out.vendor=str(3,3);
-  out.unit_cost=digits(cell(3,4));
+  // ── 기본정보: B5 STYLE NO / C5 상품명 / D5 작업처 / E5 단가 ──
+  // STYLE NO "V24FT01UB400 - 5" → style_no="V24FT01UB400", round_no="5" (" - " 뒤 숫자)
+  let styleRaw=str(4,col("B"));
+  if(!styleRaw){const p=findByLabel(/STYLE\s*NO/i); if(p)styleRaw=String(rightRaw(p.r,p.c)||belowRaw(p.r,p.c)||"").trim();}
+  const sm=styleRaw.match(/^(.*?)\s*-\s*(\d+)\s*$/);
+  if(sm){out.style_no=sm[1].trim();out.round_no=sm[2];}else{out.style_no=styleRaw;}
 
-  // 담당(→ director/디자이너): "담당" 라벨 아래칸, 실패 시 row3,col12
-  const dam=findByLabel(/^담당/);
-  if(dam)out.director=String(belowRaw(dam.r,dam.c)||"").trim();
-  if(!out.director)out.director=str(3,12);
+  out.product_name=str(4,col("C"));
+  out.vendor=str(4,col("D"));
+  out.unit_cost=digits(cell(4,col("E"))); // "14,400원" → 14400
 
-  // 날짜: 라벨 같은 행 오른쪽 값 정규화
-  const wd=findByLabel(/작성일/); if(wd)out.work_date=rightDate(wd.r,wd.c);
-  const pt=findByLabel(/생산이관일/); if(pt)out.prod_transfer_date=rightDate(pt.r,pt.c);
-  const dl=findByLabel(/납품예정일/); if(dl)out.delivery_date=rightDate(dl.r,dl.c);
+  // 담당(→ director/디자이너): M4 고정, 실패 시 "담당" 라벨 아래/오른쪽
+  out.director=str(3,col("M"));
+  if(!out.director){const dam=findByLabel(/^담당/); if(dam)out.director=String(belowRaw(dam.r,dam.c)||rightRaw(dam.r,dam.c)||"").trim();}
 
-  // 총수량: 라벨 행의 마지막 숫자
-  const tq=findByLabel(/총수량/);
-  if(tq){const row=rows[tq.r]||[]; let last=""; for(let j=0;j<row.length;j++){const d=digits(row[j]); if(d!=="")last=d;} out.total_qty=last;}
+  // 날짜: 라벨 우선(작성일/생산이관일/납품예정일), 실패 시 R3/R4/R5 고정
+  const wd=findByLabel(/작성일/); out.work_date=(wd&&rightDate(wd.r,wd.c))||normDate(cell(2,col("R")));
+  const pt=findByLabel(/생산이관일/); out.prod_transfer_date=(pt&&rightDate(pt.r,pt.c))||normDate(cell(3,col("R")));
+  const dl=findByLabel(/납품예정일/); out.delivery_date=(dl&&rightDate(dl.r,dl.c))||normDate(cell(4,col("R")));
 
-  // 준수사항: 라벨 오른쪽 + 아래 텍스트 줄들 → 줄바꿈 합침
-  const rule=findByLabel(/준수사항/);
-  if(rule){const lines=[]; const sr=String(rightRaw(rule.r,rule.c)||"").trim(); if(sr)lines.push(sr);
-    for(let i=rule.r+1;i<rows.length;i++){const row=rows[i]||[]; const txt=row.map(v=>String(v==null?"":v).trim()).filter(Boolean).join(" ").trim(); if(txt)lines.push(txt);}
-    out.notes=lines.join("\n").trim();
+  // ── 원부자재표: L6 헤더(품목|자재명|색상|규격|요척|단가|원단발주량|비고), L7부터 값 행 ──
+  // ★ work_orders에 materials 컬럼이 없어 파싱만 하고 저장 payload에는 넣지 않음(콘솔 로그용, 추후 컬럼 추가 시 연결).
+  {
+    const L=col("L");
+    let hr=-1;
+    const mp=findByLabel(/자재명/); if(mp)hr=mp.r;
+    if(hr<0&&(str(5,L)!==""||str(5,L+1)!==""))hr=5; // L6 고정 fallback (row index 5)
+    if(hr>=0){
+      const hdr=(rows[hr]||[]).map(v=>String(v==null?"":v).trim());
+      const findC=(re,def)=>{const i=hdr.findIndex(v=>re.test(stripSp(v))); return i>=0?i:def;};
+      const cItem=findC(/품목/,L), cMat=findC(/자재명/,L+1), cColor=findC(/색상/,L+2),
+            cSpec=findC(/규격/,L+3), cYo=findC(/요척/,L+4), cPrice=findC(/단가/,L+5),
+            cFab=findC(/원단발주량|발주량/,L+6), cNote=findC(/비고/,L+7);
+      const mats=[];
+      for(let i=hr+1;i<rows.length;i++){
+        const item=str(i,cItem), material=str(i,cMat);
+        if(/^SIZE$/i.test(stripSp(item))||/^SIZE$/i.test(stripSp(material)))break; // 다음 섹션 진입
+        const parts=[item,material,str(i,cColor),str(i,cSpec),str(i,cYo),str(i,cPrice),str(i,cFab),str(i,cNote)];
+        if(parts.every(v=>v===""))break;
+        if(item===""&&material==="")continue;
+        mats.push({item,material,color:str(i,cColor),spec:str(i,cSpec),yocheok:str(i,cYo),price:digits(cell(i,cPrice)),fabricQty:str(i,cFab),note:str(i,cNote)});
+      }
+      if(mats.length)out.materials=mats;
+    }
   }
 
-  // SIZE 스펙 표: "SIZE"~"편차" 헤더행 → {columns, deviation_label, rows:[{item,values,deviation}]}
-  const sizePos=findCell(s=>stripSp(s).toUpperCase()==="SIZE");
+  // ── 사이즈 스펙: "SIZE" 라벨(L17) 아래, 헤더행 L18=(CM)+사이즈들+S열"편차" ──
+  // 결과: size_spec = [{item, values:{사이즈:값}, deviation}]  (size_list=values 키들 = 사이즈 헤더)
+  const sizePos=findCell(s=>stripSp(s).toUpperCase()==="SIZE"); // 첫 SIZE = 스펙표 라벨(발주표 SIZE는 하단)
   if(sizePos){
     let hr=-1;
     for(let i=sizePos.r;i<Math.min(sizePos.r+5,rows.length);i++){ if((rows[i]||[]).some(v=>/편\s*차/.test(String(v==null?"":v)))){hr=i;break;} }
-    if(hr<0)hr=sizePos.r;
+    if(hr<0)hr=sizePos.r+1;
     const header=(rows[hr]||[]).map(v=>String(v==null?"":v).trim());
-    const devCol=header.findIndex(v=>/편차/.test(v.replace(/\s/g,"")));
-    const labeled=[]; for(let c=0;c<header.length;c++){ if(header[c]!==""&&c!==devCol)labeled.push(c); }
-    const firstMeasure=labeled.length?labeled[0]:sizePos.c+1;
-    const itemCol=Math.max(0,firstMeasure-1);
-    const measureCols=labeled.filter(c=>c!==itemCol);
-    const columns=measureCols.map(c=>header[c]||`col${c}`);
+    let devCol=header.findIndex(v=>/편차/.test(v.replace(/\s/g,""))); if(devCol<0)devCol=col("S");
+    const itemCol=sizePos.c; // SIZE 라벨 열(L) = 항목열
+    const end=devCol>itemCol?devCol:header.length;
+    const sizeCols=[]; for(let c=itemCol+1;c<end;c++){ const h=header[c]; if(h!==""&&!/^SIZE$/i.test(stripSp(h)))sizeCols.push(c); }
     const specRows=[];
     for(let i=hr+1;i<rows.length;i++){
       const item=str(i,itemCol);
-      const values=measureCols.map(c=>cell(i,c));
+      const vals=sizeCols.map(c=>cell(i,c));
       const deviation=devCol>=0?cell(i,devCol):"";
-      const allEmpty=item===""&&values.every(v=>String(v).trim()==="")&&String(deviation).trim()==="";
+      const allEmpty=item===""&&vals.every(v=>String(v).trim()==="")&&String(deviation).trim()==="";
       if(allEmpty)break;
       if(/COLOR|준수사항|총수량/i.test(stripSp(item)))break;
       if(item==="")continue;
+      const values={}; sizeCols.forEach((c,k)=>{values[header[c]||`col${c}`]=vals[k];});
       specRows.push({item,values,deviation});
     }
-    if(specRows.length)out.size_spec={columns,deviation_label:devCol>=0?(header[devCol]||"편차"):null,rows:specRows};
+    if(specRows.length){out.size_spec=specRows; out.size_list=sizeCols.map(c=>header[c]||"").filter(Boolean).join(",");}
   }
 
-  // COLOR/SIZE/Q'ty 발주표 → order_matrix [{color, sizes:{size:qty}, qty}]
+  // ── 컬러×사이즈 발주표: "COLOR"(L28) + 아래 SIZE행(N~ 사이즈 라벨)·Q'ty(S열) ──
+  // 결과: order_matrix = [{color, sizes:{사이즈:수량}, qty}]
   const colorPos=findCell(s=>stripSp(s).toUpperCase()==="COLOR");
   if(colorPos){
-    const hr=colorPos.r;
-    const header=(rows[hr]||[]).map(v=>String(v==null?"":v).trim());
-    const qtyCol=header.findIndex(v=>/Q'?TY|QTY|수량|합계|TOTAL/i.test(v.replace(/\s/g,"")));
     const colorCol=colorPos.c;
+    let hr=-1, qtyCol=-1; // 헤더행: COLOR행~아래 2행 중 Q'ty/수량 포함 행
+    for(let i=colorPos.r;i<Math.min(colorPos.r+3,rows.length);i++){
+      const h=(rows[i]||[]).map(v=>String(v==null?"":v).trim());
+      const q=h.findIndex(v=>/Q'?TY|QTY|수량|합계|TOTAL/i.test(v.replace(/\s/g,"")));
+      if(q>=0){hr=i;qtyCol=q;break;}
+    }
+    if(hr<0){hr=colorPos.r+1;qtyCol=col("S");} // 고정 fallback: 아래행 + S열
+    const header=(rows[hr]||[]).map(v=>String(v==null?"":v).trim());
     const end=qtyCol>colorCol?qtyCol:header.length;
-    const sizeCols=[]; for(let c=colorCol+1;c<end;c++){ if(header[c]!=="")sizeCols.push(c); }
+    const sizeCols=[]; for(let c=colorCol+1;c<end;c++){ const h=header[c]; if(h!==""&&!/^SIZE$/i.test(stripSp(h)))sizeCols.push(c); }
     const matrix=[];
     for(let i=hr+1;i<rows.length;i++){
       const color=str(i,colorCol);
@@ -2207,6 +2234,17 @@ function parseWorkOrderSheet(rows){
     }
     if(matrix.length)out.order_matrix=matrix;
   }
+
+  // ── 준수사항: B열에서 "*"로 시작하는 줄들 → notes(줄바꿈 합침) ──
+  {
+    const B=col("B"); const lines=[];
+    for(let r=0;r<rows.length;r++){ const t=str(r,B); if(/^[*＊]/.test(t))lines.push(t); }
+    if(lines.length)out.notes=lines.join("\n").trim();
+  }
+
+  // ── 총수량: "총수량" 라벨 행의 S열, 실패 시 그 행의 마지막 숫자 ──
+  const tq=findByLabel(/총수량/);
+  if(tq){ let v=digits(cell(tq.r,col("S"))); if(v===""){ const row=rows[tq.r]||[]; for(let j=0;j<row.length;j++){const d=digits(row[j]); if(d!=="")v=d;} } out.total_qty=v; }
 
   return out;
 }
@@ -2471,7 +2509,7 @@ function WorkorderForm({editingRow,onSaved,onCancel}){
       manager:r.manager||"",director:r.director||"",work_date:r.work_date||today,
       prod_transfer_date:r.prod_transfer_date||"",delivery_date:r.delivery_date||"",
       unit_cost:sv(r.unit_cost),sale_price:sv(r.sale_price),notes:r.notes||"",
-      total_qty:sv(r.total_qty),size_spec:r.size_spec||null,order_matrix:r.order_matrix||null,
+      total_qty:sv(r.total_qty),size_list:r.size_list||"",size_spec:r.size_spec||null,order_matrix:r.order_matrix||null,
     };
   });
   const[saving,setSaving]=useState(false);
@@ -2487,6 +2525,11 @@ function WorkorderForm({editingRow,onSaved,onCancel}){
   const labelStyle={fontSize:13,fontWeight:700,color:"#475569",marginBottom:6,display:"block"};
   const inputStyle={width:"100%",padding:"9px 12px",borderRadius:8,border:"1px solid #CBD5E1",fontSize:14,outline:"none",boxSizing:"border-box"};
   const grid={display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:16};
+  // 사이즈 스펙표 스타일
+  const specTh={padding:"8px 10px",textAlign:"left",fontSize:12,fontWeight:700,color:"#475569",background:"#F8FAFC",borderBottom:"1px solid #E2E8F0",whiteSpace:"nowrap"};
+  const specTd={padding:"4px 6px",borderBottom:"1px solid #F1F5F9"};
+  const specCell={width:"100%",padding:"6px 8px",borderRadius:6,border:"1px solid #CBD5E1",fontSize:13,outline:"none",boxSizing:"border-box",textAlign:"center"};
+  const specIconBtn={border:"none",background:"none",cursor:"pointer",fontSize:15,padding:"2px 4px",lineHeight:1};
 
   // 라벨+필드 래퍼(컴포넌트가 아닌 함수라 입력 포커스 유지에 안전)
   const L=(label,node,req)=>(<div><label style={labelStyle}>{label}{req&&<span style={{color:"#DC2626",marginLeft:2}}>*</span>}</label>{node}</div>);
@@ -2495,6 +2538,30 @@ function WorkorderForm({editingRow,onSaved,onCancel}){
   // 년도: 편집중 값이 기본 목록 밖이면 옵션에 추가
   const yearOpts=f.year&&!WORKORDER_YEARS.includes(f.year)?[f.year,...WORKORDER_YEARS]:WORKORDER_YEARS;
 
+  // ── 사이즈 스펙표 편집 ──
+  // size_list(쉼표구분) → 표 컬럼. size_spec = [{item, values:{사이즈:값}, deviation}].
+  const DEFAULT_SPEC_ITEMS=["어깨넓이","가슴단면","총장","소매장","소매부리"];
+  const specSizes=(f.size_list||"").split(",").map(x=>x.trim()).filter(Boolean);
+  // 저장 데이터 없으면 기본 항목을 빈 행으로 표시(사용자가 편집하면 그때 state에 반영됨)
+  const specRows=(Array.isArray(f.size_spec)&&f.size_spec.length)?f.size_spec:DEFAULT_SPEC_ITEMS.map(item=>({item,values:{},deviation:""}));
+  const writeSpec=rows=>setField("size_spec",rows);
+  const specEditItem=(ri,val)=>writeSpec(specRows.map((r,i)=>i===ri?{...r,item:val}:r));
+  const specEditDev=(ri,val)=>writeSpec(specRows.map((r,i)=>i===ri?{...r,deviation:val}:r));
+  const specEditCell=(ri,size,val)=>writeSpec(specRows.map((r,i)=>i===ri?{...r,values:{...(r.values||{}),[size]:val}}:r));
+  const specAddRow=()=>writeSpec([...specRows,{item:"",values:{},deviation:""}]);
+  const specRemoveRow=ri=>writeSpec(specRows.filter((_,i)=>i!==ri));
+  // 첫 사이즈 값 + 편차 → 나머지 사이즈 = 이전+편차 자동 채움
+  const specAutoFill=ri=>{
+    if(specSizes.length===0)return;
+    const r=specRows[ri]; const first=specSizes[0];
+    const base=parseFloat(String((r.values||{})[first]??"").replace(/[^0-9.\-]/g,""));
+    const dev=parseFloat(String(r.deviation??"").replace(/[^0-9.\-]/g,""));
+    if(!isFinite(base)||!isFinite(dev))return;
+    const values={...(r.values||{})}; let cur=base; values[first]=base;
+    for(let k=1;k<specSizes.length;k++){cur=Math.round((cur+dev)*100)/100; values[specSizes[k]]=cur;}
+    writeSpec(specRows.map((x,i)=>i===ri?{...x,values}:x));
+  };
+
   const handleSave=async()=>{
     if(!f.style_no.trim()||!f.product_name.trim()){
       setMsg({type:"err",text:"스타일넘버와 품명은 필수 입력입니다."});
@@ -2502,8 +2569,10 @@ function WorkorderForm({editingRow,onSaved,onCancel}){
     }
     setSaving(true);setMsg(null);
     const now=new Date().toISOString();
-    // 숫자성 컬럼도 문자열로 전송(int/numeric/text 어떤 타입이어도 안전). 빈값은 null.
+    // 문자성 컬럼: 빈값은 null(날짜 컬럼 포함 — work_date 등 빈 값이면 null).
     const s=v=>{const t=String(v==null?"":v).trim();return t===""?null:t;};
+    // 숫자 컬럼: "14,900원" 같은 문자열이면 숫자만 추출→number, 빈값이면 null.
+    const num=v=>{const d=String(v==null?"":v).replace(/[^\d]/g,"");return d===""?null:Number(d);};
     const payload={
       style_no:f.style_no.trim(),product_name:f.product_name.trim(),
       category:s(f.category),vendor:s(f.vendor),year:s(f.year),season:s(f.season),
@@ -2511,8 +2580,9 @@ function WorkorderForm({editingRow,onSaved,onCancel}){
       notion_url:s(f.notion_url),image_url:s(f.image_url),
       manager:s(f.manager),director:s(f.director),
       work_date:s(f.work_date),prod_transfer_date:s(f.prod_transfer_date),delivery_date:s(f.delivery_date),
-      unit_cost:s(f.unit_cost),sale_price:s(f.sale_price),notes:s(f.notes),
-      size_spec:f.size_spec||null,order_matrix:f.order_matrix||null, // jsonb (엑셀 파싱분)
+      unit_cost:num(f.unit_cost),sale_price:num(f.sale_price),notes:s(f.notes),
+      size_list:s(f.size_list), // text: "M,L,XL,2XL" (사이즈 스펙표 컬럼)
+      size_spec:f.size_spec||[],order_matrix:f.order_matrix||[], // jsonb (엑셀 파싱분) — null/undefined면 빈 배열로(not-null 위반 방지)
       updated_at:now,
     };
     const tq=s(f.total_qty); // 엑셀에서 채워진 총수량(없으면 null)
@@ -2556,7 +2626,9 @@ function WorkorderForm({editingRow,onSaved,onCancel}){
       const want=["style_no","product_name","vendor","unit_cost","director","work_date","prod_transfer_date","delivery_date","total_qty","notes","size_spec","order_matrix"];
       const empty=want.filter(k=>parsed[k]===""||parsed[k]==null);
       if(empty.length)console.warn("[작업지시서 엑셀] 자동 인식 못한 필드:",empty.join(", "));
-      setSpecSummary({specRows:parsed.size_spec?.rows?.length||0,matrixRows:Array.isArray(parsed.order_matrix)?parsed.order_matrix.length:0});
+      // 원부자재는 스키마에 컬럼이 없어 저장하지 않고 콘솔에만 남김(추후 컬럼 추가 시 연결)
+      if(Array.isArray(parsed.materials)&&parsed.materials.length)console.log("[작업지시서 엑셀] 원부자재(파싱만, 미저장):",parsed.materials);
+      setSpecSummary({specRows:Array.isArray(parsed.size_spec)?parsed.size_spec.length:(parsed.size_spec?.rows?.length||0),matrixRows:Array.isArray(parsed.order_matrix)?parsed.order_matrix.length:0});
       if(names.length>1){
         setSheetInfo({count:names.length,names});
         setParseMsg({type:"ok",text:`첫 시트 "${names[0]}" 자동 채움 완료.`});
@@ -2664,15 +2736,60 @@ function WorkorderForm({editingRow,onSaved,onCancel}){
           style={{...inputStyle,resize:"vertical",fontFamily:"inherit"}}/>
       </SectionCard>
 
-      {/* 사이즈 스펙 / 발주표: 편집 UI는 다음 단계. 엑셀 파싱분은 저장됨(자리표시 + 요약) */}
-      <SectionCard title="📐 사이즈 스펙 · 컬러×사이즈 발주표">
-        {(f.size_spec&&Array.isArray(f.size_spec.rows)&&f.size_spec.rows.length>0)||(Array.isArray(f.order_matrix)&&f.order_matrix.length>0)?(
-          <div style={{fontSize:14,color:"#475569"}}>
-            {f.size_spec?.rows?.length>0&&<div style={{marginBottom:6}}>📐 사이즈 스펙 {f.size_spec.rows.length}행 · 컬럼 [{(f.size_spec.columns||[]).join(", ")}] — <b>엑셀에서 인식됨</b> (저장 시 함께 저장, 편집 UI는 다음 단계)</div>}
-            {Array.isArray(f.order_matrix)&&f.order_matrix.length>0&&<div>🎨 발주표 {f.order_matrix.length}개 컬러 — <b>엑셀에서 인식됨</b> (저장 시 함께 저장, 편집 UI는 다음 단계)</div>}
+      {/* 사이즈 스펙 (편집) — size_list(컬럼) + size_spec(행). 저장은 하단 "저장" 버튼에 통합 */}
+      <SectionCard title="📐 사이즈 스펙">
+        <div style={{display:"flex",justifyContent:"flex-end",marginBottom:12}}>
+          <div style={{minWidth:280,maxWidth:"100%"}}>
+            <label style={labelStyle}>사이즈 목록 (쉼표 구분)</label>
+            <input value={f.size_list} onChange={e=>setField("size_list",e.target.value)}
+              placeholder="예: M,L,XL,2XL" style={inputStyle}/>
           </div>
+        </div>
+        {specSizes.length===0?(
+          <div style={{textAlign:"center",padding:24,color:"#94A3B8",fontSize:14}}>사이즈 목록을 입력하면 스펙 표가 생성됩니다 (예: M,L,XL,2XL)</div>
         ):(
-          <div style={{textAlign:"center",padding:40,color:"#94A3B8",fontSize:14}}>다음 단계에서 구현됩니다 (size_spec · order_matrix) · 엑셀 업로드 시 자동 인식됩니다</div>
+          <>
+            <div style={{overflowX:"auto"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+                <thead>
+                  <tr>
+                    <th style={{...specTh,minWidth:120}}>항목</th>
+                    {specSizes.map(sz=><th key={sz} style={{...specTh,textAlign:"center"}}>{sz}</th>)}
+                    <th style={{...specTh,textAlign:"center"}}>편차</th>
+                    <th style={{...specTh,width:78,textAlign:"center"}}>동작</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {specRows.map((r,ri)=>(
+                    <tr key={ri}>
+                      <td style={specTd}><input value={r.item||""} onChange={e=>specEditItem(ri,e.target.value)} placeholder="항목명" style={{...specCell,textAlign:"left"}}/></td>
+                      {specSizes.map(sz=>(
+                        <td key={sz} style={specTd}><input value={String((r.values||{})[sz]??"")} onChange={e=>specEditCell(ri,sz,e.target.value)} style={specCell}/></td>
+                      ))}
+                      <td style={specTd}><input value={String(r.deviation??"")} onChange={e=>specEditDev(ri,e.target.value)} placeholder="±" style={specCell}/></td>
+                      <td style={{...specTd,textAlign:"center",whiteSpace:"nowrap"}}>
+                        <button type="button" title="첫 사이즈 값+편차로 나머지 자동 채움" onClick={()=>specAutoFill(ri)} style={specIconBtn}>↻</button>
+                        <button type="button" title="행 삭제" onClick={()=>specRemoveRow(ri)} style={{...specIconBtn,color:"#DC2626"}}>🗑</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{marginTop:12,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+              <SmallBtn onClick={specAddRow}>+ 항목 추가</SmallBtn>
+              <span style={{fontSize:12,color:"#94A3B8"}}>↻ = 첫 사이즈 값과 편차로 나머지 사이즈 자동 채움 · 모든 칸 수동 수정 가능</span>
+            </div>
+          </>
+        )}
+      </SectionCard>
+
+      {/* 컬러×사이즈 발주표: 편집 UI는 다음 단계. 엑셀 파싱분은 저장됨(요약 표시) */}
+      <SectionCard title="🎨 컬러×사이즈 발주표">
+        {Array.isArray(f.order_matrix)&&f.order_matrix.length>0?(
+          <div style={{fontSize:14,color:"#475569"}}>🎨 발주표 {f.order_matrix.length}개 컬러 — <b>엑셀에서 인식됨</b> (저장 시 함께 저장, 편집 UI는 다음 단계)</div>
+        ):(
+          <div style={{textAlign:"center",padding:40,color:"#94A3B8",fontSize:14}}>다음 단계에서 구현됩니다 (order_matrix) · 엑셀 업로드 시 자동 인식됩니다</div>
         )}
       </SectionCard>
     </>
