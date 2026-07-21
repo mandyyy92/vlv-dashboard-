@@ -2978,6 +2978,48 @@ function WorkorderForm({editingRow,onSaved,onCancel}){
   );
 }
 
+// ─── 전사프린팅 외주 (UI 틀만 · DB 연결 없음) ───
+// 소메뉴 3개: 발주서 작성 / 업체·단가·샘플 관리 / 발주 히스토리. 본문은 준비중 placeholder.
+function PrintOutsourcingTab(){
+  const [sub,setSub]=useState("order"); // order | supplier | history
+
+  const subTabs=[
+    {id:"order",label:"발주서 작성"},
+    {id:"supplier",label:"업체·단가·샘플 관리"},
+    {id:"history",label:"발주 히스토리"},
+  ];
+
+  return(
+    <>
+      {/* 서브탭 (작업지시서 목록과 동일 pill 스타일) */}
+      <div style={{display:"flex",gap:6,marginBottom:20,flexWrap:"wrap"}}>
+        {subTabs.map(t=>(
+          <button key={t.id} onClick={()=>setSub(t.id)}
+            style={{padding:"9px 18px",borderRadius:8,border:sub===t.id?"none":"1px solid #CBD5E1",background:sub===t.id?"#1E293B":"#FFF",color:sub===t.id?"#F8FAFC":"#475569",fontSize:15,fontWeight:sub===t.id?700:600,cursor:"pointer",letterSpacing:-0.2,transition:"all 0.15s"}}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {sub==="order"&&(
+        <SectionCard title="🖨️ 발주서 작성">
+          <div style={{textAlign:"center",padding:60,color:"#94A3B8",fontSize:15}}>발주서 작성 &amp; 자동 추천 (준비 중)</div>
+        </SectionCard>
+      )}
+      {sub==="supplier"&&(
+        <SectionCard title="🏢 업체·단가·샘플 관리">
+          <div style={{textAlign:"center",padding:60,color:"#94A3B8",fontSize:15}}>외주 업체별 가능상품 · 단가 · 샘플 관리 (준비 중)</div>
+        </SectionCard>
+      )}
+      {sub==="history"&&(
+        <SectionCard title="📚 발주 히스토리">
+          <div style={{textAlign:"center",padding:60,color:"#94A3B8",fontSize:15}}>발주 차수 히스토리 (준비 중)</div>
+        </SectionCard>
+      )}
+    </>
+  );
+}
+
 // ─── Tab 6: 실측 사이즈 (Supabase) ───
 function MeasurementTab(){
   const[measurements,setMeasurements]=useState([]);
@@ -4731,6 +4773,7 @@ export default function Dashboard(){
     {id:"productdb",label:"제품 DB",icon:"🗃"},
     {id:"planning",label:"아이템 기획",icon:"💡",hidden:true},
     {id:"sample",label:"작업지시서",icon:"📝"},
+    {id:"print",label:"전사프린팅 외주",icon:"🖨️"},
     {id:"measure",label:"실측 사이즈",icon:"📐",hidden:true},
     {id:"products",label:"상품 마스터",icon:"📋",hidden:true},
   ];
@@ -4843,6 +4886,7 @@ export default function Dashboard(){
         {activeTab==="schedule"&&<ScheduleTab />}
         {activeTab==="price"&&<PriceTab />}
         {activeTab==="sample"&&<SampleTabWorkorder />}
+        {activeTab==="print"&&<PrintOutsourcingTab />}
         {activeTab==="reorder"&&<ReorderTab />}
         {activeTab==="ordertrack"&&<ProductionDashboard />}
         {activeTab==="productdb"&&<ProductDB />}
