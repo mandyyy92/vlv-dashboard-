@@ -2103,6 +2103,13 @@ async function loadWorkorderXLSX(){
   return XLSX;
 }
 
+// ExcelJS CDN 동적 로드 (SheetJS 로더와 동일 패턴, 의존성 추가 없음 · 스타일/이미지 삽입용)
+async function loadExcelJS(){
+  if(typeof window!=="undefined"&&window.ExcelJS)return window.ExcelJS;
+  await new Promise((res,rej)=>{const s=document.createElement("script");s.src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js";s.onload=res;s.onerror=()=>rej(new Error("ExcelJS 로드 실패"));document.head.appendChild(s);});
+  return window.ExcelJS;
+}
+
 // 작업지시서 시트(2D 배열, 0-based) → 폼 필드 매핑. VLVD 표준 양식(코니키즈 26FW) 기준.
 // 좌표는 라벨 텍스트 탐색 우선, 실패 시 고정 셀(엑셀 셀 기준) fallback. 시트마다 행 수가 달라 하드코딩 대신 라벨 기준.
 function parseWorkOrderSheet(rows){
@@ -3147,13 +3154,115 @@ function PrintOrderCreate(){
   const specCell={width:"100%",padding:"6px 8px",borderRadius:6,border:"1px solid #CBD5E1",fontSize:13,outline:"none",boxSizing:"border-box",textAlign:"center"};
   const specIconBtn={border:"none",background:"none",cursor:"pointer",fontSize:15,padding:"2px 4px",lineHeight:1};
 
+  // 엑셀 다운로드 — 업로드 양식과 동일 포맷(상품명 그룹 병합 + 이미지). ExcelJS CDN 동적 로드.
+  const generatePrintOrderExcel=async()=>{
+    if(items.length===0){alert("발주 품목이 없습니다. 품목을 먼저 추가하세요.");return;}
+    try{
+      const ExcelJS=await loadExcelJS();
+      const wb=new ExcelJS.Workbook();
+      const ws=wb.addWorksheet("상품별 수량");
+
+      // 열 너비 (A~F)
+      ws.getColumn(1).width=13.4; // A 이미지
+      ws.getColumn(2).width=12;   // B 상품코드
+      ws.getColumn(3).width=29.5; // C 상품명
+      ws.getColumn(4).width=20.5; // D 옵션
+      ws.getColumn(5).width=8.1;  // E 총수량
+      ws.getColumn(6).width=33.4; // F 비고
+
+      // 헤더행 (1행)
+      const header=["이미지","상품코드","상품명","옵션","총수량","비고"];
+      header.forEach((h,i)=>{ws.getRow(1).getCell(i+1).value=h;});
+
+      // 상품명 기준 그룹핑 (같은 상품명이 연속되도록 삽입순 유지)
+      const order=[]; const seen=new Map();
+      items.forEach(it=>{const k=it.product_name||""; if(!seen.has(k)){seen.set(k,[]);order.push(k);} seen.get(k).push(it);});
+
+      // 데이터행 (헤더가 1행 → 2행부터)
+      let ri=2;
+      const groups=[]; // {name,start,end,image_url,note}
+      order.forEach(k=>{
+        const arr=seen.get(k);
+        const start=ri;
+        arr.forEach(it=>{
+          const row=ws.getRow(ri);
+          row.getCell(2).value=it.product_code||"";
+          row.getCell(4).value=it.option||"";
+          row.getCell(5).value=nToNum(it.qty);
+          ri++;
+        });
+        const end=ri-1;
+        ws.getRow(start).getCell(3).value=k;                 // 상품명: 그룹 첫 행
+        ws.getRow(start).getCell(6).value=arr[0]?.note||"";  // 비고: 그룹 첫 항목
+        groups.push({name:k,start,end,image_url:(arr.find(a=>a.image_url)||{}).image_url||"",note:arr[0]?.note||""});
+      });
+      const lastDataRow=ri-1;
+
+      // 그룹 병합 (A 이미지 / C 상품명 / F 비고) — 2행 이상일 때만
+      groups.forEach(g=>{
+        if(g.end>g.start){
+          ws.mergeCells(g.start,1,g.end,1);
+          ws.mergeCells(g.start,3,g.end,3);
+          ws.mergeCells(g.start,6,g.end,6);
+        }
+      });
+
+      // 이미지 삽입 (image_url 있을 때만, CORS/네트워크 실패 시 건너뜀)
+      for(const g of groups){
+        if(!g.image_url)continue;
+        try{
+          const resp=await fetch(g.image_url);
+          if(!resp.ok)throw new Error("HTTP "+resp.status);
+          const ab=await resp.arrayBuffer();
+          const ext=/\.png(\?|$)/i.test(g.image_url)?"png":/\.gif(\?|$)/i.test(g.image_url)?"gif":"jpeg";
+          const imgId=wb.addImage({buffer:ab,extension:ext});
+          ws.addImage(imgId,`A${g.start}:A${g.end}`);
+        }catch(e){console.warn("[프린팅발주 엑셀] 이미지 건너뜀:",g.image_url,e);}
+      }
+
+      // 합계행 (A~D 병합 "합 계", E열 SUM)
+      const sumRow=lastDataRow+1;
+      ws.mergeCells(sumRow,1,sumRow,4);
+      ws.getRow(sumRow).getCell(1).value="합 계";
+      ws.getRow(sumRow).getCell(5).value={formula:`SUM(E2:E${lastDataRow})`,result:items.reduce((s,it)=>s+nToNum(it.qty),0)};
+
+      // 스타일: 전체 얇은 테두리 + 가운데정렬, 헤더 볼드+배경, 합계 볼드
+      const thin={style:"thin",color:{argb:"FFCBD5E1"}};
+      for(let r=1;r<=sumRow;r++){
+        for(let c=1;c<=6;c++){
+          const cell=ws.getRow(r).getCell(c);
+          cell.border={top:thin,left:thin,bottom:thin,right:thin};
+          cell.alignment={vertical:"middle",horizontal:"center",wrapText:true};
+        }
+      }
+      for(let c=1;c<=6;c++){
+        const cell=ws.getRow(1).getCell(c);
+        cell.font={bold:true,color:{argb:"FF1E293B"}};
+        cell.fill={type:"pattern",pattern:"solid",fgColor:{argb:"FFF1F5F9"}};
+      }
+      ws.getRow(sumRow).getCell(1).font={bold:true};
+      ws.getRow(sumRow).getCell(5).font={bold:true};
+
+      // 다운로드
+      const today=new Date().toISOString().slice(0,10);
+      const fname=`프린팅발주_${head.supplier||""}_${head.round_no||""}차_${today}.xlsx`;
+      const buf=await wb.xlsx.writeBuffer();
+      const blob=new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement("a");a.href=url;a.download=fname;document.body.appendChild(a);a.click();a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),1000);
+    }catch(e){
+      alert("엑셀 생성 실패: "+(e?.message||e));
+    }
+  };
+
   return(
     <>
       {/* 발주 기본정보 */}
       <SectionCard title="🧾 발주 기본정보"
         actions={<div style={{display:"flex",gap:8}}>
           <span title="자동 추천 (준비 중)" style={{padding:"8px 14px",borderRadius:8,border:"1px solid #CBD5E1",background:"#F8FAFC",color:"#94A3B8",fontSize:14,fontWeight:600,cursor:"not-allowed"}}>✨ 자동 추천</span>
-          <span title="엑셀 다운로드 (준비 중)" style={{padding:"8px 14px",borderRadius:8,border:"1px solid #CBD5E1",background:"#F8FAFC",color:"#94A3B8",fontSize:14,fontWeight:600,cursor:"not-allowed"}}>📊 엑셀 다운로드</span>
+          <SmallBtn onClick={generatePrintOrderExcel}>📊 엑셀 다운로드</SmallBtn>
         </div>}>
         <div style={grid}>
           <div><label style={labelStyle}>업체</label><input value={head.supplier} onChange={e=>setHeadField("supplier",e.target.value)} placeholder="외주 업체명" style={inputStyle}/></div>
