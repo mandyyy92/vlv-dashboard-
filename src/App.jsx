@@ -2264,6 +2264,15 @@ function SampleTabWorkorder(){
   const goEdit=(row)=>{setEditingRow(row);setSub("create");};
   const goList=()=>{setEditingRow(null);setSub("list");};
   const afterSave=()=>{setEditingRow(null);setListNonce(n=>n+1);setSub("list");};
+  const handleDelete=async(row)=>{
+    if(!row||!row.id) return;
+    if(!window.confirm("이 작업지시서를 삭제할까요? 되돌릴 수 없어요.")) return;
+    try{
+      const res=await fetch(`${SUPABASE_URL}/rest/v1/work_orders?id=eq.${row.id}`,{method:"DELETE",headers:sbHeaders});
+      if(!res.ok) throw new Error(await res.text()||res.status);
+      setListNonce(n=>n+1);
+    }catch(e){alert("삭제 실패: "+(e.message||e));}
+  };
 
   // 서브탭 버튼 직접 클릭: "작성"은 항상 신규 폼으로 시작
   const onSubClick=(id)=>{ if(id==="create"){goNew();return;} setSub(id); };
@@ -2280,7 +2289,7 @@ function SampleTabWorkorder(){
         ))}
       </div>
 
-      {sub==="list"&&<WorkorderList nonce={listNonce} onNew={goNew} onEdit={goEdit} />}
+      {sub==="list"&&<WorkorderList nonce={listNonce} onNew={goNew} onEdit={goEdit} onDelete={handleDelete} />}
       {sub==="create"&&<WorkorderForm key={editingRow?editingRow.id:"new"} editingRow={editingRow} onSaved={afterSave} onCancel={goList} />}
       {sub==="order"&&(
         <SectionCard title="📦 발주 관리">
@@ -2292,7 +2301,7 @@ function SampleTabWorkorder(){
 }
 
 // 작업지시서 목록: work_orders 전체 GET → 카운트/검색/필터/표
-function WorkorderList({onNew,onEdit,nonce}){
+function WorkorderList({onNew,onEdit,onDelete,nonce}){
   const[rows,setRows]=useState([]);
   const[loading,setLoading]=useState(true);
   const[error,setError]=useState(null);
@@ -2472,9 +2481,8 @@ function WorkorderList({onNew,onEdit,nonce}){
                       </td>
                       <td style={{...td,textAlign:"center",whiteSpace:"nowrap"}}>
                         <span style={{display:"inline-flex",gap:10,color:"#94A3B8"}}>
-                          <span title="보기 (준비 중)" style={{cursor:"not-allowed"}}>👁</span>
                           <span title="수정" onClick={()=>onEdit&&onEdit(r)} style={{cursor:"pointer",color:"#2563EB"}}>✏️</span>
-                          <span title="삭제 (준비 중)" style={{cursor:"not-allowed"}}>🗑</span>
+                          <span title="삭제" onClick={()=>onDelete&&onDelete(r)} style={{cursor:"pointer",color:"#EF4444"}}>🗑</span>
                         </span>
                       </td>
                     </tr>
