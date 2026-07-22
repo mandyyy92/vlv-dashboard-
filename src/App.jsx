@@ -3364,11 +3364,21 @@ function PrintSupplierManage(){
   const[view,setView]=useState("supplier"); // supplier | product
   const[search,setSearch]=useState("");
   const[costFocus,setCostFocus]=useState(null); // 포커스 중인 단가 셀 id(표시/편집 전환)
+  // 추가 모달(팝업) 상태 — React state로만 열고닫기(브라우저 storage 미사용)
+  const[showAdd,setShowAdd]=useState(false);
+  const[mSup,setMSup]=useState("");       // 선택 업체 id 또는 "__new__"
+  const[mNewSup,setMNewSup]=useState(""); // 새 업체 직접입력
+  const[mDesign,setMDesign]=useState("");
+  const[mStyle,setMStyle]=useState("");
+  const[mCost,setMCost]=useState("");
+  const[mSample,setMSample]=useState("미승인");
+  const[mSaving,setMSaving]=useState(false);
   const reload=()=>setNonce(n=>n+1);
 
   // 인라인 편집 셀 스타일(발주 품목표 패턴 재사용)
   const cellInput={width:"100%",padding:"6px 8px",borderRadius:6,border:"1px solid #CBD5E1",fontSize:13,outline:"none",boxSizing:"border-box"};
-  const selStyle={padding:"7px 12px",borderRadius:6,border:"1px solid #CBD5E1",fontSize:14,color:"#475569",background:"#F8FAFC",outline:"none"};
+  const selStyle={padding:"7px 12px",borderRadius:6,border:"1px solid #CBD5E1",fontSize:14,color:"#475569",background:"#F8FAFC",outline:"none",boxSizing:"border-box"};
+  const mLabel={display:"block",fontSize:13,fontWeight:700,color:"#475569",marginBottom:6};
   const money=n=>Number(n||0).toLocaleString();
 
   useEffect(()=>{
@@ -3407,21 +3417,44 @@ function PrintSupplierManage(){
   const commitCost=(id,raw)=>{const v=Number(String(raw).replace(/[^\d.]/g,""))||0;editLocal(id,"unit_cost",v);commit(id,"unit_cost",v);}; // 수기 입력은 변환 없이 그대로
   const changeSample=(id,value)=>{editLocal(id,"sample_status",value);commit(id,"sample_status",value);};
 
-  const addSupplier=async()=>{
-    const name=window.prompt("추가할 업체명을 입력하세요");
-    if(!name||!name.trim())return;
-    try{
-      const r=await fetch(`${SUPABASE_URL}/rest/v1/print_suppliers`,{method:"POST",headers:sbHeaders,body:JSON.stringify({name:name.trim(),active:true})});
-      if(!r.ok){const e=await r.json().catch(()=>null);throw new Error(e?.message||`HTTP ${r.status}`);}
-      reload();
-    }catch(e){alert("업체 추가 실패: "+String(e?.message||e));}
+  // "+ 추가" 모달 열기 — 폼 초기화
+  const openAdd=()=>{
+    setMSup(suppliers[0]?String(suppliers[0].id):"__new__");
+    setMNewSup("");setMDesign("");setMStyle("");setMCost("");setMSample("미승인");
+    setShowAdd(true);
   };
-  const addProductFor=async(supplierId)=>{
+  // 모달 저장: (필요 시)업체 확보 → print_supplier_products POST
+  const saveAdd=async()=>{
+    const design=mDesign.trim();
+    if(!design){alert("상품명을 입력하세요");return;}
+    let supplier_id;
+    if(mSup==="__new__"){
+      const nm=mNewSup.trim();
+      if(!nm){alert("새 업체명을 입력하세요");return;}
+      const existing=suppliers.find(s=>s.name===nm); // 같은 이름 있으면 재사용
+      if(existing){supplier_id=existing.id;}
+      else{
+        try{
+          const r=await fetch(`${SUPABASE_URL}/rest/v1/print_suppliers`,{method:"POST",headers:{...sbHeaders,Prefer:"return=representation"},body:JSON.stringify({name:nm,active:true})});
+          const d=await r.json();
+          if(!r.ok)throw new Error(d?.message||`HTTP ${r.status}`);
+          supplier_id=Array.isArray(d)?d[0]?.id:d?.id;
+          if(supplier_id==null)throw new Error("업체 id 확인 실패");
+        }catch(e){alert("업체 추가 실패: "+String(e?.message||e));return;}
+      }
+    }else{
+      const so=suppliers.find(s=>String(s.id)===String(mSup));
+      if(!so){alert("업체를 선택하세요");return;}
+      supplier_id=so.id;
+    }
+    setMSaving(true);
     try{
-      const r=await fetch(`${SUPABASE_URL}/rest/v1/print_supplier_products`,{method:"POST",headers:sbHeaders,body:JSON.stringify({supplier_id:supplierId,sample_status:"미승인"})});
+      const unit_cost=Number(String(mCost).replace(/[^\d.]/g,""))||0; // 수기 입력: VAT 변환 없음
+      const r=await fetch(`${SUPABASE_URL}/rest/v1/print_supplier_products`,{method:"POST",headers:sbHeaders,body:JSON.stringify({supplier_id,style_group:mStyle.trim()||"기타",design_name:design,unit_cost,sample_status:mSample})});
       if(!r.ok){const e=await r.json().catch(()=>null);throw new Error(e?.message||`HTTP ${r.status}`);}
-      reload();
+      setShowAdd(false);reload();
     }catch(e){alert("상품 추가 실패: "+String(e?.message||e));}
+    finally{setMSaving(false);}
   };
   const removeProduct=async(id)=>{
     if(!window.confirm("이 단가 항목을 삭제할까요?"))return;
@@ -3441,7 +3474,7 @@ function PrintSupplierManage(){
       onFocus={()=>setCostFocus(p.id)}
       onChange={e=>editLocal(p.id,"unit_cost",e.target.value)}
       onBlur={e=>{setCostFocus(null);commitCost(p.id,e.target.value);}}
-      style={{...cellInput,textAlign:"right"}}/>;
+      style={{...cellInput,textAlign:"right",maxWidth:110,marginLeft:"auto",display:"block"}}/>;
   };
   const sampleSelect=p=>{
     const v=p.sample_status||"미승인";const c=pspSampleColor(v);
@@ -3502,25 +3535,24 @@ function PrintSupplierManage(){
       <div style={{display:"flex",gap:12,alignItems:"center",marginBottom:16,flexWrap:"wrap"}}>
         {viewTabs}
         <div style={{flex:1}}/>
-        {view==="supplier"&&<SmallBtn onClick={addSupplier}>+ 업체 추가</SmallBtn>}
         {view==="product"&&<input value={search} onChange={e=>setSearch(e.target.value)} placeholder="디자인·스타일 검색" style={{...selStyle,minWidth:200}}/>}
+        <SmallBtn primary onClick={openAdd}>+ 추가</SmallBtn>
       </div>
 
       {/* [업체별] */}
       {view==="supplier"&&(
         suppliers.length===0?(
-          <SectionCard title="🏢 업체·단가·샘플 관리"><div style={{textAlign:"center",padding:40,color:"#94A3B8",fontSize:14}}>등록된 업체가 없습니다 · “+ 업체 추가”</div></SectionCard>
+          <SectionCard title="🏢 업체·단가·샘플 관리"><div style={{textAlign:"center",padding:40,color:"#94A3B8",fontSize:14}}>등록된 업체가 없습니다 · 상단 “+ 추가”</div></SectionCard>
         ):suppliers.map(s=>{
           const list=bySupplier.get(String(s.id))||[];
           const costs=list.map(p=>Number(p.unit_cost)||0).filter(v=>v>0);
           const avg=costs.length?Math.round(costs.reduce((a,b)=>a+b,0)/costs.length):null;
           return(
-            <SectionCard key={s.id} title={`🏢 ${s.name}`} subtitle={`등록 상품 ${list.length}개 · 평균단가 ${avg==null?"-":money(avg)+"원"}`}
-              actions={<SmallBtn primary onClick={()=>addProductFor(s.id)}>+ 상품 추가</SmallBtn>}>
+            <SectionCard key={s.id} title={`🏢 ${s.name}`} subtitle={`등록 상품 ${list.length}개 · 평균단가 ${avg==null?"-":money(avg)+"원"}`}>
               {list.length===0?(
-                <div style={{textAlign:"center",padding:24,color:"#94A3B8",fontSize:13}}>등록된 상품이 없습니다 · “+ 상품 추가”</div>
+                <div style={{textAlign:"center",padding:24,color:"#94A3B8",fontSize:13}}>등록된 상품이 없습니다 · 상단 “+ 추가”</div>
               ):(
-                <Table headers={["상품명","단가(VAT포함)","샘플상태","삭제"]} maxH={420}>
+                <Table headers={["상품명","단가(VAT포함)","샘플상태",""]} maxH={420}>
                   {list.map(p=>(
                     <tr key={p.id}>
                       <Td style={{fontWeight:600}}>{p.design_name||"-"}</Td>
@@ -3542,7 +3574,7 @@ function PrintSupplierManage(){
           <SectionCard title="📦 상품별 단가 비교"><div style={{textAlign:"center",padding:40,color:"#94A3B8",fontSize:14}}>표시할 디자인이 없습니다{search?" · 검색어를 확인하세요":""}</div></SectionCard>
         ):byDesign.map(g=>(
           <SectionCard key={g.key} title={`📦 ${g.design_name||"(디자인 미지정)"}`} subtitle={`${g.style_group||"스타일그룹 미지정"} · 업체 ${g.rows.length}곳`}>
-            <Table headers={["업체","단가(VAT포함)","샘플상태","삭제"]} maxH={420}>
+            <Table headers={["업체","단가(VAT포함)","샘플상태",""]} maxH={420}>
               {g.rows.map(p=>{
                 const cost=Number(p.unit_cost)||0;
                 const isLowest=g.minCost!=null&&cost===g.minCost&&cost>0;
@@ -3558,6 +3590,33 @@ function PrintSupplierManage(){
             </Table>
           </SectionCard>
         ))
+      )}
+
+      {/* 추가 모달(팝업) */}
+      {showAdd&&(
+        <div onClick={()=>!mSaving&&setShowAdd(false)} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.45)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:16}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"#FFF",borderRadius:14,padding:24,width:"100%",maxWidth:440,boxShadow:"0 10px 40px rgba(0,0,0,0.2)"}}>
+            <h3 style={{margin:"0 0 16px",fontSize:18,fontWeight:700,color:"#0F172A",letterSpacing:-0.3}}>+ 단가 항목 추가</h3>
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              <div>
+                <label style={mLabel}>업체</label>
+                <select value={mSup} onChange={e=>setMSup(e.target.value)} style={{...selStyle,width:"100%",cursor:"pointer"}}>
+                  {suppliers.map(s=>(<option key={s.id} value={String(s.id)}>{s.name}</option>))}
+                  <option value="__new__">+ 새 업체 직접입력</option>
+                </select>
+                {mSup==="__new__"&&<input value={mNewSup} onChange={e=>setMNewSup(e.target.value)} placeholder="새 업체명" style={{...selStyle,width:"100%",marginTop:8}}/>}
+              </div>
+              <div><label style={mLabel}>상품명 *</label><input value={mDesign} onChange={e=>setMDesign(e.target.value)} placeholder="예: 반팔 티셔츠" style={{...selStyle,width:"100%"}}/></div>
+              <div><label style={mLabel}>스타일그룹</label><input value={mStyle} onChange={e=>setMStyle(e.target.value)} placeholder="비우면 '기타'" style={{...selStyle,width:"100%"}}/></div>
+              <div><label style={mLabel}>단가(VAT포함)</label><input value={mCost} onChange={e=>setMCost(e.target.value)} placeholder="숫자만 · VAT포함 금액" style={{...selStyle,width:"100%",textAlign:"right"}}/></div>
+              <div><label style={mLabel}>샘플상태</label><select value={mSample} onChange={e=>setMSample(e.target.value)} style={{...selStyle,width:"100%",cursor:"pointer"}}>{PSP_SAMPLE_OPTS.map(o=>(<option key={o} value={o}>{o}</option>))}</select></div>
+            </div>
+            <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:20}}>
+              <SmallBtn onClick={()=>!mSaving&&setShowAdd(false)}>취소</SmallBtn>
+              <SmallBtn primary onClick={saveAdd}>{mSaving?"추가 중...":"추가"}</SmallBtn>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );
