@@ -3362,6 +3362,20 @@ function PrintOrderCreate(){
   const emptyItem=()=>({product_code:"",product_name:"",option:"",qty:"",unit_cost:"",note:""});
   const[items,setItems]=useState([]);
 
+  // 업체 드롭다운용 목록 (print_suppliers 읽기, 실패해도 화면 유지)
+  const[supplierList,setSupplierList]=useState([]);
+  useEffect(()=>{
+    let alive=true;
+    (async()=>{
+      try{
+        const r=await fetch(`${SUPABASE_URL}/rest/v1/print_suppliers?select=id,name&order=name.asc`,{headers:sbHeaders});
+        const d=await r.json();
+        if(r.ok&&Array.isArray(d)&&alive)setSupplierList(d);
+      }catch(e){console.warn("[PrintOrderCreate] 업체 목록 로드 실패",e);}
+    })();
+    return()=>{alive=false;};
+  },[]);
+
   // 자동 추천 — 기존 리오더 데이터(재고+판매 병합) 재사용, 읽기 전용.
   // TODO: inventory 500 해결 후 실데이터로 교체 (아래 데모 경로 제거 + 주석 처리된 실데이터 경로 복구)
   const{data:reorderData,loading:reorderLoading}=useReorderData(); // eslint-disable-line no-unused-vars
@@ -3459,8 +3473,8 @@ function PrintOrderCreate(){
         });
         const end=ri-1;
         ws.getRow(start).getCell(3).value=k;                 // 상품명: 그룹 첫 행
-        ws.getRow(start).getCell(6).value=arr[0]?.note||"";  // 비고: 그룹 첫 항목
-        groups.push({name:k,start,end,image_url:(arr.find(a=>a.image_url)||{}).image_url||"",note:arr[0]?.note||""});
+        ws.getRow(start).getCell(6).value="";  // 비고: 엑셀 출력 시 항상 빈칸(화면 표의 비고는 유지)
+        groups.push({name:k,start,end,image_url:(arr.find(a=>a.image_url)||{}).image_url||"",note:""});
       });
       const lastDataRow=ri-1;
 
@@ -3531,7 +3545,12 @@ function PrintOrderCreate(){
           <SmallBtn onClick={generatePrintOrderExcel}>📊 엑셀 다운로드</SmallBtn>
         </div>}>
         <div style={grid}>
-          <div><label style={labelStyle}>업체</label><input value={head.supplier} onChange={e=>setHeadField("supplier",e.target.value)} placeholder="외주 업체명" style={inputStyle}/></div>
+          <div><label style={labelStyle}>업체</label>
+            <select value={head.supplier} onChange={e=>setHeadField("supplier",e.target.value)} style={{...inputStyle,cursor:"pointer"}}>
+              <option value="">업체 선택</option>
+              {supplierList.map(s=>(<option key={s.id} value={s.name}>{s.name}</option>))}
+            </select>
+          </div>
           <div><label style={labelStyle}>차수</label><input type="number" value={head.round_no} onChange={e=>setHeadField("round_no",e.target.value)} placeholder="숫자" style={inputStyle}/></div>
           <div><label style={labelStyle}>시즌</label><input value={head.season} onChange={e=>setHeadField("season",e.target.value)} placeholder="예: 26FW" style={inputStyle}/></div>
           <div><label style={labelStyle}>발주일</label><input type="date" value={head.order_date} onChange={e=>setHeadField("order_date",e.target.value)} style={inputStyle}/></div>
