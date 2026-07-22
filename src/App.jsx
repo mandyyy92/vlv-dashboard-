@@ -3363,6 +3363,7 @@ function PrintSupplierManage(){
   const[nonce,setNonce]=useState(0); // 저장 후 재조회 트리거
   const[view,setView]=useState("supplier"); // supplier | product
   const[search,setSearch]=useState("");
+  const[costFocus,setCostFocus]=useState(null); // 포커스 중인 단가 셀 id(표시/편집 전환)
   const reload=()=>setNonce(n=>n+1);
 
   // 인라인 편집 셀 스타일(발주 품목표 패턴 재사용)
@@ -3432,16 +3433,26 @@ function PrintSupplierManage(){
   };
 
   // 공통 편집 셀 렌더러(두 뷰 재사용)
-  const codeInput=p=><input value={p.product_code||""} onChange={e=>editLocal(p.id,"product_code",e.target.value)} onBlur={e=>commit(p.id,"product_code",e.target.value)} style={{...cellInput,fontFamily:"monospace"}}/>;
-  const optInput=p=><input value={p.option_name||""} onChange={e=>editLocal(p.id,"option_name",e.target.value)} onBlur={e=>commit(p.id,"option_name",e.target.value)} style={cellInput}/>;
-  const costInput=p=><input value={p.unit_cost==null?"":p.unit_cost} onChange={e=>editLocal(p.id,"unit_cost",e.target.value)} onBlur={e=>commitCost(p.id,e.target.value)} style={{...cellInput,textAlign:"right"}}/>;
-  const sampleSelect=p=>(
-    <select value={p.sample_status||"미승인"} onChange={e=>changeSample(p.id,e.target.value)}
-      style={{...cellInput,cursor:"pointer",fontWeight:700,color:pspSampleColor(p.sample_status||"미승인"),borderColor:`${pspSampleColor(p.sample_status||"미승인")}55`}}>
-      {PSP_SAMPLE_OPTS.map(o=>(<option key={o} value={o} style={{color:"#334155"}}>{o}</option>))}
-    </select>
-  );
-  const delBtn=p=><button type="button" title="행 삭제" onClick={()=>removeProduct(p.id)} style={{border:"none",background:"none",cursor:"pointer",fontSize:15,color:"#DC2626",padding:"2px 4px",lineHeight:1}}>🗑</button>;
+  // 단가: 표시 상태엔 ₩+천단위, 포커스 시 숫자만. blur 시 PATCH(수기 입력은 VAT 변환 없음).
+  const costInput=p=>{
+    const focused=String(costFocus)===String(p.id);
+    const display=focused?(p.unit_cost==null?"":p.unit_cost):(p.unit_cost==null||p.unit_cost===""?"":`₩${money(p.unit_cost)}`);
+    return <input value={display}
+      onFocus={()=>setCostFocus(p.id)}
+      onChange={e=>editLocal(p.id,"unit_cost",e.target.value)}
+      onBlur={e=>{setCostFocus(null);commitCost(p.id,e.target.value);}}
+      style={{...cellInput,textAlign:"right"}}/>;
+  };
+  const sampleSelect=p=>{
+    const v=p.sample_status||"미승인";const c=pspSampleColor(v);
+    return(
+      <select value={v} onChange={e=>changeSample(p.id,e.target.value)}
+        style={{...cellInput,cursor:"pointer",fontWeight:700,color:c,background:`${c}18`,borderColor:`${c}55`}}>
+        {PSP_SAMPLE_OPTS.map(o=>{const oc=pspSampleColor(o);return(<option key={o} value={o} style={{color:oc,background:`${oc}18`}}>{o}</option>);})}
+      </select>
+    );
+  };
+  const delBtn=p=><SmallBtn danger onClick={()=>removeProduct(p.id)}>삭제</SmallBtn>;
 
   // [업체별] 업체 → 상품 목록
   const bySupplier=useMemo(()=>{
@@ -3509,14 +3520,11 @@ function PrintSupplierManage(){
               {list.length===0?(
                 <div style={{textAlign:"center",padding:24,color:"#94A3B8",fontSize:13}}>등록된 상품이 없습니다 · “+ 상품 추가”</div>
               ):(
-                <Table headers={["스타일그룹","디자인·아이템","상품코드","옵션","단가(VAT포함)","샘플상태","삭제"]} maxH={420}>
+                <Table headers={["상품명","단가(VAT포함)","샘플상태","삭제"]} maxH={420}>
                   {list.map(p=>(
                     <tr key={p.id}>
-                      <Td>{p.style_group||"-"}</Td>
-                      <Td>{p.design_name||"-"}</Td>
-                      <Td>{codeInput(p)}</Td>
-                      <Td>{optInput(p)}</Td>
-                      <Td style={{minWidth:100}}>{costInput(p)}</Td>
+                      <Td style={{fontWeight:600}}>{p.design_name||"-"}</Td>
+                      <Td style={{minWidth:120}}>{costInput(p)}</Td>
                       <Td style={{whiteSpace:"nowrap"}}>{sampleSelect(p)}</Td>
                       <Td style={{textAlign:"center"}}>{delBtn(p)}</Td>
                     </tr>
