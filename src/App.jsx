@@ -3360,15 +3360,15 @@ function PrintSupplierManage(){
   const[products,setProducts]=useState([]);
   const[loading,setLoading]=useState(true);
   const[error,setError]=useState(null);
-  const[nonce,setNonce]=useState(0); // 저장·업로드 후 재조회 트리거
-  const[filterSup,setFilterSup]=useState("all");
+  const[nonce,setNonce]=useState(0); // 저장 후 재조회 트리거
+  const[view,setView]=useState("supplier"); // supplier | product
   const[search,setSearch]=useState("");
-  const[uploading,setUploading]=useState(false);
-  const fileRef=useRef(null);
   const reload=()=>setNonce(n=>n+1);
 
   // 인라인 편집 셀 스타일(발주 품목표 패턴 재사용)
   const cellInput={width:"100%",padding:"6px 8px",borderRadius:6,border:"1px solid #CBD5E1",fontSize:13,outline:"none",boxSizing:"border-box"};
+  const selStyle={padding:"7px 12px",borderRadius:6,border:"1px solid #CBD5E1",fontSize:14,color:"#475569",background:"#F8FAFC",outline:"none"};
+  const money=n=>Number(n||0).toLocaleString();
 
   useEffect(()=>{
     let alive=true;
@@ -3394,14 +3394,6 @@ function PrintSupplierManage(){
   },[nonce]);
 
   const supName=useMemo(()=>{const m=new Map();suppliers.forEach(s=>m.set(String(s.id),s.name));return m;},[suppliers]);
-  const filtered=useMemo(()=>{
-    const q=search.trim().toLowerCase();
-    return products.filter(p=>{
-      if(filterSup!=="all"&&String(p.supplier_id)!==String(filterSup))return false;
-      if(q){const hay=`${p.design_name||""} ${p.style_group||""}`.toLowerCase();if(!hay.includes(q))return false;}
-      return true;
-    });
-  },[products,filterSup,search]);
 
   // 인라인 편집: onChange는 로컬만, onBlur/select 변경 시 PATCH
   const editLocal=(id,field,value)=>setProducts(ps=>ps.map(p=>String(p.id)===String(id)?{...p,[field]:value}:p));
@@ -3411,7 +3403,7 @@ function PrintSupplierManage(){
       if(!r.ok){const e=await r.json().catch(()=>null);throw new Error(e?.message||`HTTP ${r.status}`);}
     }catch(e){alert("저장 실패: "+String(e?.message||e));reload();}
   };
-  const commitCost=(id,raw)=>{const v=Number(String(raw).replace(/[^\d.]/g,""))||0;editLocal(id,"unit_cost",v);commit(id,"unit_cost",v);};
+  const commitCost=(id,raw)=>{const v=Number(String(raw).replace(/[^\d.]/g,""))||0;editLocal(id,"unit_cost",v);commit(id,"unit_cost",v);}; // 수기 입력은 변환 없이 그대로
   const changeSample=(id,value)=>{editLocal(id,"sample_status",value);commit(id,"sample_status",value);};
 
   const addSupplier=async()=>{
@@ -3423,12 +3415,9 @@ function PrintSupplierManage(){
       reload();
     }catch(e){alert("업체 추가 실패: "+String(e?.message||e));}
   };
-  const addProduct=async()=>{
-    if(filterSup==="all"){alert("먼저 상단에서 업체를 선택하세요");return;}
-    const supObj=suppliers.find(s=>String(s.id)===String(filterSup));
-    if(!supObj){alert("업체 정보를 찾을 수 없습니다");return;}
+  const addProductFor=async(supplierId)=>{
     try{
-      const r=await fetch(`${SUPABASE_URL}/rest/v1/print_supplier_products`,{method:"POST",headers:sbHeaders,body:JSON.stringify({supplier_id:supObj.id,sample_status:"미승인"})});
+      const r=await fetch(`${SUPABASE_URL}/rest/v1/print_supplier_products`,{method:"POST",headers:sbHeaders,body:JSON.stringify({supplier_id:supplierId,sample_status:"미승인"})});
       if(!r.ok){const e=await r.json().catch(()=>null);throw new Error(e?.message||`HTTP ${r.status}`);}
       reload();
     }catch(e){alert("상품 추가 실패: "+String(e?.message||e));}
@@ -3442,134 +3431,126 @@ function PrintSupplierManage(){
     }catch(e){alert("삭제 실패: "+String(e?.message||e));}
   };
 
-  // 단가표 엑셀 업로드 → 없는 업체 생성 → 상품행 append
-  const handleUpload=async(file)=>{
-    if(!file)return;
-    if(!window.confirm("기존 단가 데이터를 유지하고 추가할까요? (취소 시 중단)"))return;
-    setUploading(true);
-    try{
-      const X=await loadWorkorderXLSX();
-      const buf=await file.arrayBuffer();
-      const wb=X.read(new Uint8Array(buf),{type:"array"});
-      const names=wb.SheetNames||[];
-      if(names.length===0)throw new Error("시트가 없습니다.");
-      const grid=X.utils.sheet_to_json(wb.Sheets[names[0]],{header:1,defval:""});
-      // 헤더행 자동 탐색: '업체'와 '단가'가 모두 있는 행
-      let hIdx=-1;
-      for(let i=0;i<grid.length;i++){
-        const cells=(grid[i]||[]).map(c=>String(c));
-        if(cells.some(c=>c.includes("업체"))&&cells.some(c=>c.includes("단가"))){hIdx=i;break;}
-      }
-      if(hIdx<0)throw new Error("헤더행(업체명/단가)을 찾지 못했습니다.");
-      const header=(grid[hIdx]||[]).map(c=>String(c));
-      const findCol=(...keys)=>header.findIndex(c=>keys.some(k=>c.includes(k)));
-      const cStyle=findCol("스타일"),cDesign=findCol("디자인","아이템"),cSup=findCol("업체"),cCost=findCol("단가");
-      const parsed=[];
-      for(let i=hIdx+1;i<grid.length;i++){
-        const row=grid[i]||[];
-        const supplier_name=cSup>=0?String(row[cSup]||"").trim():"";
-        const style_group=cStyle>=0?String(row[cStyle]||"").trim():"";
-        const design_name=cDesign>=0?String(row[cDesign]||"").trim():"";
-        const costExVat=cCost>=0?(Number(String(row[cCost]||"").replace(/[^\d.]/g,""))||0):0;
-        const unit_cost=Math.round(costExVat*1.1); // 엑셀 단가는 VAT 별도 → 저장 시 VAT포함으로 변환
-        if(!supplier_name&&!design_name&&!style_group)continue; // 빈 행
-        if(!supplier_name)continue; // 업체 없으면 매핑 불가
-        parsed.push({supplier_name,style_group,design_name,unit_cost});
-      }
-      if(parsed.length===0)throw new Error("데이터 행이 없습니다.");
-      // a. 없는 업체 생성 → 전체 재조회 → name→id 맵
-      const existing=new Set(suppliers.map(s=>s.name));
-      const toCreate=[...new Set(parsed.map(p=>p.supplier_name))].filter(n=>!existing.has(n));
-      for(const name of toCreate){
-        const r=await fetch(`${SUPABASE_URL}/rest/v1/print_suppliers`,{method:"POST",headers:sbHeaders,body:JSON.stringify({name,active:true})});
-        if(!r.ok){const e=await r.json().catch(()=>null);throw new Error("업체 생성 실패: "+(e?.message||`HTTP ${r.status}`));}
-      }
-      const sr=await fetch(`${SUPABASE_URL}/rest/v1/print_suppliers?select=*`,{headers:sbHeaders});
-      const sdata=await sr.json();
-      if(!sr.ok)throw new Error(sdata?.message||`HTTP ${sr.status}`);
-      const idMap=new Map(sdata.map(s=>[s.name,s.id]));
-      // b. 상품행 POST(append)
-      let m=0;
-      for(const p of parsed){
-        const supplier_id=idMap.get(p.supplier_name);
-        if(supplier_id==null)continue;
-        const r=await fetch(`${SUPABASE_URL}/rest/v1/print_supplier_products`,{method:"POST",headers:sbHeaders,body:JSON.stringify({supplier_id,style_group:p.style_group,design_name:p.design_name,unit_cost:p.unit_cost,sample_status:"미승인"})});
-        if(!r.ok){const e=await r.json().catch(()=>null);throw new Error("단가 등록 실패: "+(e?.message||`HTTP ${r.status}`));}
-        m++;
-      }
-      alert(`업체 ${toCreate.length}개(신규), 단가 ${m}행 등록`);
-      reload();
-    }catch(e){
-      alert("업로드 실패: "+String(e?.message||e));
-    }finally{
-      setUploading(false);
-    }
-  };
+  // 공통 편집 셀 렌더러(두 뷰 재사용)
+  const codeInput=p=><input value={p.product_code||""} onChange={e=>editLocal(p.id,"product_code",e.target.value)} onBlur={e=>commit(p.id,"product_code",e.target.value)} style={{...cellInput,fontFamily:"monospace"}}/>;
+  const optInput=p=><input value={p.option_name||""} onChange={e=>editLocal(p.id,"option_name",e.target.value)} onBlur={e=>commit(p.id,"option_name",e.target.value)} style={cellInput}/>;
+  const costInput=p=><input value={p.unit_cost==null?"":p.unit_cost} onChange={e=>editLocal(p.id,"unit_cost",e.target.value)} onBlur={e=>commitCost(p.id,e.target.value)} style={{...cellInput,textAlign:"right"}}/>;
+  const sampleSelect=p=>(
+    <select value={p.sample_status||"미승인"} onChange={e=>changeSample(p.id,e.target.value)}
+      style={{...cellInput,cursor:"pointer",fontWeight:700,color:pspSampleColor(p.sample_status||"미승인"),borderColor:`${pspSampleColor(p.sample_status||"미승인")}55`}}>
+      {PSP_SAMPLE_OPTS.map(o=>(<option key={o} value={o} style={{color:"#334155"}}>{o}</option>))}
+    </select>
+  );
+  const delBtn=p=><button type="button" title="행 삭제" onClick={()=>removeProduct(p.id)} style={{border:"none",background:"none",cursor:"pointer",fontSize:15,color:"#DC2626",padding:"2px 4px",lineHeight:1}}>🗑</button>;
 
-  const selStyle={padding:"7px 12px",borderRadius:6,border:"1px solid #CBD5E1",fontSize:14,color:"#475569",background:"#F8FAFC",outline:"none",cursor:"pointer"};
+  // [업체별] 업체 → 상품 목록
+  const bySupplier=useMemo(()=>{
+    const m=new Map();
+    products.forEach(p=>{const k=String(p.supplier_id);if(!m.has(k))m.set(k,[]);m.get(k).push(p);});
+    return m;
+  },[products]);
+
+  // [상품별] style_group+design_name 그룹 → 업체별 단가 비교(단가 오름차순, 미입력 0은 뒤로)
+  const byDesign=useMemo(()=>{
+    const q=search.trim().toLowerCase();
+    const groups=new Map();
+    products.forEach(p=>{
+      if(q){const hay=`${p.design_name||""} ${p.style_group||""}`.toLowerCase();if(!hay.includes(q))return;}
+      const key=`${p.style_group||""}||${p.design_name||""}`;
+      if(!groups.has(key))groups.set(key,{key,style_group:p.style_group||"",design_name:p.design_name||"",rows:[]});
+      groups.get(key).rows.push(p);
+    });
+    const arr=[...groups.values()];
+    arr.forEach(g=>{
+      g.rows.sort((a,b)=>{const ca=Number(a.unit_cost)||0,cb=Number(b.unit_cost)||0;if(ca===0&&cb===0)return 0;if(ca===0)return 1;if(cb===0)return -1;return ca-cb;});
+      const positives=g.rows.map(r=>Number(r.unit_cost)||0).filter(v=>v>0);
+      g.minCost=positives.length?Math.min(...positives):null;
+    });
+    arr.sort((a,b)=>`${a.style_group} ${a.design_name}`.localeCompare(`${b.style_group} ${b.design_name}`,"ko"));
+    return arr;
+  },[products,search]);
+
+  // 내부 탭 (이 컴포넌트 전용 세그먼트 토글 · 소메뉴 pill과 구분)
+  const viewTabs=(
+    <div style={{display:"inline-flex",border:"1px solid #CBD5E1",borderRadius:8,overflow:"hidden"}}>
+      {[{id:"supplier",label:"업체별"},{id:"product",label:"상품별"}].map(t=>(
+        <button key={t.id} onClick={()=>setView(t.id)}
+          style={{padding:"8px 18px",border:"none",background:view===t.id?"#1E293B":"#FFF",color:view===t.id?"#F8FAFC":"#475569",fontSize:14,fontWeight:view===t.id?700:600,cursor:"pointer",transition:"all 0.15s"}}>
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+
+  if(loading)return <SectionCard title="🏢 업체·단가·샘플 관리"><div style={{textAlign:"center",padding:40,color:"#94A3B8",fontSize:14}}>⏳ 데이터 불러오는 중...</div></SectionCard>;
+  if(error)return <SectionCard title="🏢 업체·단가·샘플 관리"><div style={{textAlign:"center",padding:40,color:"#DC2626",fontSize:14}}>불러오기 실패: {error}</div></SectionCard>;
 
   return(
     <>
-      {/* 단가표 엑셀 업로드 */}
-      <SectionCard title="📥 단가표 엑셀 업로드" subtitle="헤더: 스타일 그룹 / 디자인·아이템 / 업체명 / 단가 (원) — 업체·단가행 자동 추가"
-        actions={
-          <>
-            <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];e.target.value="";handleUpload(f);}}/>
-            {uploading
-              ?<span style={{padding:"6px 14px",borderRadius:6,border:"1px solid #CBD5E1",background:"#F8FAFC",color:"#94A3B8",fontSize:14,fontWeight:600,cursor:"not-allowed"}}>⏳ 업로드 중...</span>
-              :<SmallBtn primary onClick={()=>fileRef.current?.click()}>📤 엑셀 업로드(.xlsx)</SmallBtn>}
-          </>}>
-        <div style={{fontSize:14,color:"#64748B",lineHeight:1.7}}>
-          첫 시트를 읽어 <b>업체명·단가</b>가 포함된 헤더행을 자동으로 찾습니다. 파일에 없는 업체는 자동 생성되고, 각 행은 <b>미승인</b> 샘플상태로 추가됩니다. (덮어쓰기 아님 · append)
-        </div>
-      </SectionCard>
+      {/* 내부 탭 + 뷰별 액션 */}
+      <div style={{display:"flex",gap:12,alignItems:"center",marginBottom:16,flexWrap:"wrap"}}>
+        {viewTabs}
+        <div style={{flex:1}}/>
+        {view==="supplier"&&<SmallBtn onClick={addSupplier}>+ 업체 추가</SmallBtn>}
+        {view==="product"&&<input value={search} onChange={e=>setSearch(e.target.value)} placeholder="디자인·스타일 검색" style={{...selStyle,minWidth:200}}/>}
+      </div>
 
-      {/* 업체별 상품·단가 표 */}
-      <SectionCard title="🏢 업체·단가·샘플 관리"
-        actions={<div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-          <select value={filterSup} onChange={e=>setFilterSup(e.target.value)} style={selStyle}>
-            <option value="all">전체 업체</option>
-            {suppliers.map(s=>(<option key={s.id} value={String(s.id)}>{s.name}</option>))}
-          </select>
-          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="디자인·스타일 검색" style={{...selStyle,cursor:"text",minWidth:160}}/>
-          <SmallBtn onClick={addSupplier}>+ 업체 추가</SmallBtn>
-          <SmallBtn primary onClick={addProduct}>+ 상품 추가</SmallBtn>
-        </div>}>
-        {loading?(
-          <div style={{textAlign:"center",padding:40,color:"#94A3B8",fontSize:14}}>⏳ 데이터 불러오는 중...</div>
-        ):error?(
-          <div style={{textAlign:"center",padding:40,color:"#DC2626",fontSize:14}}>불러오기 실패: {error}</div>
-        ):filtered.length===0?(
-          <div style={{textAlign:"center",padding:40,color:"#94A3B8",fontSize:14}}>표시할 단가 항목이 없습니다 · 엑셀 업로드 또는 “+ 상품 추가”</div>
-        ):(
-          <Table headers={["업체","스타일그룹","디자인·아이템","상품코드","옵션","단가(VAT포함)","샘플상태","삭제"]} maxH={520}>
-            {filtered.map(p=>(
-              <tr key={p.id}>
-                <Td style={{fontWeight:600,whiteSpace:"nowrap"}}>{supName.get(String(p.supplier_id))||"-"}</Td>
-                <Td>{p.style_group||"-"}</Td>
-                <Td>{p.design_name||"-"}</Td>
-                <Td><input value={p.product_code||""} onChange={e=>editLocal(p.id,"product_code",e.target.value)} onBlur={e=>commit(p.id,"product_code",e.target.value)} style={{...cellInput,fontFamily:"monospace"}}/></Td>
-                <Td><input value={p.option_name||""} onChange={e=>editLocal(p.id,"option_name",e.target.value)} onBlur={e=>commit(p.id,"option_name",e.target.value)} style={cellInput}/></Td>
-                <Td style={{minWidth:100}}><input value={p.unit_cost==null?"":p.unit_cost} onChange={e=>editLocal(p.id,"unit_cost",e.target.value)} onBlur={e=>commitCost(p.id,e.target.value)} style={{...cellInput,textAlign:"right"}}/></Td>
-                <Td style={{whiteSpace:"nowrap"}}>
-                  <select value={p.sample_status||"미승인"} onChange={e=>changeSample(p.id,e.target.value)}
-                    style={{...cellInput,cursor:"pointer",fontWeight:700,color:pspSampleColor(p.sample_status||"미승인"),borderColor:`${pspSampleColor(p.sample_status||"미승인")}55`}}>
-                    {PSP_SAMPLE_OPTS.map(o=>(<option key={o} value={o} style={{color:"#334155"}}>{o}</option>))}
-                  </select>
-                </Td>
-                <Td style={{textAlign:"center"}}>
-                  <button type="button" title="행 삭제" onClick={()=>removeProduct(p.id)} style={{border:"none",background:"none",cursor:"pointer",fontSize:15,color:"#DC2626",padding:"2px 4px",lineHeight:1}}>🗑</button>
-                </Td>
-              </tr>
-            ))}
-          </Table>
-        )}
-        {!loading&&!error&&(
-          <div style={{marginTop:12,fontSize:14,color:"#64748B",fontWeight:600}}>
-            총 {filtered.length}행 · 업체 {suppliers.length}개
-          </div>
-        )}
-      </SectionCard>
+      {/* [업체별] */}
+      {view==="supplier"&&(
+        suppliers.length===0?(
+          <SectionCard title="🏢 업체·단가·샘플 관리"><div style={{textAlign:"center",padding:40,color:"#94A3B8",fontSize:14}}>등록된 업체가 없습니다 · “+ 업체 추가”</div></SectionCard>
+        ):suppliers.map(s=>{
+          const list=bySupplier.get(String(s.id))||[];
+          const costs=list.map(p=>Number(p.unit_cost)||0).filter(v=>v>0);
+          const avg=costs.length?Math.round(costs.reduce((a,b)=>a+b,0)/costs.length):null;
+          return(
+            <SectionCard key={s.id} title={`🏢 ${s.name}`} subtitle={`등록 상품 ${list.length}개 · 평균단가 ${avg==null?"-":money(avg)+"원"}`}
+              actions={<SmallBtn primary onClick={()=>addProductFor(s.id)}>+ 상품 추가</SmallBtn>}>
+              {list.length===0?(
+                <div style={{textAlign:"center",padding:24,color:"#94A3B8",fontSize:13}}>등록된 상품이 없습니다 · “+ 상품 추가”</div>
+              ):(
+                <Table headers={["스타일그룹","디자인·아이템","상품코드","옵션","단가(VAT포함)","샘플상태","삭제"]} maxH={420}>
+                  {list.map(p=>(
+                    <tr key={p.id}>
+                      <Td>{p.style_group||"-"}</Td>
+                      <Td>{p.design_name||"-"}</Td>
+                      <Td>{codeInput(p)}</Td>
+                      <Td>{optInput(p)}</Td>
+                      <Td style={{minWidth:100}}>{costInput(p)}</Td>
+                      <Td style={{whiteSpace:"nowrap"}}>{sampleSelect(p)}</Td>
+                      <Td style={{textAlign:"center"}}>{delBtn(p)}</Td>
+                    </tr>
+                  ))}
+                </Table>
+              )}
+            </SectionCard>
+          );
+        })
+      )}
+
+      {/* [상품별] 디자인 기준 업체 단가 비교 */}
+      {view==="product"&&(
+        byDesign.length===0?(
+          <SectionCard title="📦 상품별 단가 비교"><div style={{textAlign:"center",padding:40,color:"#94A3B8",fontSize:14}}>표시할 디자인이 없습니다{search?" · 검색어를 확인하세요":""}</div></SectionCard>
+        ):byDesign.map(g=>(
+          <SectionCard key={g.key} title={`📦 ${g.design_name||"(디자인 미지정)"}`} subtitle={`${g.style_group||"스타일그룹 미지정"} · 업체 ${g.rows.length}곳`}>
+            <Table headers={["업체","단가(VAT포함)","샘플상태","삭제"]} maxH={420}>
+              {g.rows.map(p=>{
+                const cost=Number(p.unit_cost)||0;
+                const isLowest=g.minCost!=null&&cost===g.minCost&&cost>0;
+                return(
+                  <tr key={p.id}>
+                    <Td style={{fontWeight:600,whiteSpace:"nowrap"}}>{supName.get(String(p.supplier_id))||"-"}{isLowest&&<span style={{marginLeft:8}}><Badge color="#16A34A">최저가</Badge></span>}</Td>
+                    <Td style={{minWidth:120}}>{costInput(p)}</Td>
+                    <Td style={{whiteSpace:"nowrap"}}>{sampleSelect(p)}</Td>
+                    <Td style={{textAlign:"center"}}>{delBtn(p)}</Td>
+                  </tr>
+                );
+              })}
+            </Table>
+          </SectionCard>
+        ))
+      )}
     </>
   );
 }
