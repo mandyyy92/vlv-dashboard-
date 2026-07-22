@@ -3381,21 +3381,22 @@ function PrintOrderCreate(){
       if(!r.ok){const b=await r.text().catch(()=>"");throw new Error(`HTTP ${r.status} ${b.slice(0,200)}`);}
       const rows=await r.json();
       const list=Array.isArray(rows)?rows:[];
+      if(list[0])console.log("[추천응답] 첫 항목:",list[0],"· keys:",Object.keys(list[0])); // DEBUG(임시): 이미지 필드 실제 키 확인
       if(list.length===0){alert("추천할 부족 품목이 없습니다");return;}
       if(groups.length>0&&!window.confirm("현재 추천 결과를 새로 교체할까요?"))return;
-      // 업체명으로 그룹핑
+      // 업체명으로 그룹핑 (RPC 반환 컬럼은 한글 키)
       const bySup=new Map();
       list.forEach(row=>{
-        const name=row.업체명||"(미지정)";
-        if(!bySup.has(name))bySup.set(name,{supplier_id:row.supplier_id??null,supplier_name:name,items:[]});
+        const name=row["업체명"]||"(미지정)";
+        if(!bySup.has(name))bySup.set(name,{supplier_id:row["supplier_id"]??null,supplier_name:name,items:[]});
         bySup.get(name).items.push({
           uid:nextUid(),
-          product_code:row.상품코드||"",
-          product_name:row.상품명||"",
-          option:row.옵션||"",
-          qty:Number(row.추천수량)||0,
-          unit_cost:Number(row.단가)||0,
-          image_url:row.이미지URL||"",
+          product_code:row["상품코드"]||"",
+          product_name:row["상품명"]||"",
+          option:row["옵션"]||"",
+          qty:Number(row["추천수량"])||0,
+          unit_cost:Number(row["단가"])||0,
+          image_url:row["이미지URL"]||"",   // 한글 키 명시적 접근
         });
       });
       const arr=[...bySup.values()];
@@ -3594,7 +3595,7 @@ function PrintOrderCreate(){
                         <tr key={it.uid} draggable onDragStart={e=>onDragStart(e,g.supplier_name,it.uid)} style={{cursor:"grab"}}>
                           <td style={{...specTd,textAlign:"center"}}>
                             {it.image_url
-                              ?<img src={it.image_url} alt="" width={40} height={40} loading="lazy" onError={e=>{e.currentTarget.style.display="none";e.currentTarget.nextSibling.style.display="inline-block";}} style={{width:40,height:40,objectFit:"cover",borderRadius:6,verticalAlign:"middle",background:"#F1F5F9"}}/>
+                              ?<img src={it.image_url} alt="" width={40} height={40} loading="lazy" referrerPolicy="no-referrer" onError={e=>{e.currentTarget.style.display="none";e.currentTarget.nextSibling.style.display="inline-block";}} style={{width:40,height:40,objectFit:"cover",borderRadius:6,verticalAlign:"middle",background:"#F1F5F9"}}/>
                               :null}
                             <span style={{display:it.image_url?"none":"inline-block",width:40,height:40,borderRadius:6,background:"#F1F5F9",verticalAlign:"middle"}} />
                           </td>
