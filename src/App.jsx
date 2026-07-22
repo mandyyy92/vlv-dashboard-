@@ -798,6 +798,7 @@ function ScheduleTab(){
     return {all:groups,production,outsource,productionQty:sumQty(production),outsourceQty:sumQty(outsource)};
   },[thisWeekNotion]);
   // "입고대기 현황": Notion 발주DB(notionEvents) 기준, 오늘(00:00) 이후 예정건. 대상 5개 상태만("입고 완료" 제외)
+  const[waitFilter,setWaitFilter]=useState(null); // 상태 배지 클릭 필터 (null=전체)
   const TARGET_ST=["발주중","생산중","선적 완료","입고 일정 확인중","입고 확정"];
   const waitList=useMemo(()=>{
     const _today=new Date();_today.setHours(0,0,0,0);
@@ -806,6 +807,7 @@ function ScheduleTab(){
       .sort((a,b)=>new Date(a.date)-new Date(b.date));
   },[notionEvents]);
   const cnt=useMemo(()=>{const c={};TARGET_ST.forEach(s=>c[s]=0);waitList.forEach(e=>{c[e.status]=(c[e.status]||0)+1;});return c;},[waitList]);
+  const shownWait=useMemo(()=>waitFilter?waitList.filter(e=>e.status===waitFilter):waitList,[waitList,waitFilter]);
 
   // v77: 상세 패널 ESC 닫기
   useEffect(()=>{
@@ -1294,21 +1296,29 @@ function ScheduleTab(){
         </div>
       </div>
 
-      {/* 오른쪽: 입고대기 현황 (Notion notionEvents 기준) */}
-      <SectionCard title="📦 입고대기 현황" subtitle={`총 ${waitList.length}건`}>
-        {/* (a) 상태별 카운트 배지 (0건은 흐리게) */}
+      {/* 오른쪽: 입고대기 현황 (Notion notionEvents 기준, 왼쪽 카드와 padding·높이 통일) */}
+      <div style={{padding:"22px 24px",borderRadius:14,background:"#FFF",border:"1px solid #E2E8F0",boxShadow:"0 2px 8px rgba(15,23,42,0.04)",height:"100%",boxSizing:"border-box",display:"flex",flexDirection:"column",minHeight:0}}>
+        {/* 헤더 (SectionCard 타이틀 스타일 재현) */}
+        <div style={{marginBottom:14}}>
+          <h3 style={{margin:0,fontSize:19,fontWeight:700,color:"#0F172A",letterSpacing:-0.3}}>📦 입고대기 현황</h3>
+          <p style={{margin:"4px 0 0",fontSize:14,color:"#94A3B8"}}>총 {shownWait.length}건{waitFilter?` · ${waitFilter}`:""}</p>
+        </div>
+        {/* (a) 상태별 카운트 배지 (클릭 필터, 카운트는 전체 기준) */}
         <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
           {TARGET_ST.map(st=>{
             const c=NOTION_STATUS_COLOR[st]||{bg:"#F1F5F9",color:"#64748B"};
-            return(<div key={st} style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:c.bg,color:c.color,fontWeight:600,opacity:cnt[st]>0?1:0.4}}>{st} {cnt[st]}</div>);
+            const sel=waitFilter===st;
+            const op=waitFilter?(sel?1:0.35):(cnt[st]>0?1:0.4);
+            return(<div key={st} onClick={()=>setWaitFilter(sel?null:st)}
+              style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:c.bg,color:c.color,fontWeight:sel?800:600,cursor:"pointer",border:sel?`1.5px solid ${c.color}`:"1.5px solid transparent",opacity:op}}>{st} {cnt[st]}</div>);
           })}
         </div>
-        {/* (b) 목록 / (c) 빈 상태 */}
-        {waitList.length===0?(
-          <div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:14}}>예정된 입고대기 건이 없습니다</div>
+        {/* (b) 목록(내부 스크롤) / (c) 빈 상태 */}
+        {shownWait.length===0?(
+          <div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:14}}>{waitFilter?`'${waitFilter}' 상태 건이 없습니다`:"예정된 입고대기 건이 없습니다"}</div>
         ):(
-          <div style={{maxHeight:260,overflowY:"auto",paddingRight:2}}>
-            {waitList.map((e,i)=>{
+          <div style={{flex:1,minHeight:0,maxHeight:260,overflowY:"auto",paddingRight:2}}>
+            {shownWait.map((e,i)=>{
               const c=NOTION_STATUS_COLOR[e.status]||{bg:"#EDE9FE",color:"#6D28D9"};
               const d=new Date(e.date);
               const ymd=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
@@ -1324,7 +1334,7 @@ function ScheduleTab(){
             })}
           </div>
         )}
-      </SectionCard>
+      </div>
     </div>
 
     {/* 뷰 전환 */}
