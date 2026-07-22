@@ -23,17 +23,37 @@ function buildUrl(table, params){
 
 async function fetchJSON(url){
   const r = await fetch(url, { headers: sbHeaders });
-  if(!r.ok) throw new Error(`${r.status} ${r.statusText} :: ${url}`);
+  if(!r.ok){
+    const body = await r.text().catch(()=> "");
+    console.error("[inv에러본문]", r.status, r.statusText, "::", body, "::", url); // DEBUG(임시)
+    throw new Error(`${r.status} ${r.statusText} :: ${body.slice(0,300)} :: ${url}`);
+  }
   return r.json();
 }
 
 async function fetchLatestCollectionDate(){
-  const params = new URLSearchParams();
-  params.set("select", "수집일자");
-  params.set("order",  "수집일자.desc");
-  params.set("limit",  "1");
-  const rows = await fetchJSON(buildUrl(INVENTORY_TABLE, params));
-  return rows[0]?.수집일자 ?? null;
+  // 1차: 정렬 조회(수집일자.desc, 1건). 500/timeout이면 2차로 정렬 없이 받아 클라이언트에서 max 계산.
+  try{
+    const params = new URLSearchParams();
+    params.set("select", "수집일자");
+    params.set("order",  "수집일자.desc");
+    params.set("limit",  "1");
+    const url = buildUrl(INVENTORY_TABLE, params);
+    console.log("[useReorderData] fetchLatestCollectionDate URL:", url); // DEBUG(임시)
+    const rows = await fetchJSON(url);
+    return rows[0]?.수집일자 ?? null;
+  }catch(e){
+    console.warn("[useReorderData] 정렬 조회 실패 → 우회(클라이언트 max 계산)", e);
+    const params = new URLSearchParams();
+    params.set("select", "수집일자");         // 정렬 제거
+    params.set("limit",  String(PAGE_SIZE*10)); // 최대 1만행에서 max 계산
+    const url = buildUrl(INVENTORY_TABLE, params);
+    console.log("[useReorderData] fetchLatestCollectionDate(우회) URL:", url); // DEBUG(임시)
+    const rows = await fetchJSON(url);
+    let max = null;
+    for(const r of rows){ const v = r.수집일자; if(v && (max===null || String(v) > String(max))) max = v; }
+    return max;
+  }
 }
 
 async function fetchInventoryByDate(date){
@@ -46,7 +66,9 @@ async function fetchInventoryByDate(date){
     params.set("수집일자", `eq.${date}`);
     params.set("limit",  String(PAGE_SIZE));
     params.set("offset", String(offset));
-    const rows = await fetchJSON(buildUrl(INVENTORY_TABLE, params));
+    const url = buildUrl(INVENTORY_TABLE, params);
+    console.log("[useReorderData] fetchInventoryByDate URL:", url); // DEBUG(임시)
+    const rows = await fetchJSON(url);
     out.push(...rows);
     if(rows.length < PAGE_SIZE) break;
     offset += PAGE_SIZE;

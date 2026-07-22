@@ -3163,13 +3163,23 @@ function PrintHistory(){
   const handleUpload=async(file)=>{
     if(!file)return;
     setUploading(true);
+    // 응답을 text로 먼저 읽어 로깅(빈 본문·비JSON에도 안 멈춤) 후 JSON 파싱 시도
+    const readRes=async(res,tag)=>{
+      const txt=await res.text().catch(()=>"");
+      let json=null; try{json=txt?JSON.parse(txt):null;}catch(_){json=null;}
+      console.log(`[PT업로드] ${tag} → status ${res.status} ${res.ok?"OK":"FAIL"} · body:`,txt.slice(0,500));
+      return{json,txt};
+    };
     try{
+      console.log("[PT업로드] 시작 · 파일:",file.name);
       const X=await loadWorkorderXLSX();
       const buf=await file.arrayBuffer();
       const wb=X.read(new Uint8Array(buf),{type:"array"});
       const names=wb.SheetNames||[];
+      console.log("[PT업로드] 시트 목록:",names);
       if(names.length===0)throw new Error("시트가 없습니다.");
       const sheetName=names.find(n=>String(n).includes("상품별 수량"))||names[0];
+      console.log("[PT업로드] 선택 시트:",sheetName);
       const grid=X.utils.sheet_to_json(wb.Sheets[sheetName],{header:1,defval:""});
 
       // (a) 파일명에서 차수·업체 추출 (없으면 prompt)
@@ -3180,6 +3190,7 @@ function PrintHistory(){
       if(round_no==null){const v=window.prompt("파일명에서 차수를 찾지 못했습니다. 차수를 입력하세요 (숫자)");if(v==null)throw new Error("취소됨");round_no=Number(String(v).replace(/[^\d]/g,""))||null;}
       if(!supplier_name){const v=window.prompt("파일명에서 업체를 찾지 못했습니다. 업체명을 입력하세요");if(v==null)throw new Error("취소됨");supplier_name=String(v).trim();}
       if(!supplier_name)throw new Error("업체명이 필요합니다.");
+      console.log("[PT업로드] 파일명 파싱 → round_no:",round_no,"supplier_name:",supplier_name);
 
       // (b) 헤더행 탐색(상품코드+총수량) → 컬럼 인덱스
       let hIdx=-1;
@@ -3188,6 +3199,7 @@ function PrintHistory(){
       const header=(grid[hIdx]||[]).map(c=>String(c));
       const findCol=(...keys)=>header.findIndex(c=>keys.some(k=>c.includes(k)));
       const cCode=findCol("상품코드"),cName=findCol("상품명"),cOpt=findCol("옵션"),cQty=findCol("총수량"),cNote=findCol("비고");
+      console.log("[PT업로드] 헤더행 idx:",hIdx,"컬럼(코드/명/옵션/수량/비고):",cCode,cName,cOpt,cQty,cNote);
 
       // (c)(d) 데이터행 파싱 + 상품명 forward-fill, 합계/빈행(상품코드 없음) 제외
       const items=[];let lastName="";
@@ -3202,40 +3214,48 @@ function PrintHistory(){
         const note=cNote>=0?String(row[cNote]||"").trim():"";
         items.push({product_code:code,product_name:name,option_name:opt,req_qty,note});
       }
+      console.log("[PT업로드] 파싱된 행 수:",items.length,"· 샘플:",items.slice(0,3));
       if(items.length===0)throw new Error("등록할 데이터 행이 없습니다.");
 
-      if(!window.confirm(`${round_no}차 / ${supplier_name} · ${items.length}건을 등록할까요?`)){setUploading(false);return;}
+      if(!window.confirm(`${round_no}차 / ${supplier_name} · ${items.length}건을 등록할까요?`)){console.log("[PT업로드] 사용자 취소");return;}
 
       // supplier_id: print_suppliers 조회(없으면 생성)
       let supplier_id=null;
       const sq=await fetch(`${SUPABASE_URL}/rest/v1/print_suppliers?select=id,name&name=eq.${encodeURIComponent(supplier_name)}`,{headers:sbHeaders});
-      const sd=await sq.json();
+      const{json:sd}=await readRes(sq,"print_suppliers 조회");
       if(sq.ok&&Array.isArray(sd)&&sd[0])supplier_id=sd[0].id;
       if(supplier_id==null){
         const cr=await fetch(`${SUPABASE_URL}/rest/v1/print_suppliers`,{method:"POST",headers:{...sbHeaders,Prefer:"return=representation"},body:JSON.stringify({name:supplier_name,active:true})});
-        const cd=await cr.json();
-        if(!cr.ok)throw new Error(cd?.message||`업체 생성 실패 HTTP ${cr.status}`);
+        const{json:cd,txt:ct}=await readRes(cr,"print_suppliers 생성");
+        if(!cr.ok)throw new Error((cd&&cd.message)||`업체 생성 실패 HTTP ${cr.status} ${ct.slice(0,200)}`);
         supplier_id=Array.isArray(cd)?cd[0]?.id:cd?.id;
       }
+      console.log("[PT업로드] supplier_id:",supplier_id);
 
-      // print_orders 헤더 1건 POST (id 확보)
+      // print_orders 헤더 1건 POST (id 확보 · Prefer: return=representation)
       const totalQty=items.reduce((s,it)=>s+it.req_qty,0);
-      const or=await fetch(`${SUPABASE_URL}/rest/v1/print_orders`,{method:"POST",headers:{...sbHeaders,Prefer:"return=representation"},body:JSON.stringify({supplier_id,round_no,title:`${supplier_name} ${round_no}차`,total_qty:totalQty,order_date:null})});
-      const od=await or.json();
-      if(!or.ok)throw new Error(od?.message||`발주 헤더 생성 실패 HTTP ${or.status}`);
+      const orderBody={supplier_id,round_no,title:`${supplier_name} ${round_no}차`,total_qty:totalQty,order_date:null};
+      console.log("[PT업로드] print_orders POST body:",orderBody);
+      const or=await fetch(`${SUPABASE_URL}/rest/v1/print_orders`,{method:"POST",headers:{...sbHeaders,Prefer:"return=representation"},body:JSON.stringify(orderBody)});
+      const{json:od,txt:ot}=await readRes(or,"print_orders 생성");
+      if(!or.ok)throw new Error((od&&od.message)||`발주 헤더 생성 실패 HTTP ${or.status} ${ot.slice(0,200)}`);
       const order_id=Array.isArray(od)?od[0]?.id:od?.id;
-      if(order_id==null)throw new Error("발주 id 확인 실패");
+      console.log("[PT업로드] 받은 order_id:",order_id);
+      if(order_id==null)throw new Error("발주 id 확인 실패 (Prefer: return=representation 응답에 id 없음)");
 
       // print_order_items 각 행 POST
       let n=0;
       for(const it of items){
         const ir=await fetch(`${SUPABASE_URL}/rest/v1/print_order_items`,{method:"POST",headers:sbHeaders,body:JSON.stringify({order_id,round_no,supplier_name,product_code:it.product_code,product_name:it.product_name,option_name:it.option_name,req_qty:it.req_qty,note:it.note})});
-        if(!ir.ok){const e=await ir.json().catch(()=>null);throw new Error(e?.message||`품목 등록 실패 HTTP ${ir.status}`);}
+        console.log(`[PT업로드] item ${n+1}/${items.length} (${it.product_code}) → status ${ir.status} ${ir.ok?"OK":"FAIL"}`);
+        if(!ir.ok){const{txt:et}=await readRes(ir,`print_order_items ${it.product_code}`);throw new Error(`품목 등록 실패 HTTP ${ir.status} ${et.slice(0,200)}`);}
         n++;
       }
+      console.log("[PT업로드] 완료 · 등록 건수:",n);
       alert(`${n}건 등록`);
       reload();
     }catch(e){
+      console.error("[PT업로드] 실패:",e);
       alert("업로드 실패: "+String(e?.message||e));
     }finally{
       setUploading(false);
@@ -3343,8 +3363,21 @@ function PrintOrderCreate(){
   const[items,setItems]=useState([]);
 
   // 자동 추천 — 기존 리오더 데이터(재고+판매 병합) 재사용, 읽기 전용.
-  const{data:reorderData,loading:reorderLoading}=useReorderData();
+  // TODO: inventory 500 해결 후 실데이터로 교체 (아래 데모 경로 제거 + 주석 처리된 실데이터 경로 복구)
+  const{data:reorderData,loading:reorderLoading}=useReorderData(); // eslint-disable-line no-unused-vars
   const recommend=()=>{
+    // ── 데모(발표)용 샘플 추천: inventory 500으로 실데이터 연동 불가 → 샘플로 품목표 채움 ──
+    const demo=[
+      {product_code:"S22499", product_name:"상의-에센셜 Shell",     option:"[화이트-90(S)]", qty:120, unit_cost:0, note:"일평균 8.5, 잔여 6일"},
+      {product_code:"S26523", product_name:"상의-에센셜 Wavy",      option:"[멜란지-100(L)]", qty:90,  unit_cost:0, note:"일평균 6.2, 잔여 9일"},
+      {product_code:"S25869", product_name:"상의-에센셜 WeWe",      option:"[화이트-95(M)]", qty:60,  unit_cost:0, note:"일평균 4.1, 잔여 12일"},
+      {product_code:"S21688", product_name:"하의-버뮤다팬츠 Teen",  option:"[멜란지-L]",     qty:45,  unit_cost:0, note:"일평균 3.0, 잔여 14일"},
+      {product_code:"S16855", product_name:"상의-에센셜 Bluetag",   option:"[화이트-95(M)]", qty:80,  unit_cost:0, note:"일평균 5.5, 잔여 10일"},
+    ].sort((a,b)=>b.qty-a.qty); // 수량 큰 순
+    if(items.length>0&&!window.confirm("현재 품목을 추천 결과로 교체할까요?"))return;
+    setItems(demo); // 조용히 반영(alert 없음)
+
+    /* ── 실데이터 경로 (inventory 500 복구 후 이 블록으로 교체) ──
     const rows=(reorderData||[]).filter(r=>Number(r.need30)>0); // 30일 기준 부족분만
     if(rows.length===0){alert("추천할 부족 품목이 없습니다");return;}
     if(items.length>0&&!window.confirm("현재 품목을 추천 결과로 교체할까요?"))return;
@@ -3364,6 +3397,7 @@ function PrintOrderCreate(){
         };
       });
     setItems(recItems);
+    */
   };
 
   const setHeadField=(k,v)=>setHead(p=>({...p,[k]:v}));
@@ -3493,9 +3527,7 @@ function PrintOrderCreate(){
       {/* 발주 기본정보 */}
       <SectionCard title="🧾 발주 기본정보"
         actions={<div style={{display:"flex",gap:8}}>
-          {reorderLoading
-            ?<span title="재고·판매 분석 중" style={{padding:"8px 14px",borderRadius:8,border:"1px solid #CBD5E1",background:"#F8FAFC",color:"#94A3B8",fontSize:14,fontWeight:600,cursor:"not-allowed"}}>✨ 분석 중...</span>
-            :<SmallBtn onClick={recommend}>✨ 자동 추천</SmallBtn>}
+          <SmallBtn onClick={recommend}>✨ 자동 추천</SmallBtn>
           <SmallBtn onClick={generatePrintOrderExcel}>📊 엑셀 다운로드</SmallBtn>
         </div>}>
         <div style={grid}>
