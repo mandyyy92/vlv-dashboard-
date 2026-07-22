@@ -3406,6 +3406,7 @@ function PrintOrderCreate(){
           option:row.옵션||"",
           qty:Number(row.추천수량)||0,
           unit_cost:Number(row.단가)||0,
+          image_url:row.이미지URL||"",
         });
       });
       const arr=[...bySup.values()];
@@ -3593,6 +3594,7 @@ function PrintOrderCreate(){
                   <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
                     <thead>
                       <tr>
+                        <th style={{...specTh,width:50,textAlign:"center"}}>이미지</th>
                         <th style={{...specTh,minWidth:110}}>상품코드</th>
                         <th style={{...specTh,minWidth:150}}>상품명</th>
                         <th style={{...specTh,minWidth:110}}>색상·사이즈</th>
@@ -3605,6 +3607,12 @@ function PrintOrderCreate(){
                     <tbody>
                       {g.items.map(it=>(
                         <tr key={it.uid} draggable onDragStart={e=>onDragStart(e,g.supplier_name,it.uid)} style={{cursor:"grab"}}>
+                          <td style={{...specTd,textAlign:"center"}}>
+                            {it.image_url
+                              ?<img src={it.image_url} alt="" width={40} height={40} loading="lazy" onError={e=>{e.currentTarget.style.display="none";e.currentTarget.nextSibling.style.display="inline-block";}} style={{width:40,height:40,objectFit:"cover",borderRadius:6,verticalAlign:"middle",background:"#F1F5F9"}}/>
+                              :null}
+                            <span style={{display:it.image_url?"none":"inline-block",width:40,height:40,borderRadius:6,background:"#F1F5F9",verticalAlign:"middle"}} />
+                          </td>
                           <td style={{...specTd,fontFamily:"monospace",whiteSpace:"nowrap"}}>⠿ {it.product_code}</td>
                           <td style={{...specTd,fontWeight:600}}>{it.product_name}</td>
                           <td style={specTd}>{it.option}</td>
