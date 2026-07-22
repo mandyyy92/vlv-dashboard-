@@ -3376,6 +3376,53 @@ function PrintOrderCreate(){
     return()=>{alive=false;};
   },[]);
 
+  // 선택 업체의 승인완료 디자인 목록 (print_supplier_products 읽기)
+  const[approved,setApproved]=useState([]);
+  const[approvedLoading,setApprovedLoading]=useState(false);
+  useEffect(()=>{
+    const sup=supplierList.find(s=>s.name===head.supplier);
+    if(!sup){setApproved([]);return;}
+    let alive=true;
+    (async()=>{
+      setApprovedLoading(true);
+      try{
+        const r=await fetch(`${SUPABASE_URL}/rest/v1/print_supplier_products?select=id,design_name,unit_cost&supplier_id=eq.${sup.id}&sample_status=eq.${encodeURIComponent("승인완료")}&order=design_name.asc`,{headers:sbHeaders});
+        const d=await r.json();
+        if(alive)setApproved(r.ok&&Array.isArray(d)?d:[]);
+      }catch(e){console.warn("[PrintOrderCreate] 승인품목 로드 실패",e);if(alive)setApproved([]);}
+      finally{if(alive)setApprovedLoading(false);}
+    })();
+    return()=>{alive=false;};
+  },[head.supplier,supplierList]);
+
+  // 승인 디자인 → inventory에서 SKU 조회 후 발주 품목표에 추가(상품코드 중복 제외). inventory는 GET만.
+  const addDesignToOrder=async(design)=>{
+    const dn=(design.design_name||"").trim();
+    if(!dn){alert("디자인명이 비어 있습니다");return;}
+    try{
+      const sel=encodeURIComponent("대표상품코드,상품코드,상품명,옵션");
+      // 한글 컬럼/값 URL 인코딩, order 절 없음(500 회피)
+      const url=`${SUPABASE_URL}/rest/v1/inventory?select=${sel}&${encodeURIComponent("상품명")}=ilike.${encodeURIComponent("*"+dn+"*")}&limit=200`;
+      const r=await fetch(url,{headers:sbHeaders});
+      if(!r.ok){const b=await r.text().catch(()=>"");throw new Error(`HTTP ${r.status} ${b.slice(0,200)}`);}
+      const rows=await r.json();
+      if(!Array.isArray(rows)||rows.length===0){alert(`'${dn}' 재고 SKU를 찾지 못했습니다`);return;}
+      setItems(prev=>{
+        const seen=new Set(prev.map(it=>it.product_code));
+        const add=[];
+        for(const row of rows){
+          const code=row.상품코드||"";
+          if(!code||seen.has(code))continue;
+          seen.add(code);
+          add.push({product_code:code,product_name:row.상품명||"",option:row.옵션||"",qty:0,unit_cost:Number(design.unit_cost)||0,note:""});
+        }
+        return[...prev,...add];
+      });
+    }catch(e){
+      alert("재고 조회 실패: "+String(e?.message||e));
+    }
+  };
+
   // 자동 추천 — 기존 리오더 데이터(재고+판매 병합) 재사용, 읽기 전용.
   // TODO: inventory 500 해결 후 실데이터로 교체 (아래 데모 경로 제거 + 주석 처리된 실데이터 경로 복구)
   const{data:reorderData,loading:reorderLoading}=useReorderData(); // eslint-disable-line no-unused-vars
@@ -3557,6 +3604,29 @@ function PrintOrderCreate(){
           <div><label style={labelStyle}>입고예정일</label><input type="date" value={head.expected_date} onChange={e=>setHeadField("expected_date",e.target.value)} style={inputStyle}/></div>
         </div>
       </SectionCard>
+
+      {/* 승인 품목 (선택 업체의 승인완료 디자인) */}
+      {head.supplier&&(
+        <SectionCard title="✅ 승인 품목" subtitle={`${head.supplier} · 승인완료 디자인 → 발주 담기`}>
+          {approvedLoading?(
+            <div style={{textAlign:"center",padding:20,color:"#94A3B8",fontSize:14}}>⏳ 불러오는 중...</div>
+          ):approved.length===0?(
+            <div style={{textAlign:"center",padding:20,color:"#94A3B8",fontSize:14}}>승인완료 품목이 없습니다</div>
+          ):(
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              {approved.map(a=>(
+                <div key={a.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",borderRadius:8,border:"1px solid #E2E8F0",background:"#F8FAFC"}}>
+                  <div style={{minWidth:0}}>
+                    <div style={{fontSize:13,fontWeight:600,color:"#1E293B"}}>{a.design_name||"-"}</div>
+                    <div style={{fontSize:12,color:"#64748B"}}>₩{Number(a.unit_cost||0).toLocaleString()}</div>
+                  </div>
+                  <SmallBtn primary onClick={()=>addDesignToOrder(a)}>발주 담기</SmallBtn>
+                </div>
+              ))}
+            </div>
+          )}
+        </SectionCard>
+      )}
 
       {/* 발주 품목 표 */}
       <SectionCard title="📦 발주 품목">
