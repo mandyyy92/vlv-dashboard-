@@ -3106,6 +3106,10 @@ function PrintHistory(){
   const[search,setSearch]=useState("");
   const[fRound,setFRound]=useState("");
   const[fSupplier,setFSupplier]=useState("");
+  const[nonce,setNonce]=useState(0);        // 업로드 후 재조회 트리거
+  const[uploading,setUploading]=useState(false);
+  const fileRef=useRef(null);
+  const reload=()=>setNonce(n=>n+1);
 
   useEffect(()=>{
     let alive=true;
@@ -3124,7 +3128,7 @@ function PrintHistory(){
       }
     })();
     return()=>{alive=false;};
-  },[]);
+  },[nonce]);
 
   // 필터 셀렉트 값: 데이터에서 distinct
   const distinct=useCallback((key)=>[...new Set(rows.map(r=>r[key]).filter(v=>v!==null&&v!==undefined&&v!==""))],[rows]);
@@ -3154,8 +3158,99 @@ function PrintHistory(){
   const th={padding:"11px 12px",textAlign:"left",fontSize:12,fontWeight:700,color:"#64748B",whiteSpace:"nowrap",borderBottom:"2px solid #E2E8F0",textTransform:"uppercase",letterSpacing:0.3};
   const td={padding:"11px 12px",fontSize:14,color:"#1E293B",borderBottom:"1px solid #F1F5F9",verticalAlign:"middle"};
 
+  // 발송요청 엑셀("상품별 수량" 시트) 업로드 → print_orders 헤더 + print_order_items 행 등록
+  const KNOWN_SUPPLIERS=["제일커스텀","국제나염","프린트랩","두리전사","마크랜드","국제프린팅"];
+  const handleUpload=async(file)=>{
+    if(!file)return;
+    setUploading(true);
+    try{
+      const X=await loadWorkorderXLSX();
+      const buf=await file.arrayBuffer();
+      const wb=X.read(new Uint8Array(buf),{type:"array"});
+      const names=wb.SheetNames||[];
+      if(names.length===0)throw new Error("시트가 없습니다.");
+      const sheetName=names.find(n=>String(n).includes("상품별 수량"))||names[0];
+      const grid=X.utils.sheet_to_json(wb.Sheets[sheetName],{header:1,defval:""});
+
+      // (a) 파일명에서 차수·업체 추출 (없으면 prompt)
+      const fname=file.name||"";
+      const roundM=fname.match(/(\d+)\s*차/);
+      let round_no=roundM?Number(roundM[1]):null;
+      let supplier_name=KNOWN_SUPPLIERS.find(s=>fname.includes(s))||"";
+      if(round_no==null){const v=window.prompt("파일명에서 차수를 찾지 못했습니다. 차수를 입력하세요 (숫자)");if(v==null)throw new Error("취소됨");round_no=Number(String(v).replace(/[^\d]/g,""))||null;}
+      if(!supplier_name){const v=window.prompt("파일명에서 업체를 찾지 못했습니다. 업체명을 입력하세요");if(v==null)throw new Error("취소됨");supplier_name=String(v).trim();}
+      if(!supplier_name)throw new Error("업체명이 필요합니다.");
+
+      // (b) 헤더행 탐색(상품코드+총수량) → 컬럼 인덱스
+      let hIdx=-1;
+      for(let i=0;i<grid.length;i++){const cells=(grid[i]||[]).map(c=>String(c));if(cells.some(c=>c.includes("상품코드"))&&cells.some(c=>c.includes("총수량"))){hIdx=i;break;}}
+      if(hIdx<0)throw new Error("헤더행(상품코드/총수량)을 찾지 못했습니다.");
+      const header=(grid[hIdx]||[]).map(c=>String(c));
+      const findCol=(...keys)=>header.findIndex(c=>keys.some(k=>c.includes(k)));
+      const cCode=findCol("상품코드"),cName=findCol("상품명"),cOpt=findCol("옵션"),cQty=findCol("총수량"),cNote=findCol("비고");
+
+      // (c)(d) 데이터행 파싱 + 상품명 forward-fill, 합계/빈행(상품코드 없음) 제외
+      const items=[];let lastName="";
+      for(let i=hIdx+1;i<grid.length;i++){
+        const row=grid[i]||[];
+        const code=cCode>=0?String(row[cCode]||"").trim():"";
+        let name=cName>=0?String(row[cName]||"").trim():"";
+        if(name)lastName=name; else name=lastName; // 병합셀 forward-fill
+        if(!code)continue; // 합계행("합 계")·빈행 제외
+        const opt=cOpt>=0?String(row[cOpt]||"").trim():"";
+        const req_qty=cQty>=0?(Number(String(row[cQty]||"").replace(/[^\d.]/g,""))||0):0;
+        const note=cNote>=0?String(row[cNote]||"").trim():"";
+        items.push({product_code:code,product_name:name,option_name:opt,req_qty,note});
+      }
+      if(items.length===0)throw new Error("등록할 데이터 행이 없습니다.");
+
+      if(!window.confirm(`${round_no}차 / ${supplier_name} · ${items.length}건을 등록할까요?`)){setUploading(false);return;}
+
+      // supplier_id: print_suppliers 조회(없으면 생성)
+      let supplier_id=null;
+      const sq=await fetch(`${SUPABASE_URL}/rest/v1/print_suppliers?select=id,name&name=eq.${encodeURIComponent(supplier_name)}`,{headers:sbHeaders});
+      const sd=await sq.json();
+      if(sq.ok&&Array.isArray(sd)&&sd[0])supplier_id=sd[0].id;
+      if(supplier_id==null){
+        const cr=await fetch(`${SUPABASE_URL}/rest/v1/print_suppliers`,{method:"POST",headers:{...sbHeaders,Prefer:"return=representation"},body:JSON.stringify({name:supplier_name,active:true})});
+        const cd=await cr.json();
+        if(!cr.ok)throw new Error(cd?.message||`업체 생성 실패 HTTP ${cr.status}`);
+        supplier_id=Array.isArray(cd)?cd[0]?.id:cd?.id;
+      }
+
+      // print_orders 헤더 1건 POST (id 확보)
+      const totalQty=items.reduce((s,it)=>s+it.req_qty,0);
+      const or=await fetch(`${SUPABASE_URL}/rest/v1/print_orders`,{method:"POST",headers:{...sbHeaders,Prefer:"return=representation"},body:JSON.stringify({supplier_id,round_no,title:`${supplier_name} ${round_no}차`,total_qty:totalQty,order_date:null})});
+      const od=await or.json();
+      if(!or.ok)throw new Error(od?.message||`발주 헤더 생성 실패 HTTP ${or.status}`);
+      const order_id=Array.isArray(od)?od[0]?.id:od?.id;
+      if(order_id==null)throw new Error("발주 id 확인 실패");
+
+      // print_order_items 각 행 POST
+      let n=0;
+      for(const it of items){
+        const ir=await fetch(`${SUPABASE_URL}/rest/v1/print_order_items`,{method:"POST",headers:sbHeaders,body:JSON.stringify({order_id,round_no,supplier_name,product_code:it.product_code,product_name:it.product_name,option_name:it.option_name,req_qty:it.req_qty,note:it.note})});
+        if(!ir.ok){const e=await ir.json().catch(()=>null);throw new Error(e?.message||`품목 등록 실패 HTTP ${ir.status}`);}
+        n++;
+      }
+      alert(`${n}건 등록`);
+      reload();
+    }catch(e){
+      alert("업로드 실패: "+String(e?.message||e));
+    }finally{
+      setUploading(false);
+    }
+  };
+
   return(
-    <SectionCard title="📚 발주 히스토리">
+    <SectionCard title="📚 발주 히스토리" actions={
+      <>
+        <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];e.target.value="";handleUpload(f);}}/>
+        {uploading
+          ?<span style={{padding:"6px 14px",borderRadius:6,border:"1px solid #CBD5E1",background:"#F8FAFC",color:"#94A3B8",fontSize:14,fontWeight:600,cursor:"not-allowed"}}>⏳ 업로드 중...</span>
+          :<SmallBtn primary onClick={()=>fileRef.current?.click()}>📤 엑셀 업로드(.xlsx)</SmallBtn>}
+      </>
+    }>
       {/* 검색 + 필터 */}
       <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:18}}>
         <input
