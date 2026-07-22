@@ -769,6 +769,41 @@ function ScheduleTab(){
     catch(e){console.warn("[super-worker] 병합 실패",e);setNotionEvents([]);}
   })();},[]);
 
+  // ── 홈에서 이동해온 요약 카드용 계산 (이번주 입고건 · 입고대기 현황) ──
+  // "이번주 입고건": Notion 발주DB 기준, 이번주=월~금(이미 지난 요일 포함)
+  const thisWeekNotion=useMemo(()=>{
+    const now=new Date();
+    const dow=now.getDay(); // 0=Sun..6=Sat
+    const mondayOffset=dow===0?-6:1-dow;
+    const monday=new Date(now.getFullYear(),now.getMonth(),now.getDate()+mondayOffset);
+    const friday=new Date(monday.getFullYear(),monday.getMonth(),monday.getDate()+4);
+    const ymd=(d)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+    const lo=ymd(monday),hi=ymd(friday);
+    return notionEvents.filter(n=>n.date&&n.date>=lo&&n.date<=hi).sort((a,b)=>(a.date||"").localeCompare(b.date||""));
+  },[notionEvents]);
+  const thisWeekNotionQty=useMemo(()=>thisWeekNotion.reduce((sum,n)=>sum+(n.qty||0),0),[thisWeekNotion]);
+  // 캘린더와 동일한 (title+round) 그룹핑 → "품목 그룹" 단위. 생산건 / 프린팅 외주 분리.
+  const thisWeekNotionGroups=useMemo(()=>{
+    const m=new Map();
+    thisWeekNotion.forEach(ev=>{
+      const key=`${ev.item||""}__${ev.round||""}`;
+      if(!m.has(key))m.set(key,{key,rep:ev,qty:0});
+      m.get(key).qty+=(Number(ev.qty)||0);
+    });
+    const groups=Array.from(m.values());
+    const isOutsource=g=>{const t=(g.rep.item||"").toLowerCase();return t.includes("프린팅")||t.includes("외주");};
+    const outsource=groups.filter(isOutsource);
+    const production=groups.filter(g=>!isOutsource(g));
+    const sumQty=arr=>arr.reduce((s,g)=>s+g.qty,0);
+    return {all:groups,production,outsource,productionQty:sumQty(production),outsourceQty:sumQty(outsource)};
+  },[thisWeekNotion]);
+  // "입고대기 현황": 오늘 이후의 모든 스케줄
+  const pendingSchedules=useMemo(()=>{
+    const today=new Date().toISOString().slice(0,10);
+    return schedules.filter(s=>{const d=s.kr_date||s.date;return d&&d>=today;}).sort((a,b)=>(a.kr_date||a.date||"").localeCompare(b.kr_date||b.date||""));
+  },[schedules]);
+  const pendingTotalQty=useMemo(()=>pendingSchedules.reduce((sum,s)=>sum+(s.qty||0),0),[pendingSchedules]);
+
   // v77: 상세 패널 ESC 닫기
   useEffect(()=>{
     if(!selectedDay)return;
@@ -1222,6 +1257,66 @@ function ScheduleTab(){
         <span style={{fontSize:19,fontWeight:700,color:"#0F172A"}}>입고 스케줄 관리</span>
       </div>
       <div style={{fontSize:15,fontWeight:600,color:"#3B82F6"}}>{year}년 {month+1}월 {new Date().getDate()}일</div>
+    </div>
+
+    {/* 홈에서 이동: 이번주 입고건 / 입고대기 현황 (좌우 2단 · 좁은 폭이면 1단) */}
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(320px,1fr))",gap:16,marginBottom:16}}>
+      {/* 왼쪽: 이번주 입고건 */}
+      <div style={{padding:"22px 24px",borderRadius:14,background:"linear-gradient(135deg,#EFF6FF 0%,#F5F3FF 100%)",border:"1px solid #BFDBFE",boxShadow:"0 2px 8px rgba(59,130,246,0.08)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+          <div>
+            <div style={{fontSize:13,fontWeight:600,color:"#6366F1",letterSpacing:0.5,textTransform:"uppercase",marginBottom:6}}>📦 이번주 입고건</div>
+            <div style={{fontSize:38,fontWeight:800,color:"#3B82F6",letterSpacing:-1.5}}>{thisWeekNotionGroups.all.length}<span style={{fontSize:16,fontWeight:500,color:"#93C5FD",marginLeft:4}}>건</span></div>
+            <div style={{fontSize:14,color:"#6B7280",marginTop:6}}>총 {thisWeekNotionQty.toLocaleString()}장 입고 예정</div>
+          </div>
+          <div style={{width:48,height:48,borderRadius:12,background:"#3B82F620",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24}}>📅</div>
+        </div>
+        {/* 생산건 / 프린팅 외주 분리 (품목 그룹 기준) */}
+        <div style={{marginTop:14,display:"flex",gap:10}}>
+          <div style={{flex:1,padding:"10px 12px",borderRadius:8,background:"rgba(255,255,255,0.6)",border:"1px solid #BFDBFE"}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#2563EB"}}>🏭 생산건</div>
+            <div style={{fontSize:22,fontWeight:800,color:"#1E40AF",marginTop:2,letterSpacing:-0.5}}>{thisWeekNotionGroups.production.length}<span style={{fontSize:12,fontWeight:600,color:"#93C5FD",marginLeft:2}}>건</span></div>
+            <div style={{fontSize:12,color:"#6B7280",marginTop:1}}>{thisWeekNotionGroups.productionQty.toLocaleString()}장</div>
+          </div>
+          <div style={{flex:1,padding:"10px 12px",borderRadius:8,background:"rgba(255,255,255,0.6)",border:"1px solid #DDD6FE"}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#7C3AED"}}>🖨 프린팅 외주</div>
+            <div style={{fontSize:22,fontWeight:800,color:"#5B21B6",marginTop:2,letterSpacing:-0.5}}>{thisWeekNotionGroups.outsource.length}<span style={{fontSize:12,fontWeight:600,color:"#C4B5FD",marginLeft:2}}>건</span></div>
+            <div style={{fontSize:12,color:"#6B7280",marginTop:1}}>{thisWeekNotionGroups.outsourceQty.toLocaleString()}장</div>
+          </div>
+        </div>
+        <div style={{marginTop:12,display:"flex",gap:6,flexWrap:"wrap"}}>
+          {thisWeekNotionGroups.all.slice(0,3).map((g,i)=>(<div key={g.key||i} style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#DBEAFE",color:"#1E40AF",fontWeight:600}}>{(g.rep.item||"").slice(0,8)}… {g.qty.toLocaleString()}장</div>))}
+          {thisWeekNotionGroups.all.length>3&&<div style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#E0E7FF",color:"#4338CA",fontWeight:600}}>+{thisWeekNotionGroups.all.length-3}건</div>}
+          {thisWeekNotionGroups.all.length===0&&<div style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#F1F5F9",color:"#94A3B8",fontWeight:600}}>이번주 입고건 없음</div>}
+        </div>
+      </div>
+
+      {/* 오른쪽: 입고대기 현황 */}
+      <SectionCard title="📦 입고대기 현황" subtitle={`${pendingSchedules.length}건 · 총 ${pendingTotalQty.toLocaleString()}장`}>
+        {pendingSchedules.length===0?(
+          <div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:15}}>입고 대기 일정이 없습니다</div>
+        ):(<div style={{maxHeight:340,overflowY:"auto",paddingRight:2}}>
+          {pendingSchedules.map((s,i)=>{
+            const confirmed=s.status==="입고확정";
+            const sup=SCHEDULE_SUP_STYLES[s.supplier]||{color:"#64748B",bg:"#F8FAFC",icon:"📦"};
+            return(<div key={s.id||i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",borderRadius:8,marginBottom:6,background:sup.bg,border:`1px solid ${sup.color}33`,borderLeft:`4px solid ${sup.color}`}}>
+              <div style={{minWidth:0,flex:1}}>
+                <div style={{fontSize:15,fontWeight:600,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                  <span style={{marginRight:4}}>{confirmed?"🟢":"🟡"}</span>{translateItemName(s.item)||"(상품명)"}
+                </div>
+                <div style={{fontSize:13,color:"#64748B",marginTop:2,display:"flex",alignItems:"center",gap:4}}>
+                  <span>{s.kr_date||s.date||"-"}</span>
+                  <span style={{color:sup.color,fontWeight:700}}>· {sup.icon} {s.supplier||"-"}</span>
+                </div>
+              </div>
+              <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>
+                <div style={{fontSize:17,fontWeight:700,color:sup.color}}>{(s.qty||0).toLocaleString()}장</div>
+                <div style={{fontSize:12,color:confirmed?"#15803D":"#B45309",fontWeight:600}}>{confirmed?"입고 확정":"입고 일정 확인중"}</div>
+              </div>
+            </div>);
+          })}
+        </div>)}
+      </SectionCard>
     </div>
 
     {/* 뷰 전환 */}
@@ -3474,7 +3569,7 @@ function PrintSupplierManage(){
       onFocus={()=>setCostFocus(p.id)}
       onChange={e=>editLocal(p.id,"unit_cost",e.target.value)}
       onBlur={e=>{setCostFocus(null);commitCost(p.id,e.target.value);}}
-      style={{...cellInput,textAlign:"right",maxWidth:110,marginLeft:"auto",display:"block"}}/>;
+      style={{...cellInput,textAlign:"right",width:120,maxWidth:120,flex:"none",marginLeft:"auto",display:"block"}}/>;
   };
   const sampleSelect=p=>{
     const v=p.sample_status||"미승인";const c=pspSampleColor(v);
@@ -5342,60 +5437,7 @@ export default function Dashboard(){
   const[time,setTime]=useState(new Date());
   useEffect(()=>{const t=setInterval(()=>setTime(new Date()),60000);return()=>clearInterval(t);},[]);
 
-  // Supabase schedules 데이터 (입고 스케줄 탭과 동일 소스)
-  const[dashSchedules,setDashSchedules]=useState([]);
-  useEffect(()=>{(async()=>{const data=await sb.get("schedules");setDashSchedules(data||[]);})();},[]);
-
-  // Notion 발주DB(입고 스케줄) — "이번주 입고건" 카드 전용 소스. 실패 시 빈 배열(카드 0건, 대시보드는 정상)
-  const[notionEvents,setNotionEvents]=useState([]);
-  useEffect(()=>{(async()=>{try{const list=await fetchNotionSchedule();setNotionEvents(list||[]);}catch(e){console.warn("[overview] notion fetch 실패",e);setNotionEvents([]);}})();},[]);
-
-  // 이번주(오늘~이번주 일요일) kr_date에 잡힌 스케줄 (지난 날짜 제외)
-  const thisWeekSchedules=useMemo(()=>{
-    const now=new Date();
-    const dow=now.getDay(); // 0=Sun..6=Sat
-    const sunOffset=dow===0?0:7-dow;
-    const sunday=new Date(now.getFullYear(),now.getMonth(),now.getDate()+sunOffset);
-    const ymd=(d)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-    const lo=ymd(now),hi=ymd(sunday);
-    return dashSchedules.filter(s=>{const d=s.kr_date||s.date;return d&&d>=lo&&d<=hi;}).sort((a,b)=>(a.kr_date||a.date||"").localeCompare(b.kr_date||b.date||""));
-  },[dashSchedules]);
-  const thisWeekTotalQty=useMemo(()=>thisWeekSchedules.reduce((sum,s)=>sum+(s.qty||0),0),[thisWeekSchedules]);
-
-  // "이번주 입고건" 카드: Notion 발주DB 기준, 이번주=월~금(이미 지난 요일 포함)
-  const thisWeekNotion=useMemo(()=>{
-    const now=new Date();
-    const dow=now.getDay(); // 0=Sun..6=Sat
-    const mondayOffset=dow===0?-6:1-dow;
-    const monday=new Date(now.getFullYear(),now.getMonth(),now.getDate()+mondayOffset);
-    const friday=new Date(monday.getFullYear(),monday.getMonth(),monday.getDate()+4);
-    const ymd=(d)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-    const lo=ymd(monday),hi=ymd(friday);
-    return notionEvents.filter(n=>n.date&&n.date>=lo&&n.date<=hi).sort((a,b)=>(a.date||"").localeCompare(b.date||""));
-  },[notionEvents]);
-  const thisWeekNotionQty=useMemo(()=>thisWeekNotion.reduce((sum,n)=>sum+(n.qty||0),0),[thisWeekNotion]);
-  // 캘린더와 동일한 (title+round) 그룹핑 → "품목 그룹" 단위. 생산건 / 프린팅 외주 분리.
-  const thisWeekNotionGroups=useMemo(()=>{
-    const m=new Map();
-    thisWeekNotion.forEach(ev=>{
-      const key=`${ev.item||""}__${ev.round||""}`;
-      if(!m.has(key))m.set(key,{key,rep:ev,qty:0});
-      m.get(key).qty+=(Number(ev.qty)||0);
-    });
-    const groups=Array.from(m.values());
-    const isOutsource=g=>{const t=(g.rep.item||"").toLowerCase();return t.includes("프린팅")||t.includes("외주");};
-    const outsource=groups.filter(isOutsource);
-    const production=groups.filter(g=>!isOutsource(g));
-    const sumQty=arr=>arr.reduce((s,g)=>s+g.qty,0);
-    return {all:groups,production,outsource,productionQty:sumQty(production),outsourceQty:sumQty(outsource)};
-  },[thisWeekNotion]);
-
-  // 오늘 이후의 모든 스케줄 (입고대기 현황)
-  const pendingSchedules=useMemo(()=>{
-    const today=new Date().toISOString().slice(0,10);
-    return dashSchedules.filter(s=>{const d=s.kr_date||s.date;return d&&d>=today;}).sort((a,b)=>(a.kr_date||a.date||"").localeCompare(b.kr_date||b.date||""));
-  },[dashSchedules]);
-  const pendingTotalQty=useMemo(()=>pendingSchedules.reduce((sum,s)=>sum+(s.qty||0),0),[pendingSchedules]);
+  // "이번주 입고건" · "입고대기 현황" 카드는 입고 스케줄 탭(ScheduleTab)으로 이동됨.
 
   // hidden:true 인 탭은 메뉴에서만 숨김(컴포넌트/라우팅/데이터는 그대로 보존). 되돌릴 땐 hidden 제거.
   const tabs=[
@@ -5412,39 +5454,8 @@ export default function Dashboard(){
 
   const renderOverview=()=>(
     <>
-      {/* 상단 2카드: 이번주 입고건 / 샘플 진행건 */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:16,marginBottom:20}}>
-        {/* 1. 이번주 입고건 */}
-        <div style={{padding:"22px 24px",borderRadius:14,background:"linear-gradient(135deg,#EFF6FF 0%,#F5F3FF 100%)",border:"1px solid #BFDBFE",boxShadow:"0 2px 8px rgba(59,130,246,0.08)"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-            <div>
-              <div style={{fontSize:13,fontWeight:600,color:"#6366F1",letterSpacing:0.5,textTransform:"uppercase",marginBottom:6}}>📦 이번주 입고건</div>
-              <div style={{fontSize:38,fontWeight:800,color:"#3B82F6",letterSpacing:-1.5}}>{thisWeekNotionGroups.all.length}<span style={{fontSize:16,fontWeight:500,color:"#93C5FD",marginLeft:4}}>건</span></div>
-              <div style={{fontSize:14,color:"#6B7280",marginTop:6}}>총 {thisWeekNotionQty.toLocaleString()}장 입고 예정</div>
-            </div>
-            <div style={{width:48,height:48,borderRadius:12,background:"#3B82F620",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24}}>📅</div>
-          </div>
-          {/* 생산건 / 프린팅 외주 분리 (품목 그룹 기준) */}
-          <div style={{marginTop:14,display:"flex",gap:10}}>
-            <div style={{flex:1,padding:"10px 12px",borderRadius:8,background:"rgba(255,255,255,0.6)",border:"1px solid #BFDBFE"}}>
-              <div style={{fontSize:12,fontWeight:700,color:"#2563EB"}}>🏭 생산건</div>
-              <div style={{fontSize:22,fontWeight:800,color:"#1E40AF",marginTop:2,letterSpacing:-0.5}}>{thisWeekNotionGroups.production.length}<span style={{fontSize:12,fontWeight:600,color:"#93C5FD",marginLeft:2}}>건</span></div>
-              <div style={{fontSize:12,color:"#6B7280",marginTop:1}}>{thisWeekNotionGroups.productionQty.toLocaleString()}장</div>
-            </div>
-            <div style={{flex:1,padding:"10px 12px",borderRadius:8,background:"rgba(255,255,255,0.6)",border:"1px solid #DDD6FE"}}>
-              <div style={{fontSize:12,fontWeight:700,color:"#7C3AED"}}>🖨 프린팅 외주</div>
-              <div style={{fontSize:22,fontWeight:800,color:"#5B21B6",marginTop:2,letterSpacing:-0.5}}>{thisWeekNotionGroups.outsource.length}<span style={{fontSize:12,fontWeight:600,color:"#C4B5FD",marginLeft:2}}>건</span></div>
-              <div style={{fontSize:12,color:"#6B7280",marginTop:1}}>{thisWeekNotionGroups.outsourceQty.toLocaleString()}장</div>
-            </div>
-          </div>
-          <div style={{marginTop:12,display:"flex",gap:6,flexWrap:"wrap"}}>
-            {thisWeekNotionGroups.all.slice(0,3).map((g,i)=>(<div key={g.key||i} style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#DBEAFE",color:"#1E40AF",fontWeight:600}}>{(g.rep.item||"").slice(0,8)}… {g.qty.toLocaleString()}장</div>))}
-            {thisWeekNotionGroups.all.length>3&&<div style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#E0E7FF",color:"#4338CA",fontWeight:600}}>+{thisWeekNotionGroups.all.length-3}건</div>}
-            {thisWeekNotionGroups.all.length===0&&<div style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#F1F5F9",color:"#94A3B8",fontWeight:600}}>이번주 입고건 없음</div>}
-          </div>
-        </div>
-
-        {/* 2. 샘플 진행건 */}
+      {/* 샘플 진행건 (입고 관련 2카드는 입고 스케줄 탭으로 이동) */}
+      <div style={{marginBottom:20}}>
         <div style={{padding:"22px 24px",borderRadius:14,background:"linear-gradient(135deg,#F0FDF4 0%,#ECFDF5 100%)",border:"1px solid #BBF7D0",boxShadow:"0 2px 8px rgba(16,185,129,0.08)"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
             <div>
@@ -5460,46 +5471,18 @@ export default function Dashboard(){
         </div>
       </div>
 
-      {/* 하단: 입고대기 현황 + 샘플 진행 현황 (풀폭) */}
-      <div>
-          <SectionCard title="📦 입고대기 현황" subtitle={`${pendingSchedules.length}건 · 총 ${pendingTotalQty.toLocaleString()}장`}>
-            {pendingSchedules.length===0?(
-              <div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:15}}>입고 대기 일정이 없습니다</div>
-            ):(<div style={{maxHeight:340,overflowY:"auto",paddingRight:2}}>
-              {pendingSchedules.map((s,i)=>{
-                const confirmed=s.status==="입고확정";
-                const sup=SCHEDULE_SUP_STYLES[s.supplier]||{color:"#64748B",bg:"#F8FAFC",icon:"📦"};
-                return(<div key={s.id||i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",borderRadius:8,marginBottom:6,background:sup.bg,border:`1px solid ${sup.color}33`,borderLeft:`4px solid ${sup.color}`}}>
-                  <div style={{minWidth:0,flex:1}}>
-                    <div style={{fontSize:15,fontWeight:600,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                      <span style={{marginRight:4}}>{confirmed?"🟢":"🟡"}</span>{translateItemName(s.item)||"(상품명)"}
-                    </div>
-                    <div style={{fontSize:13,color:"#64748B",marginTop:2,display:"flex",alignItems:"center",gap:4}}>
-                      <span>{s.kr_date||s.date||"-"}</span>
-                      <span style={{color:sup.color,fontWeight:700}}>· {sup.icon} {s.supplier||"-"}</span>
-                    </div>
-                  </div>
-                  <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>
-                    <div style={{fontSize:17,fontWeight:700,color:sup.color}}>{(s.qty||0).toLocaleString()}장</div>
-                    <div style={{fontSize:12,color:confirmed?"#15803D":"#B45309",fontWeight:600}}>{confirmed?"입고 확정":"입고 일정 확인중"}</div>
-                  </div>
-                </div>);
-              })}
-            </div>)}
-          </SectionCard>
-
-          <SectionCard title="🧪 샘플 진행 현황">
-            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-              {SAMPLE_STATUSES.map(st=>{
-                const count=[0,1,2,1,1,1][SAMPLE_STATUSES.indexOf(st)];
-                return(<div key={st} style={{flex:"1 1 70px",textAlign:"center",padding:"10px 6px",borderRadius:8,background:`${STATUS_COLORS[st]}10`}}>
-                  <div style={{fontSize:22,fontWeight:800,color:STATUS_COLORS[st]}}>{count}</div>
-                  <div style={{fontSize:11,color:STATUS_COLORS[st],fontWeight:600,marginTop:2}}>{st}</div>
-                </div>);
-              })}
-            </div>
-          </SectionCard>
-      </div>
+      {/* 샘플 진행 현황 */}
+      <SectionCard title="🧪 샘플 진행 현황">
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          {SAMPLE_STATUSES.map(st=>{
+            const count=[0,1,2,1,1,1][SAMPLE_STATUSES.indexOf(st)];
+            return(<div key={st} style={{flex:"1 1 70px",textAlign:"center",padding:"10px 6px",borderRadius:8,background:`${STATUS_COLORS[st]}10`}}>
+              <div style={{fontSize:22,fontWeight:800,color:STATUS_COLORS[st]}}>{count}</div>
+              <div style={{fontSize:11,color:STATUS_COLORS[st],fontWeight:600,marginTop:2}}>{st}</div>
+            </div>);
+          })}
+        </div>
+      </SectionCard>
     </>
   );
 
