@@ -3376,74 +3376,54 @@ function PrintOrderCreate(){
     return()=>{alive=false;};
   },[]);
 
-  // 선택 업체의 승인완료 디자인 목록 (print_supplier_products 읽기)
-  const[approved,setApproved]=useState([]);
-  const[approvedLoading,setApprovedLoading]=useState(false);
-  useEffect(()=>{
-    const sup=supplierList.find(s=>s.name===head.supplier);
-    if(!sup){setApproved([]);return;}
-    let alive=true;
-    (async()=>{
-      setApprovedLoading(true);
-      try{
-        const r=await fetch(`${SUPABASE_URL}/rest/v1/print_supplier_products?select=id,design_name,unit_cost&supplier_id=eq.${sup.id}&sample_status=eq.${encodeURIComponent("승인완료")}&order=design_name.asc`,{headers:sbHeaders});
-        const d=await r.json();
-        if(alive)setApproved(r.ok&&Array.isArray(d)?d:[]);
-      }catch(e){console.warn("[PrintOrderCreate] 승인품목 로드 실패",e);if(alive)setApproved([]);}
-      finally{if(alive)setApprovedLoading(false);}
-    })();
-    return()=>{alive=false;};
-  },[head.supplier,supplierList]);
-
-  // 승인 디자인 → inventory에서 SKU 조회 후 발주 품목표에 추가(상품코드 중복 제외). inventory는 GET만.
-  const addDesignToOrder=async(design)=>{
-    const dn=(design.design_name||"").trim();
-    if(!dn){alert("디자인명이 비어 있습니다");return;}
+  // 자동 추천 — RPC get_print_reorder(읽기)로 부족 품목 조회 → 품목표 채움
+  const[recLoading,setRecLoading]=useState(false);
+  const recommend=async()=>{
+    setRecLoading(true);
     try{
-      const sel=encodeURIComponent("대표상품코드,상품코드,상품명,옵션");
-      // 한글 컬럼/값 URL 인코딩, order 절 없음(500 회피)
-      const url=`${SUPABASE_URL}/rest/v1/inventory?select=${sel}&${encodeURIComponent("상품명")}=ilike.${encodeURIComponent("*"+dn+"*")}&limit=200`;
-      const r=await fetch(url,{headers:sbHeaders});
+      const r=await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_print_reorder`,{
+        method:"POST",
+        headers:{...sbHeaders,"Content-Type":"application/json"},
+        body:JSON.stringify({days_cover:30}),
+      });
       if(!r.ok){const b=await r.text().catch(()=>"");throw new Error(`HTTP ${r.status} ${b.slice(0,200)}`);}
       const rows=await r.json();
-      if(!Array.isArray(rows)||rows.length===0){alert(`'${dn}' 재고 SKU를 찾지 못했습니다`);return;}
-      setItems(prev=>{
-        const seen=new Set(prev.map(it=>it.product_code));
-        const add=[];
-        for(const row of rows){
-          const code=row.상품코드||"";
-          if(!code||seen.has(code))continue;
-          seen.add(code);
-          add.push({product_code:code,product_name:row.상품명||"",option:row.옵션||"",qty:0,unit_cost:Number(design.unit_cost)||0,note:""});
-        }
-        return[...prev,...add];
-      });
+      const list=Array.isArray(rows)?rows:[];
+      if(list.length===0){alert("추천할 부족 품목이 없습니다");return;}
+      if(items.length>0&&!window.confirm("현재 품목을 추천 결과로 교체할까요?"))return;
+      // 추천수량 큰 순으로 이미 정렬돼 옴 → 그대로 매핑
+      const recItems=list.map(row=>({
+        product_code:row.상품코드||"",
+        product_name:row.상품명||"",
+        option:row.옵션||"",           // 품목표 스키마 필드는 option
+        qty:Number(row.추천수량)||0,
+        unit_cost:0,
+        note:"",
+      }));
+      setItems(recItems);
     }catch(e){
-      alert("재고 조회 실패: "+String(e?.message||e));
+      alert("자동 추천 실패: "+String(e?.message||e));
+    }finally{
+      setRecLoading(false);
     }
-  };
 
-  // 자동 추천 — 기존 리오더 데이터(재고+판매 병합) 재사용, 읽기 전용.
-  // TODO: inventory 500 해결 후 실데이터로 교체 (아래 데모 경로 제거 + 주석 처리된 실데이터 경로 복구)
-  const{data:reorderData,loading:reorderLoading}=useReorderData(); // eslint-disable-line no-unused-vars
-  const recommend=()=>{
-    // ── 데모(발표)용 샘플 추천: inventory 500으로 실데이터 연동 불가 → 샘플로 품목표 채움 ──
+    /* ── 데모(발표)용 샘플 추천 (보존: RPC 불가 시 임시 사용) ──
     const demo=[
       {product_code:"S22499", product_name:"상의-에센셜 Shell",     option:"[화이트-90(S)]", qty:120, unit_cost:0, note:"일평균 8.5, 잔여 6일"},
       {product_code:"S26523", product_name:"상의-에센셜 Wavy",      option:"[멜란지-100(L)]", qty:90,  unit_cost:0, note:"일평균 6.2, 잔여 9일"},
       {product_code:"S25869", product_name:"상의-에센셜 WeWe",      option:"[화이트-95(M)]", qty:60,  unit_cost:0, note:"일평균 4.1, 잔여 12일"},
       {product_code:"S21688", product_name:"하의-버뮤다팬츠 Teen",  option:"[멜란지-L]",     qty:45,  unit_cost:0, note:"일평균 3.0, 잔여 14일"},
       {product_code:"S16855", product_name:"상의-에센셜 Bluetag",   option:"[화이트-95(M)]", qty:80,  unit_cost:0, note:"일평균 5.5, 잔여 10일"},
-    ].sort((a,b)=>b.qty-a.qty); // 수량 큰 순
+    ].sort((a,b)=>b.qty-a.qty);
     if(items.length>0&&!window.confirm("현재 품목을 추천 결과로 교체할까요?"))return;
-    setItems(demo); // 조용히 반영(alert 없음)
-
-    /* ── 실데이터 경로 (inventory 500 복구 후 이 블록으로 교체) ──
-    const rows=(reorderData||[]).filter(r=>Number(r.need30)>0); // 30일 기준 부족분만
+    setItems(demo);
+    */
+    /* ── useReorderData(재고+판매 병합) 기반 경로 (보존) ──
+    const rows=(reorderData||[]).filter(r=>Number(r.need30)>0);
     if(rows.length===0){alert("추천할 부족 품목이 없습니다");return;}
     if(items.length>0&&!window.confirm("현재 품목을 추천 결과로 교체할까요?"))return;
     const recItems=[...rows]
-      .sort((a,b)=>Number(b.need30)-Number(a.need30)) // 부족 큰 순
+      .sort((a,b)=>Number(b.need30)-Number(a.need30))
       .map(r=>{
         const dailyAvg=Number(r.dailyAvg)||0;
         const daysLeft=r.daysLeft;
@@ -3454,7 +3434,7 @@ function PrintOrderCreate(){
           qty:Number(r.need30)||0,
           unit_cost:0,
           note:`일평균 ${dailyAvg.toFixed(1)}, 잔여 ${daysLeft==null?"-":Math.round(daysLeft)}일`,
-          image_url:r.이미지URL||"", // 엑셀 이미지 삽입에 재사용
+          image_url:r.이미지URL||"",
         };
       });
     setItems(recItems);
@@ -3588,7 +3568,9 @@ function PrintOrderCreate(){
       {/* 발주 기본정보 */}
       <SectionCard title="🧾 발주 기본정보"
         actions={<div style={{display:"flex",gap:8}}>
-          <SmallBtn onClick={recommend}>✨ 자동 추천</SmallBtn>
+          {recLoading
+            ?<span title="추천 분석 중" style={{padding:"8px 14px",borderRadius:8,border:"1px solid #CBD5E1",background:"#F8FAFC",color:"#94A3B8",fontSize:14,fontWeight:600,cursor:"not-allowed"}}>✨ 분석 중...</span>
+            :<SmallBtn onClick={recommend}>✨ 자동 추천</SmallBtn>}
           <SmallBtn onClick={generatePrintOrderExcel}>📊 엑셀 다운로드</SmallBtn>
         </div>}>
         <div style={grid}>
@@ -3605,28 +3587,7 @@ function PrintOrderCreate(){
         </div>
       </SectionCard>
 
-      {/* 승인 품목 (선택 업체의 승인완료 디자인) */}
-      {head.supplier&&(
-        <SectionCard title="✅ 승인 품목" subtitle={`${head.supplier} · 승인완료 디자인 → 발주 담기`}>
-          {approvedLoading?(
-            <div style={{textAlign:"center",padding:20,color:"#94A3B8",fontSize:14}}>⏳ 불러오는 중...</div>
-          ):approved.length===0?(
-            <div style={{textAlign:"center",padding:20,color:"#94A3B8",fontSize:14}}>승인완료 품목이 없습니다</div>
-          ):(
-            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-              {approved.map(a=>(
-                <div key={a.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",borderRadius:8,border:"1px solid #E2E8F0",background:"#F8FAFC"}}>
-                  <div style={{minWidth:0}}>
-                    <div style={{fontSize:13,fontWeight:600,color:"#1E293B"}}>{a.design_name||"-"}</div>
-                    <div style={{fontSize:12,color:"#64748B"}}>₩{Number(a.unit_cost||0).toLocaleString()}</div>
-                  </div>
-                  <SmallBtn primary onClick={()=>addDesignToOrder(a)}>발주 담기</SmallBtn>
-                </div>
-              ))}
-            </div>
-          )}
-        </SectionCard>
-      )}
+      {/* 승인 품목 칩 UI 제거됨(발주품은 자동추천으로 채움). 관련 로직은 커밋 6151553 참고. */}
 
       {/* 발주 품목 표 */}
       <SectionCard title="📦 발주 품목">
