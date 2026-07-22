@@ -5462,10 +5462,10 @@ export default function Dashboard(){
     {id:"overview",label:"대시보드",icon:"⬡",hidden:true}, // 메뉴에서만 숨김(컴포넌트·renderOverview 유지, hidden 제거 시 복원)
     {id:"schedule",label:"입고 스케줄",icon:"📅"},
     {id:"ordertrack",label:"오더 입고현황",icon:"📊"},
+    {id:"print",label:"프린팅 외주",icon:"🖨️"},
     {id:"productdb",label:"제품 DB",icon:"🗃"},
     {id:"planning",label:"아이템 기획",icon:"💡",hidden:true},
     {id:"sample",label:"작업지시서",icon:"📝"},
-    {id:"print",label:"프린팅 외주",icon:"🖨️"},
     {id:"measure",label:"실측 사이즈",icon:"📐",hidden:true},
     {id:"products",label:"상품 마스터",icon:"📋",hidden:true},
   ];
