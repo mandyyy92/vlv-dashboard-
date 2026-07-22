@@ -3134,6 +3134,30 @@ function PrintOrderCreate(){
   const emptyItem=()=>({product_code:"",product_name:"",option:"",qty:"",unit_cost:"",note:""});
   const[items,setItems]=useState([]);
 
+  // 자동 추천 — 기존 리오더 데이터(재고+판매 병합) 재사용, 읽기 전용.
+  const{data:reorderData,loading:reorderLoading}=useReorderData();
+  const recommend=()=>{
+    const rows=(reorderData||[]).filter(r=>Number(r.need30)>0); // 30일 기준 부족분만
+    if(rows.length===0){alert("추천할 부족 품목이 없습니다");return;}
+    if(items.length>0&&!window.confirm("현재 품목을 추천 결과로 교체할까요?"))return;
+    const recItems=[...rows]
+      .sort((a,b)=>Number(b.need30)-Number(a.need30)) // 부족 큰 순
+      .map(r=>{
+        const dailyAvg=Number(r.dailyAvg)||0;
+        const daysLeft=r.daysLeft;
+        return{
+          product_code:r.상품코드||r.바코드||"",
+          product_name:r.상품명||"",
+          option:r.옵션||"",
+          qty:Number(r.need30)||0,
+          unit_cost:0,
+          note:`일평균 ${dailyAvg.toFixed(1)}, 잔여 ${daysLeft==null?"-":Math.round(daysLeft)}일`,
+          image_url:r.이미지URL||"", // 엑셀 이미지 삽입에 재사용
+        };
+      });
+    setItems(recItems);
+  };
+
   const setHeadField=(k,v)=>setHead(p=>({...p,[k]:v}));
   const itemEdit=(ri,key,val)=>setItems(rows=>rows.map((r,i)=>i===ri?{...r,[key]:val}:r));
   const itemAddRow=()=>setItems(rows=>[...rows,emptyItem()]);
@@ -3261,7 +3285,9 @@ function PrintOrderCreate(){
       {/* 발주 기본정보 */}
       <SectionCard title="🧾 발주 기본정보"
         actions={<div style={{display:"flex",gap:8}}>
-          <span title="자동 추천 (준비 중)" style={{padding:"8px 14px",borderRadius:8,border:"1px solid #CBD5E1",background:"#F8FAFC",color:"#94A3B8",fontSize:14,fontWeight:600,cursor:"not-allowed"}}>✨ 자동 추천</span>
+          {reorderLoading
+            ?<span title="재고·판매 분석 중" style={{padding:"8px 14px",borderRadius:8,border:"1px solid #CBD5E1",background:"#F8FAFC",color:"#94A3B8",fontSize:14,fontWeight:600,cursor:"not-allowed"}}>✨ 분석 중...</span>
+            :<SmallBtn onClick={recommend}>✨ 자동 추천</SmallBtn>}
           <SmallBtn onClick={generatePrintOrderExcel}>📊 엑셀 다운로드</SmallBtn>
         </div>}>
         <div style={grid}>
