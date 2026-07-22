@@ -3392,7 +3392,6 @@ function PrintOrderCreate(){
       const list=Array.isArray(rows)?rows:[];
       if(list.length===0){alert("이 업체의 승인 품목 중 추천할 부족 품목이 없습니다");return;}
       if(items.length>0&&!window.confirm("현재 품목을 추천 결과로 교체할까요?"))return;
-      // 추천수량 큰 순으로 이미 정렬돼 옴 → 그대로 매핑 (단가는 RPC 반환값 사용)
       const recItems=list.map(row=>({
         product_code:row.상품코드||"",
         product_name:row.상품명||"",
@@ -3401,6 +3400,11 @@ function PrintOrderCreate(){
         unit_cost:Number(row.단가)||0,
         note:"",
       }));
+      // 같은 상품끼리 모이도록 클라이언트 정렬: 1차 상품명, 2차 옵션(색상·사이즈)
+      recItems.sort((a,b)=>
+        (a.product_name||"").localeCompare(b.product_name||"","ko")
+        || (a.option||"").localeCompare(b.option||"","ko")
+      );
       setItems(recItems);
     }catch(e){
       alert("자동 추천 실패: "+String(e?.message||e));
