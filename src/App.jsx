@@ -3587,18 +3587,33 @@ function PrintSupplierManage(){
       onFocus={()=>setCostFocus(p.id)}
       onChange={e=>editLocal(p.id,"unit_cost",e.target.value)}
       onBlur={e=>{setCostFocus(null);commitCost(p.id,e.target.value);}}
-      style={{...cellInput,textAlign:"right",width:120,maxWidth:120,flex:"none",marginLeft:"auto",display:"block"}}/>;
+      style={{...cellInput,textAlign:"right",width:110,maxWidth:110,flex:"none",marginLeft:"auto",display:"block"}}/>;
   };
   const sampleSelect=p=>{
     const v=p.sample_status||"미승인";const c=pspSampleColor(v);
     return(
       <select value={v} onChange={e=>changeSample(p.id,e.target.value)}
-        style={{...cellInput,cursor:"pointer",fontWeight:700,color:c,background:`${c}18`,borderColor:`${c}55`}}>
+        style={{...cellInput,width:120,cursor:"pointer",fontWeight:700,color:c,background:`${c}18`,borderColor:`${c}55`}}>
         {PSP_SAMPLE_OPTS.map(o=>{const oc=pspSampleColor(o);return(<option key={o} value={o} style={{color:oc,background:`${oc}18`}}>{o}</option>);})}
       </select>
     );
   };
-  const delBtn=p=><SmallBtn danger onClick={()=>removeProduct(p.id)}>삭제</SmallBtn>;
+  const delBtn=p=><button type="button" title="삭제" onClick={()=>removeProduct(p.id)} style={{border:"none",background:"none",cursor:"pointer",fontSize:16,color:"#DC2626",padding:"2px 4px",lineHeight:1}}>🗑</button>;
+
+  // 고정폭 테이블 (모든 업체/상품 표의 컬럼 정렬 통일: 상품명 가변 / 단가 140 / 샘플 130 / 삭제 60)
+  const fixedTable=(headers,children)=>(
+    <div style={{overflowX:"auto",overflowY:"auto",maxHeight:420,borderRadius:10,border:"1px solid #E2E8F0"}}>
+      <table style={{width:"100%",borderCollapse:"collapse",fontSize:15,tableLayout:"fixed"}}>
+        <colgroup><col/><col style={{width:140}}/><col style={{width:130}}/><col style={{width:60}}/></colgroup>
+        <thead style={{position:"sticky",top:0,zIndex:1}}>
+          <tr style={{background:"#F8FAFC"}}>
+            {headers.map((h,i)=>(<th key={i} style={{padding:"10px 14px",textAlign:i===1?"right":i===3?"center":"left",fontWeight:600,color:"#64748B",fontSize:13,letterSpacing:0.4,borderBottom:"1px solid #E2E8F0",whiteSpace:"nowrap",textTransform:"uppercase"}}>{h}</th>))}
+          </tr>
+        </thead>
+        <tbody>{children}</tbody>
+      </table>
+    </div>
+  );
 
   // [업체별] 업체 → 상품 목록
   const bySupplier=useMemo(()=>{
@@ -3665,16 +3680,16 @@ function PrintSupplierManage(){
               {list.length===0?(
                 <div style={{textAlign:"center",padding:24,color:"#94A3B8",fontSize:13}}>등록된 상품이 없습니다 · 상단 “+ 추가”</div>
               ):(
-                <Table headers={["상품명","단가(VAT포함)","샘플상태",""]} maxH={420}>
-                  {list.map(p=>(
+                fixedTable(["상품명","단가(VAT포함)","샘플상태",""],
+                  list.map(p=>(
                     <tr key={p.id}>
-                      <Td style={{fontWeight:600}}>{p.design_name||"-"}</Td>
-                      <Td style={{minWidth:120}}>{costInput(p)}</Td>
-                      <Td style={{whiteSpace:"nowrap"}}>{sampleSelect(p)}</Td>
+                      <Td style={{fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.design_name||"-"}</Td>
+                      <Td style={{textAlign:"right"}}>{costInput(p)}</Td>
+                      <Td>{sampleSelect(p)}</Td>
                       <Td style={{textAlign:"center"}}>{delBtn(p)}</Td>
                     </tr>
-                  ))}
-                </Table>
+                  ))
+                )
               )}
             </SectionCard>
           );
@@ -3687,20 +3702,20 @@ function PrintSupplierManage(){
           <SectionCard title="📦 상품별 단가 비교"><div style={{textAlign:"center",padding:40,color:"#94A3B8",fontSize:14}}>표시할 디자인이 없습니다{search?" · 검색어를 확인하세요":""}</div></SectionCard>
         ):byDesign.map(g=>(
           <SectionCard key={g.key} title={`📦 ${g.design_name||"(디자인 미지정)"}`} subtitle={`${g.style_group||"스타일그룹 미지정"} · 업체 ${g.rows.length}곳`}>
-            <Table headers={["업체","단가(VAT포함)","샘플상태",""]} maxH={420}>
-              {g.rows.map(p=>{
+            {fixedTable(["업체","단가(VAT포함)","샘플상태",""],
+              g.rows.map(p=>{
                 const cost=Number(p.unit_cost)||0;
                 const isLowest=g.minCost!=null&&cost===g.minCost&&cost>0;
                 return(
                   <tr key={p.id}>
-                    <Td style={{fontWeight:600,whiteSpace:"nowrap"}}>{supName.get(String(p.supplier_id))||"-"}{isLowest&&<span style={{marginLeft:8}}><Badge color="#16A34A">최저가</Badge></span>}</Td>
-                    <Td style={{minWidth:120}}>{costInput(p)}</Td>
-                    <Td style={{whiteSpace:"nowrap"}}>{sampleSelect(p)}</Td>
+                    <Td style={{fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{supName.get(String(p.supplier_id))||"-"}{isLowest&&<span style={{marginLeft:8}}><Badge color="#16A34A">최저가</Badge></span>}</Td>
+                    <Td style={{textAlign:"right"}}>{costInput(p)}</Td>
+                    <Td>{sampleSelect(p)}</Td>
                     <Td style={{textAlign:"center"}}>{delBtn(p)}</Td>
                   </tr>
                 );
-              })}
-            </Table>
+              })
+            )}
           </SectionCard>
         ))
       )}
