@@ -3587,27 +3587,27 @@ function PrintSupplierManage(){
       onFocus={()=>setCostFocus(p.id)}
       onChange={e=>editLocal(p.id,"unit_cost",e.target.value)}
       onBlur={e=>{setCostFocus(null);commitCost(p.id,e.target.value);}}
-      style={{...cellInput,textAlign:"right",width:110,maxWidth:110,flex:"none",marginLeft:"auto",display:"block"}}/>;
+      style={{...cellInput,textAlign:"right"}}/>;
   };
   const sampleSelect=p=>{
     const v=p.sample_status||"미승인";const c=pspSampleColor(v);
     return(
       <select value={v} onChange={e=>changeSample(p.id,e.target.value)}
-        style={{...cellInput,width:120,cursor:"pointer",fontWeight:700,color:c,background:`${c}18`,borderColor:`${c}55`}}>
+        style={{...cellInput,cursor:"pointer",fontWeight:700,color:c,background:`${c}18`,borderColor:`${c}55`}}>
         {PSP_SAMPLE_OPTS.map(o=>{const oc=pspSampleColor(o);return(<option key={o} value={o} style={{color:oc,background:`${oc}18`}}>{o}</option>);})}
       </select>
     );
   };
   const delBtn=p=><button type="button" title="삭제" onClick={()=>removeProduct(p.id)} style={{border:"none",background:"none",cursor:"pointer",fontSize:16,color:"#DC2626",padding:"2px 4px",lineHeight:1}}>🗑</button>;
 
-  // 고정폭 테이블 (모든 업체/상품 표의 컬럼 정렬 통일: 상품명 가변 / 단가 140 / 샘플 130 / 삭제 60)
+  // 고정폭 테이블 — 컬럼을 왼쪽에 콤팩트하게(상품명 220 / 단가 130 / 샘플 120 / 삭제 50). 표는 필요한 폭만 차지, 카드 내 좌측정렬.
   const fixedTable=(headers,children)=>(
-    <div style={{overflowX:"auto",overflowY:"auto",maxHeight:420,borderRadius:10,border:"1px solid #E2E8F0"}}>
-      <table style={{width:"100%",borderCollapse:"collapse",fontSize:15,tableLayout:"fixed"}}>
-        <colgroup><col/><col style={{width:140}}/><col style={{width:130}}/><col style={{width:60}}/></colgroup>
+    <div style={{display:"inline-block",maxWidth:"100%",verticalAlign:"top",overflowX:"auto",overflowY:"auto",maxHeight:420,borderRadius:10,border:"1px solid #E2E8F0"}}>
+      <table style={{width:"auto",borderCollapse:"collapse",fontSize:15,tableLayout:"fixed"}}>
+        <colgroup><col style={{width:220}}/><col style={{width:130}}/><col style={{width:120}}/><col style={{width:50}}/></colgroup>
         <thead style={{position:"sticky",top:0,zIndex:1}}>
           <tr style={{background:"#F8FAFC"}}>
-            {headers.map((h,i)=>(<th key={i} style={{padding:"10px 14px",textAlign:i===1?"right":i===3?"center":"left",fontWeight:600,color:"#64748B",fontSize:13,letterSpacing:0.4,borderBottom:"1px solid #E2E8F0",whiteSpace:"nowrap",textTransform:"uppercase"}}>{h}</th>))}
+            {headers.map((h,i)=>(<th key={i} style={{padding:"10px 12px",textAlign:i===1?"right":i===3?"center":"left",fontWeight:600,color:"#64748B",fontSize:13,letterSpacing:0.4,borderBottom:"1px solid #E2E8F0",whiteSpace:"nowrap",textTransform:"uppercase"}}>{h}</th>))}
           </tr>
         </thead>
         <tbody>{children}</tbody>
