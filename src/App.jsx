@@ -3359,8 +3359,11 @@ function PrintHistory(){
 // 프린팅 외주 발주서 작성 (UI 뼈대 · state만, DB 저장 없음). 추천·엑셀은 다음 단계.
 function PrintOrderCreate(){
   const[head,setHead]=useState({supplier:"",supplier_id:"",round_no:"",season:"",order_date:"",expected_date:""});
-  const emptyItem=()=>({product_code:"",product_name:"",option:"",qty:"",unit_cost:"",note:""});
-  const[items,setItems]=useState([]);
+  // 업체별 그룹 모델: [{supplier_id, supplier_name, items:[{uid,product_code,product_name,option,qty,unit_cost}]}]
+  const[groups,setGroups]=useState([]);
+  const uidRef=useRef(0);
+  const nextUid=()=>`u${++uidRef.current}`;
+  const sortItems=(arr)=>arr.sort((a,b)=>(a.product_name||"").localeCompare(b.product_name||"","ko")||(a.option||"").localeCompare(b.option||"","ko"));
 
   // 업체 드롭다운용 목록 (print_suppliers 읽기, 실패해도 화면 유지)
   const[supplierList,setSupplierList]=useState([]);
@@ -3376,86 +3379,104 @@ function PrintOrderCreate(){
     return()=>{alive=false;};
   },[]);
 
-  // 자동 추천 — RPC get_print_reorder(읽기)로 부족 품목 조회 → 품목표 채움
+  // 자동 추천 — RPC get_print_reorder_all(읽기): 전체 부족품 → 업체별 그룹
   const[recLoading,setRecLoading]=useState(false);
   const recommend=async()=>{
-    if(!head.supplier_id){alert("먼저 업체를 선택하세요");return;}
     setRecLoading(true);
     try{
-      const r=await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_print_reorder`,{
+      const r=await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_print_reorder_all`,{
         method:"POST",
         headers:{...sbHeaders,"Content-Type":"application/json"},
-        body:JSON.stringify({days_cover:30,p_supplier_id:head.supplier_id}),
+        body:JSON.stringify({days_cover:30}),
       });
       if(!r.ok){const b=await r.text().catch(()=>"");throw new Error(`HTTP ${r.status} ${b.slice(0,200)}`);}
       const rows=await r.json();
       const list=Array.isArray(rows)?rows:[];
-      if(list.length===0){alert("이 업체의 승인 품목 중 추천할 부족 품목이 없습니다");return;}
-      if(items.length>0&&!window.confirm("현재 품목을 추천 결과로 교체할까요?"))return;
-      const recItems=list.map(row=>({
-        product_code:row.상품코드||"",
-        product_name:row.상품명||"",
-        option:row.옵션||"",           // 품목표 스키마 필드는 option
-        qty:Number(row.추천수량)||0,
-        unit_cost:Number(row.단가)||0,
-        note:"",
-      }));
-      // 같은 상품끼리 모이도록 클라이언트 정렬: 1차 상품명, 2차 옵션(색상·사이즈)
-      recItems.sort((a,b)=>
-        (a.product_name||"").localeCompare(b.product_name||"","ko")
-        || (a.option||"").localeCompare(b.option||"","ko")
-      );
-      setItems(recItems);
+      if(list.length===0){alert("추천할 부족 품목이 없습니다");return;}
+      if(groups.length>0&&!window.confirm("현재 추천 결과를 새로 교체할까요?"))return;
+      // 업체명으로 그룹핑
+      const bySup=new Map();
+      list.forEach(row=>{
+        const name=row.업체명||"(미지정)";
+        if(!bySup.has(name))bySup.set(name,{supplier_id:row.supplier_id??null,supplier_name:name,items:[]});
+        bySup.get(name).items.push({
+          uid:nextUid(),
+          product_code:row.상품코드||"",
+          product_name:row.상품명||"",
+          option:row.옵션||"",
+          qty:Number(row.추천수량)||0,
+          unit_cost:Number(row.단가)||0,
+        });
+      });
+      const arr=[...bySup.values()];
+      arr.forEach(g=>sortItems(g.items));                          // 그룹 내 상품명·옵션 순
+      arr.sort((a,b)=>a.supplier_name.localeCompare(b.supplier_name,"ko"));
+      setGroups(arr);
     }catch(e){
       alert("자동 추천 실패: "+String(e?.message||e));
     }finally{
       setRecLoading(false);
     }
-
-    /* ── 데모(발표)용 샘플 추천 (보존: RPC 불가 시 임시 사용) ──
-    const demo=[
-      {product_code:"S22499", product_name:"상의-에센셜 Shell",     option:"[화이트-90(S)]", qty:120, unit_cost:0, note:"일평균 8.5, 잔여 6일"},
-      {product_code:"S26523", product_name:"상의-에센셜 Wavy",      option:"[멜란지-100(L)]", qty:90,  unit_cost:0, note:"일평균 6.2, 잔여 9일"},
-      {product_code:"S25869", product_name:"상의-에센셜 WeWe",      option:"[화이트-95(M)]", qty:60,  unit_cost:0, note:"일평균 4.1, 잔여 12일"},
-      {product_code:"S21688", product_name:"하의-버뮤다팬츠 Teen",  option:"[멜란지-L]",     qty:45,  unit_cost:0, note:"일평균 3.0, 잔여 14일"},
-      {product_code:"S16855", product_name:"상의-에센셜 Bluetag",   option:"[화이트-95(M)]", qty:80,  unit_cost:0, note:"일평균 5.5, 잔여 10일"},
-    ].sort((a,b)=>b.qty-a.qty);
-    if(items.length>0&&!window.confirm("현재 품목을 추천 결과로 교체할까요?"))return;
-    setItems(demo);
-    */
-    /* ── useReorderData(재고+판매 병합) 기반 경로 (보존) ──
-    const rows=(reorderData||[]).filter(r=>Number(r.need30)>0);
-    if(rows.length===0){alert("추천할 부족 품목이 없습니다");return;}
-    if(items.length>0&&!window.confirm("현재 품목을 추천 결과로 교체할까요?"))return;
-    const recItems=[...rows]
-      .sort((a,b)=>Number(b.need30)-Number(a.need30))
-      .map(r=>{
-        const dailyAvg=Number(r.dailyAvg)||0;
-        const daysLeft=r.daysLeft;
-        return{
-          product_code:r.상품코드||r.바코드||"",
-          product_name:r.상품명||"",
-          option:r.옵션||"",
-          qty:Number(r.need30)||0,
-          unit_cost:0,
-          note:`일평균 ${dailyAvg.toFixed(1)}, 잔여 ${daysLeft==null?"-":Math.round(daysLeft)}일`,
-          image_url:r.이미지URL||"",
-        };
-      });
-    setItems(recItems);
-    */
   };
 
+  // ── 드래그앤드롭(라이브러리 없이 HTML5) ──
+  const dragRef=useRef(null);              // {fromSupplier, uid}
+  const[dragOver,setDragOver]=useState(null); // 하이라이트 대상 업체명
+  const onDragStart=(e,supplierName,uid)=>{
+    dragRef.current={fromSupplier:supplierName,uid};
+    e.dataTransfer.effectAllowed="move";
+    try{e.dataTransfer.setData("text/plain",JSON.stringify({fromSupplier:supplierName,uid}));}catch(_){/*noop*/}
+  };
+  const onDragOverCard=(e,supplierName)=>{e.preventDefault();e.dataTransfer.dropEffect="move";if(dragOver!==supplierName)setDragOver(supplierName);};
+  const onDragLeaveCard=(supplierName)=>setDragOver(cur=>cur===supplierName?null:cur);
+  const onDropCard=(e,targetName)=>{
+    e.preventDefault();setDragOver(null);
+    let p=dragRef.current;
+    if(!p){try{p=JSON.parse(e.dataTransfer.getData("text/plain"));}catch(_){p=null;}}
+    dragRef.current=null;
+    if(!p||p.fromSupplier===targetName)return;
+    moveItem(p.fromSupplier,p.uid,targetName);
+  };
+  // 품목을 다른 업체 그룹으로 이동 + 대상 업체 단가로 갱신(없으면 기존 유지)
+  const moveItem=(fromName,uid,toName)=>{
+    const dst=groups.find(g=>g.supplier_name===toName);
+    const src=groups.find(g=>g.supplier_name===fromName);
+    const it=src?src.items.find(x=>x.uid===uid):null;
+    if(!dst||!it)return;
+    const targetId=dst.supplier_id, designName=it.product_name;
+    setGroups(prev=>{
+      const next=prev.map(g=>({...g,items:g.items.filter(x=>x.uid!==uid)}));
+      const target=next.find(g=>g.supplier_name===toName);
+      if(target){target.items.push({...it,supplier_name:toName});sortItems(target.items);}
+      return next;
+    });
+    updateMovedPrice(toName,targetId,uid,designName);
+  };
+  // 대상 업체의 그 디자인 단가 조회 → 적용(없으면 기존 유지). print_supplier_products 읽기.
+  const updateMovedPrice=async(toName,targetId,uid,designName)=>{
+    if(targetId==null||!designName)return;
+    try{
+      const url=`${SUPABASE_URL}/rest/v1/print_supplier_products?select=unit_cost&supplier_id=eq.${encodeURIComponent(targetId)}&design_name=eq.${encodeURIComponent(designName)}&limit=1`;
+      const r=await fetch(url,{headers:sbHeaders});
+      if(!r.ok)return;
+      const d=await r.json();
+      const price=(Array.isArray(d)&&d[0]!=null)?Number(d[0].unit_cost):null;
+      if(price==null||Number.isNaN(price))return; // 없으면 기존 유지
+      setGroups(prev=>prev.map(g=>g.supplier_name===toName?{...g,items:g.items.map(x=>x.uid===uid?{...x,unit_cost:price}:x)}:g));
+    }catch(e){console.warn("[PrintOrderCreate] 이동 단가 조회 실패",e);}
+  };
+  const editQty=(supplierName,uid,val)=>setGroups(prev=>prev.map(g=>g.supplier_name===supplierName?{...g,items:g.items.map(x=>x.uid===uid?{...x,qty:val}:x)}:g));
+  const removeItem=(supplierName,uid)=>setGroups(prev=>prev.map(g=>g.supplier_name===supplierName?{...g,items:g.items.filter(x=>x.uid!==uid)}:g));
+
   const setHeadField=(k,v)=>setHead(p=>({...p,[k]:v}));
-  const itemEdit=(ri,key,val)=>setItems(rows=>rows.map((r,i)=>i===ri?{...r,[key]:val}:r));
-  const itemAddRow=()=>setItems(rows=>[...rows,emptyItem()]);
-  const itemRemoveRow=ri=>setItems(rows=>rows.filter((_,i)=>i!==ri));
 
   const nToNum=v=>{const d=String(v==null?"":v).replace(/[^\d.]/g,"");return d===""?0:Number(d);};
-  const amount=r=>nToNum(r.qty)*nToNum(r.unit_cost);
-  const totalQty=useMemo(()=>items.reduce((s,r)=>s+nToNum(r.qty),0),[items]);
-  const totalAmount=useMemo(()=>items.reduce((s,r)=>s+amount(r),0),[items]);
+  const amount=it=>nToNum(it.qty)*nToNum(it.unit_cost);
   const fmt=n=>Number(n||0).toLocaleString();
+  // 전체 요약(모든 그룹 합산)
+  const allItems=useMemo(()=>groups.flatMap(g=>g.items),[groups]);
+  const grandQty=useMemo(()=>allItems.reduce((s,it)=>s+nToNum(it.qty),0),[allItems]);
+  const grandAmount=useMemo(()=>allItems.reduce((s,it)=>s+amount(it),0),[allItems]);
 
   // 스타일 헬퍼(WorkorderForm 패턴 재사용)
   const labelStyle={fontSize:13,fontWeight:700,color:"#475569",marginBottom:6,display:"block"};
@@ -3466,98 +3487,47 @@ function PrintOrderCreate(){
   const specCell={width:"100%",padding:"6px 8px",borderRadius:6,border:"1px solid #CBD5E1",fontSize:13,outline:"none",boxSizing:"border-box",textAlign:"center"};
   const specIconBtn={border:"none",background:"none",cursor:"pointer",fontSize:15,padding:"2px 4px",lineHeight:1};
 
-  // 엑셀 다운로드 — 업로드 양식과 동일 포맷(상품명 그룹 병합 + 이미지). ExcelJS CDN 동적 로드.
-  const generatePrintOrderExcel=async()=>{
-    if(items.length===0){alert("발주 품목이 없습니다. 품목을 먼저 추가하세요.");return;}
+  // 업체별 엑셀 다운로드 — 기존 "상품별 수량" 포맷 재사용(비고 빈칸). 파일명 업체별.
+  const exportSupplierExcel=async(g)=>{
+    const list=g.items||[];
+    if(list.length===0){alert("이 업체에 발주 품목이 없습니다.");return;}
     try{
       const ExcelJS=await loadExcelJS();
       const wb=new ExcelJS.Workbook();
       const ws=wb.addWorksheet("상품별 수량");
-
-      // 열 너비 (A~F)
-      ws.getColumn(1).width=13.4; // A 이미지
-      ws.getColumn(2).width=12;   // B 상품코드
-      ws.getColumn(3).width=29.5; // C 상품명
-      ws.getColumn(4).width=20.5; // D 옵션
-      ws.getColumn(5).width=8.1;  // E 총수량
-      ws.getColumn(6).width=33.4; // F 비고
-
-      // 헤더행 (1행)
+      ws.getColumn(1).width=13.4; ws.getColumn(2).width=12; ws.getColumn(3).width=29.5;
+      ws.getColumn(4).width=20.5; ws.getColumn(5).width=8.1; ws.getColumn(6).width=33.4;
       const header=["이미지","상품코드","상품명","옵션","총수량","비고"];
       header.forEach((h,i)=>{ws.getRow(1).getCell(i+1).value=h;});
 
-      // 상품명 기준 그룹핑 (같은 상품명이 연속되도록 삽입순 유지)
+      // 상품명 기준 그룹핑(삽입순 유지)
       const order=[]; const seen=new Map();
-      items.forEach(it=>{const k=it.product_name||""; if(!seen.has(k)){seen.set(k,[]);order.push(k);} seen.get(k).push(it);});
-
-      // 데이터행 (헤더가 1행 → 2행부터)
-      let ri=2;
-      const groups=[]; // {name,start,end,image_url,note}
+      list.forEach(it=>{const k=it.product_name||""; if(!seen.has(k)){seen.set(k,[]);order.push(k);} seen.get(k).push(it);});
+      let ri=2; const eg=[]; // {name,start,end}
       order.forEach(k=>{
-        const arr=seen.get(k);
-        const start=ri;
-        arr.forEach(it=>{
-          const row=ws.getRow(ri);
-          row.getCell(2).value=it.product_code||"";
-          row.getCell(4).value=it.option||"";
-          row.getCell(5).value=nToNum(it.qty);
-          ri++;
-        });
+        const arr=seen.get(k); const start=ri;
+        arr.forEach(it=>{const row=ws.getRow(ri); row.getCell(2).value=it.product_code||""; row.getCell(4).value=it.option||""; row.getCell(5).value=nToNum(it.qty); ri++;});
         const end=ri-1;
-        ws.getRow(start).getCell(3).value=k;                 // 상품명: 그룹 첫 행
-        ws.getRow(start).getCell(6).value="";  // 비고: 엑셀 출력 시 항상 빈칸(화면 표의 비고는 유지)
-        groups.push({name:k,start,end,image_url:(arr.find(a=>a.image_url)||{}).image_url||"",note:""});
+        ws.getRow(start).getCell(3).value=k;   // 상품명: 그룹 첫 행
+        ws.getRow(start).getCell(6).value="";  // 비고: 빈칸
+        eg.push({name:k,start,end});
       });
       const lastDataRow=ri-1;
+      eg.forEach(x=>{ if(x.end>x.start){ ws.mergeCells(x.start,1,x.end,1); ws.mergeCells(x.start,3,x.end,3); ws.mergeCells(x.start,6,x.end,6);} });
 
-      // 그룹 병합 (A 이미지 / C 상품명 / F 비고) — 2행 이상일 때만
-      groups.forEach(g=>{
-        if(g.end>g.start){
-          ws.mergeCells(g.start,1,g.end,1);
-          ws.mergeCells(g.start,3,g.end,3);
-          ws.mergeCells(g.start,6,g.end,6);
-        }
-      });
-
-      // 이미지 삽입 (image_url 있을 때만, CORS/네트워크 실패 시 건너뜀)
-      for(const g of groups){
-        if(!g.image_url)continue;
-        try{
-          const resp=await fetch(g.image_url);
-          if(!resp.ok)throw new Error("HTTP "+resp.status);
-          const ab=await resp.arrayBuffer();
-          const ext=/\.png(\?|$)/i.test(g.image_url)?"png":/\.gif(\?|$)/i.test(g.image_url)?"gif":"jpeg";
-          const imgId=wb.addImage({buffer:ab,extension:ext});
-          ws.addImage(imgId,`A${g.start}:A${g.end}`);
-        }catch(e){console.warn("[프린팅발주 엑셀] 이미지 건너뜀:",g.image_url,e);}
-      }
-
-      // 합계행 (A~D 병합 "합 계", E열 SUM)
       const sumRow=lastDataRow+1;
       ws.mergeCells(sumRow,1,sumRow,4);
       ws.getRow(sumRow).getCell(1).value="합 계";
-      ws.getRow(sumRow).getCell(5).value={formula:`SUM(E2:E${lastDataRow})`,result:items.reduce((s,it)=>s+nToNum(it.qty),0)};
+      ws.getRow(sumRow).getCell(5).value={formula:`SUM(E2:E${lastDataRow})`,result:list.reduce((s,it)=>s+nToNum(it.qty),0)};
 
-      // 스타일: 전체 얇은 테두리 + 가운데정렬, 헤더 볼드+배경, 합계 볼드
       const thin={style:"thin",color:{argb:"FFCBD5E1"}};
-      for(let r=1;r<=sumRow;r++){
-        for(let c=1;c<=6;c++){
-          const cell=ws.getRow(r).getCell(c);
-          cell.border={top:thin,left:thin,bottom:thin,right:thin};
-          cell.alignment={vertical:"middle",horizontal:"center",wrapText:true};
-        }
-      }
-      for(let c=1;c<=6;c++){
-        const cell=ws.getRow(1).getCell(c);
-        cell.font={bold:true,color:{argb:"FF1E293B"}};
-        cell.fill={type:"pattern",pattern:"solid",fgColor:{argb:"FFF1F5F9"}};
-      }
+      for(let r=1;r<=sumRow;r++){for(let c=1;c<=6;c++){const cell=ws.getRow(r).getCell(c);cell.border={top:thin,left:thin,bottom:thin,right:thin};cell.alignment={vertical:"middle",horizontal:"center",wrapText:true};}}
+      for(let c=1;c<=6;c++){const cell=ws.getRow(1).getCell(c);cell.font={bold:true,color:{argb:"FF1E293B"}};cell.fill={type:"pattern",pattern:"solid",fgColor:{argb:"FFF1F5F9"}};}
       ws.getRow(sumRow).getCell(1).font={bold:true};
       ws.getRow(sumRow).getCell(5).font={bold:true};
 
-      // 다운로드
       const today=new Date().toISOString().slice(0,10);
-      const fname=`프린팅발주_${head.supplier||""}_${head.round_no||""}차_${today}.xlsx`;
+      const fname=`프린팅발주_${g.supplier_name||""}_${today}.xlsx`;
       const buf=await wb.xlsx.writeBuffer();
       const blob=new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
       const url=URL.createObjectURL(blob);
@@ -3575,8 +3545,7 @@ function PrintOrderCreate(){
         actions={<div style={{display:"flex",gap:8}}>
           {recLoading
             ?<span title="추천 분석 중" style={{padding:"8px 14px",borderRadius:8,border:"1px solid #CBD5E1",background:"#F8FAFC",color:"#94A3B8",fontSize:14,fontWeight:600,cursor:"not-allowed"}}>✨ 분석 중...</span>
-            :<SmallBtn onClick={recommend}>✨ 자동 추천</SmallBtn>}
-          <SmallBtn onClick={generatePrintOrderExcel}>📊 엑셀 다운로드</SmallBtn>
+            :<SmallBtn primary onClick={recommend}>✨ 자동 추천 (전체)</SmallBtn>}
         </div>}>
         <div style={grid}>
           <div><label style={labelStyle}>업체</label>
@@ -3592,55 +3561,69 @@ function PrintOrderCreate(){
         </div>
       </SectionCard>
 
-      {/* 승인 품목 칩 UI 제거됨(발주품은 자동추천으로 채움). 관련 로직은 커밋 6151553 참고. */}
-
-      {/* 발주 품목 표 */}
-      <SectionCard title="📦 발주 품목">
-        {items.length===0?(
-          <div style={{textAlign:"center",padding:40,color:"#94A3B8",fontSize:14}}>품목을 추가하세요 · “+ 품목 추가”</div>
-        ):(
-          <div style={{overflowX:"auto"}}>
-            <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
-              <thead>
-                <tr>
-                  <th style={{...specTh,minWidth:110}}>상품코드</th>
-                  <th style={{...specTh,minWidth:140}}>상품명</th>
-                  <th style={{...specTh,minWidth:110}}>색상·사이즈</th>
-                  <th style={{...specTh,textAlign:"center",minWidth:80}}>의뢰수량</th>
-                  <th style={{...specTh,textAlign:"center",minWidth:90}}>원가</th>
-                  <th style={{...specTh,textAlign:"right",minWidth:100}}>금액</th>
-                  <th style={{...specTh,minWidth:100}}>비고</th>
-                  <th style={{...specTh,width:56,textAlign:"center"}}>삭제</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((r,ri)=>(
-                  <tr key={ri}>
-                    <td style={specTd}><input value={r.product_code} onChange={e=>itemEdit(ri,"product_code",e.target.value)} style={{...specCell,textAlign:"left",fontFamily:"monospace"}}/></td>
-                    <td style={specTd}><input value={r.product_name} onChange={e=>itemEdit(ri,"product_name",e.target.value)} style={{...specCell,textAlign:"left"}}/></td>
-                    <td style={specTd}><input value={r.option} onChange={e=>itemEdit(ri,"option",e.target.value)} style={{...specCell,textAlign:"left"}}/></td>
-                    <td style={specTd}><input value={r.qty} onChange={e=>itemEdit(ri,"qty",e.target.value)} style={specCell}/></td>
-                    <td style={specTd}><input value={r.unit_cost} onChange={e=>itemEdit(ri,"unit_cost",e.target.value)} style={specCell}/></td>
-                    <td style={{...specTd,textAlign:"right",fontWeight:700,color:"#1E293B",whiteSpace:"nowrap",padding:"4px 10px"}}>{fmt(amount(r))}</td>
-                    <td style={specTd}><input value={r.note} onChange={e=>itemEdit(ri,"note",e.target.value)} style={{...specCell,textAlign:"left"}}/></td>
-                    <td style={{...specTd,textAlign:"center",whiteSpace:"nowrap"}}>
-                      <button type="button" title="행 삭제" onClick={()=>itemRemoveRow(ri)} style={{...specIconBtn,color:"#DC2626"}}>🗑</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-        <div style={{marginTop:12,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
-          <SmallBtn onClick={itemAddRow}>+ 품목 추가</SmallBtn>
-          {items.length>0&&(
-            <div style={{fontSize:14,color:"#64748B",fontWeight:600}}>
-              총 수량 {fmt(totalQty)} · 총 금액 {fmt(totalAmount)}
-            </div>
-          )}
+      {/* 전체 요약 바 */}
+      {groups.length>0&&(
+        <div style={{display:"flex",gap:20,flexWrap:"wrap",alignItems:"center",padding:"14px 20px",marginBottom:16,borderRadius:12,background:"#0F172A",color:"#F8FAFC"}}>
+          <div style={{fontSize:14,fontWeight:700}}>📋 발주 요약</div>
+          <div style={{fontSize:14}}>업체 <b>{groups.length}</b></div>
+          <div style={{fontSize:14}}>품목 <b>{fmt(allItems.length)}</b></div>
+          <div style={{fontSize:14}}>총 수량 <b>{fmt(grandQty)}</b></div>
+          <div style={{fontSize:14}}>총 금액 <b>{fmt(grandAmount)}</b></div>
+          <div style={{marginLeft:"auto",fontSize:12,color:"#94A3B8"}}>행을 드래그해 다른 업체로 이동할 수 있어요</div>
         </div>
-      </SectionCard>
+      )}
+
+      {/* 업체별 그룹 카드 (드래그앤드롭 이동) */}
+      {groups.length===0?(
+        <SectionCard title="📦 발주 품목"><div style={{textAlign:"center",padding:40,color:"#94A3B8",fontSize:14}}>“✨ 자동 추천 (전체)”를 눌러 부족 품목을 업체별로 불러오세요</div></SectionCard>
+      ):groups.map(g=>{
+        const gQty=g.items.reduce((s,it)=>s+nToNum(it.qty),0);
+        const gAmt=g.items.reduce((s,it)=>s+amount(it),0);
+        const isOver=dragOver===g.supplier_name;
+        return(
+          <SectionCard key={g.supplier_name} title={`🏢 ${g.supplier_name}`}
+            subtitle={`${g.items.length}품목 · 총수량 ${fmt(gQty)} · 총금액 ${fmt(gAmt)}`}
+            actions={<SmallBtn onClick={()=>exportSupplierExcel(g)}>📊 엑셀 다운로드</SmallBtn>}>
+            <div onDragOver={e=>onDragOverCard(e,g.supplier_name)} onDragLeave={()=>onDragLeaveCard(g.supplier_name)} onDrop={e=>onDropCard(e,g.supplier_name)}
+              style={{border:isOver?"2px dashed #7C3AED":"2px dashed transparent",background:isOver?"#F5F3FF":"transparent",borderRadius:8,padding:2,transition:"all .15s"}}>
+              {g.items.length===0?(
+                <div style={{textAlign:"center",padding:24,color:"#94A3B8",fontSize:13}}>여기로 품목을 끌어다 놓으세요</div>
+              ):(
+                <div style={{overflowX:"auto"}}>
+                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+                    <thead>
+                      <tr>
+                        <th style={{...specTh,minWidth:110}}>상품코드</th>
+                        <th style={{...specTh,minWidth:150}}>상품명</th>
+                        <th style={{...specTh,minWidth:110}}>색상·사이즈</th>
+                        <th style={{...specTh,textAlign:"center",minWidth:80}}>의뢰수량</th>
+                        <th style={{...specTh,textAlign:"right",minWidth:90}}>단가</th>
+                        <th style={{...specTh,textAlign:"right",minWidth:100}}>금액</th>
+                        <th style={{...specTh,width:50,textAlign:"center"}}>삭제</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {g.items.map(it=>(
+                        <tr key={it.uid} draggable onDragStart={e=>onDragStart(e,g.supplier_name,it.uid)} style={{cursor:"grab"}}>
+                          <td style={{...specTd,fontFamily:"monospace",whiteSpace:"nowrap"}}>⠿ {it.product_code}</td>
+                          <td style={{...specTd,fontWeight:600}}>{it.product_name}</td>
+                          <td style={specTd}>{it.option}</td>
+                          <td style={specTd}><input value={it.qty} onChange={e=>editQty(g.supplier_name,it.uid,e.target.value)} style={specCell}/></td>
+                          <td style={{...specTd,textAlign:"right",whiteSpace:"nowrap"}}>{fmt(nToNum(it.unit_cost))}</td>
+                          <td style={{...specTd,textAlign:"right",fontWeight:700,color:"#1E293B",whiteSpace:"nowrap",padding:"4px 10px"}}>{fmt(amount(it))}</td>
+                          <td style={{...specTd,textAlign:"center",whiteSpace:"nowrap"}}>
+                            <button type="button" title="행 삭제" onClick={()=>removeItem(g.supplier_name,it.uid)} style={{...specIconBtn,color:"#DC2626"}}>🗑</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </SectionCard>
+        );
+      })}
     </>
   );
 }
