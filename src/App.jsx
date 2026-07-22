@@ -3763,14 +3763,19 @@ function PrintOutsourcingTab(){
 
   return(
     <>
-      {/* 서브탭 (작업지시서 목록과 동일 pill 스타일) */}
-      <div style={{display:"flex",gap:6,marginBottom:20,flexWrap:"wrap"}}>
-        {subTabs.map(t=>(
-          <button key={t.id} onClick={()=>setSub(t.id)}
-            style={{padding:"9px 18px",borderRadius:8,border:sub===t.id?"none":"1px solid #CBD5E1",background:sub===t.id?"#1E293B":"#FFF",color:sub===t.id?"#F8FAFC":"#475569",fontSize:15,fontWeight:sub===t.id?700:600,cursor:"pointer",letterSpacing:-0.2,transition:"all 0.15s"}}>
-            {t.label}
-          </button>
-        ))}
+      {/* 서브탭 (작업지시서 폼과 동일 텍스트+밑줄 스타일) */}
+      <div style={{display:"flex",gap:4,borderBottom:"2px solid #E2E8F0",marginBottom:20,flexWrap:"wrap"}}>
+        {subTabs.map(t=>{
+          const on=sub===t.id;
+          return(
+            <button key={t.id} type="button" onClick={()=>setSub(t.id)}
+              onMouseEnter={e=>{if(!on)e.currentTarget.style.color="#334155";}}
+              onMouseLeave={e=>{if(!on)e.currentTarget.style.color="#64748B";}}
+              style={{padding:"10px 22px",border:"none",borderBottom:on?"3px solid #7C3AED":"3px solid transparent",background:on?"#FFF":"transparent",color:on?"#7C3AED":"#64748B",fontSize:14,fontWeight:on?700:600,cursor:"pointer",marginBottom:-2,borderTopLeftRadius:8,borderTopRightRadius:8,letterSpacing:-0.2,transition:"all 0.15s"}}>
+              {t.label}
+            </button>
+          );
+        })}
       </div>
 
       {sub==="order"&&<PrintOrderCreate />}
