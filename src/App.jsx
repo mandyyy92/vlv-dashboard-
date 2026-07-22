@@ -5433,7 +5433,7 @@ function ProductMasterTab(){
 
 // ─── Main Dashboard ───
 export default function Dashboard(){
-  const[activeTab,setActiveTab]=useState("overview");
+  const[activeTab,setActiveTab]=useState("schedule"); // 대시보드(overview) 탭 숨김 → 기본 탭을 입고 스케줄로
   const[time,setTime]=useState(new Date());
   useEffect(()=>{const t=setInterval(()=>setTime(new Date()),60000);return()=>clearInterval(t);},[]);
 
@@ -5441,7 +5441,7 @@ export default function Dashboard(){
 
   // hidden:true 인 탭은 메뉴에서만 숨김(컴포넌트/라우팅/데이터는 그대로 보존). 되돌릴 땐 hidden 제거.
   const tabs=[
-    {id:"overview",label:"대시보드",icon:"⬡"},
+    {id:"overview",label:"대시보드",icon:"⬡",hidden:true}, // 메뉴에서만 숨김(컴포넌트·renderOverview 유지, hidden 제거 시 복원)
     {id:"schedule",label:"입고 스케줄",icon:"📅"},
     {id:"ordertrack",label:"오더 입고현황",icon:"📊"},
     {id:"productdb",label:"제품 DB",icon:"🗃"},
