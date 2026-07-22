@@ -3358,26 +3358,15 @@ function PrintHistory(){
 
 // 프린팅 외주 발주서 작성 (UI 뼈대 · state만, DB 저장 없음). 추천·엑셀은 다음 단계.
 function PrintOrderCreate(){
-  const[head,setHead]=useState({supplier:"",supplier_id:"",round_no:"",season:"",order_date:"",expected_date:""});
-  // 업체별 그룹 모델: [{supplier_id, supplier_name, items:[{uid,product_code,product_name,option,qty,unit_cost}]}]
+  // 업체별 그룹 모델: [{supplier_id, supplier_name, items:[{uid,product_code,product_name,option,qty,unit_cost,image_url}]}]
   const[groups,setGroups]=useState([]);
   const uidRef=useRef(0);
   const nextUid=()=>`u${++uidRef.current}`;
   const sortItems=(arr)=>arr.sort((a,b)=>(a.product_name||"").localeCompare(b.product_name||"","ko")||(a.option||"").localeCompare(b.option||"","ko"));
 
-  // 업체 드롭다운용 목록 (print_suppliers 읽기, 실패해도 화면 유지)
-  const[supplierList,setSupplierList]=useState([]);
-  useEffect(()=>{
-    let alive=true;
-    (async()=>{
-      try{
-        const r=await fetch(`${SUPABASE_URL}/rest/v1/print_suppliers?select=id,name&order=name.asc`,{headers:sbHeaders});
-        const d=await r.json();
-        if(r.ok&&Array.isArray(d)&&alive)setSupplierList(d);
-      }catch(e){console.warn("[PrintOrderCreate] 업체 목록 로드 실패",e);}
-    })();
-    return()=>{alive=false;};
-  },[]);
+  // 업체별 발주 메타(차수/발주일/입고예정일) — 업체명 키. { [업체명]: {round_no, order_date, due_date} }
+  const[orderMeta,setOrderMeta]=useState({});
+  const setMeta=(name,key,val)=>setOrderMeta(p=>({...p,[name]:{...(p[name]||{}),[key]:val}}));
 
   // 자동 추천 — RPC get_print_reorder_all(읽기): 전체 부족품 → 업체별 그룹
   const[recLoading,setRecLoading]=useState(false);
@@ -3469,8 +3458,6 @@ function PrintOrderCreate(){
   const editQty=(supplierName,uid,val)=>setGroups(prev=>prev.map(g=>g.supplier_name===supplierName?{...g,items:g.items.map(x=>x.uid===uid?{...x,qty:val}:x)}:g));
   const removeItem=(supplierName,uid)=>setGroups(prev=>prev.map(g=>g.supplier_name===supplierName?{...g,items:g.items.filter(x=>x.uid!==uid)}:g));
 
-  const setHeadField=(k,v)=>setHead(p=>({...p,[k]:v}));
-
   const nToNum=v=>{const d=String(v==null?"":v).replace(/[^\d.]/g,"");return d===""?0:Number(d);};
   const amount=it=>nToNum(it.qty)*nToNum(it.unit_cost);
   const fmt=n=>Number(n||0).toLocaleString();
@@ -3528,7 +3515,8 @@ function PrintOrderCreate(){
       ws.getRow(sumRow).getCell(5).font={bold:true};
 
       const today=new Date().toISOString().slice(0,10);
-      const fname=`프린팅발주_${g.supplier_name||""}_${today}.xlsx`;
+      const meta=orderMeta[g.supplier_name]||{};
+      const fname=`프린팅발주_${g.supplier_name||""}_${meta.round_no||""}차_${meta.order_date||today}.xlsx`;
       const buf=await wb.xlsx.writeBuffer();
       const blob=new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
       const url=URL.createObjectURL(blob);
@@ -3541,25 +3529,15 @@ function PrintOrderCreate(){
 
   return(
     <>
-      {/* 발주 기본정보 */}
-      <SectionCard title="🧾 발주 기본정보"
+      {/* 발주 기본정보 — 자동추천 버튼만(업체·차수 등은 업체 그룹 카드로 이동) */}
+      <SectionCard title="🧾 발주서 작성"
+        subtitle="전체 부족 품목을 업체별로 자동 추천합니다. 차수·발주일은 각 업체 카드에서 입력하세요."
         actions={<div style={{display:"flex",gap:8}}>
           {recLoading
             ?<span title="추천 분석 중" style={{padding:"8px 14px",borderRadius:8,border:"1px solid #CBD5E1",background:"#F8FAFC",color:"#94A3B8",fontSize:14,fontWeight:600,cursor:"not-allowed"}}>✨ 분석 중...</span>
             :<SmallBtn primary onClick={recommend}>✨ 자동 추천 (전체)</SmallBtn>}
         </div>}>
-        <div style={grid}>
-          <div><label style={labelStyle}>업체</label>
-            <select value={head.supplier_id||""} onChange={e=>{const id=e.target.value;const s=supplierList.find(x=>String(x.id)===String(id));setHead(p=>({...p,supplier_id:id,supplier:s?s.name:""}));}} style={{...inputStyle,cursor:"pointer"}}>
-              <option value="">업체 선택</option>
-              {supplierList.map(s=>(<option key={s.id} value={s.id}>{s.name}</option>))}
-            </select>
-          </div>
-          <div><label style={labelStyle}>차수</label><input type="number" value={head.round_no} onChange={e=>setHeadField("round_no",e.target.value)} placeholder="숫자" style={inputStyle}/></div>
-          <div><label style={labelStyle}>시즌</label><input value={head.season} onChange={e=>setHeadField("season",e.target.value)} placeholder="예: 26FW" style={inputStyle}/></div>
-          <div><label style={labelStyle}>발주일</label><input type="date" value={head.order_date} onChange={e=>setHeadField("order_date",e.target.value)} style={inputStyle}/></div>
-          <div><label style={labelStyle}>입고예정일</label><input type="date" value={head.expected_date} onChange={e=>setHeadField("expected_date",e.target.value)} style={inputStyle}/></div>
-        </div>
+        <div style={{fontSize:13,color:"#94A3B8"}}>“✨ 자동 추천 (전체)”를 눌러 시작하세요.</div>
       </SectionCard>
 
       {/* 전체 요약 바 */}
@@ -3581,10 +3559,17 @@ function PrintOrderCreate(){
         const gQty=g.items.reduce((s,it)=>s+nToNum(it.qty),0);
         const gAmt=g.items.reduce((s,it)=>s+amount(it),0);
         const isOver=dragOver===g.supplier_name;
+        const meta=orderMeta[g.supplier_name]||{};
+        const metaInput={padding:"7px 10px",borderRadius:6,border:"1px solid #CBD5E1",fontSize:13,outline:"none",boxSizing:"border-box"};
         return(
           <SectionCard key={g.supplier_name} title={`🏢 ${g.supplier_name}`}
             subtitle={`${g.items.length}품목 · 총수량 ${fmt(gQty)} · 총금액 ${fmt(gAmt)}`}
-            actions={<SmallBtn onClick={()=>exportSupplierExcel(g)}>📊 엑셀 다운로드</SmallBtn>}>
+            actions={<div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+              <label style={{fontSize:12,color:"#64748B",fontWeight:600}}>차수 <input type="number" value={meta.round_no||""} onChange={e=>setMeta(g.supplier_name,"round_no",e.target.value)} placeholder="숫자" style={{...metaInput,width:70,marginLeft:2}}/></label>
+              <label style={{fontSize:12,color:"#64748B",fontWeight:600}}>발주일 <input type="date" value={meta.order_date||""} onChange={e=>setMeta(g.supplier_name,"order_date",e.target.value)} style={{...metaInput,marginLeft:2}}/></label>
+              <label style={{fontSize:12,color:"#64748B",fontWeight:600}}>입고예정일 <input type="date" value={meta.due_date||""} onChange={e=>setMeta(g.supplier_name,"due_date",e.target.value)} style={{...metaInput,marginLeft:2}}/></label>
+              <SmallBtn onClick={()=>exportSupplierExcel(g)}>📊 엑셀 다운로드</SmallBtn>
+            </div>}>
             <div onDragOver={e=>onDragOverCard(e,g.supplier_name)} onDragLeave={()=>onDragLeaveCard(g.supplier_name)} onDrop={e=>onDropCard(e,g.supplier_name)}
               style={{border:isOver?"2px dashed #7C3AED":"2px dashed transparent",background:isOver?"#F5F3FF":"transparent",borderRadius:8,padding:2,transition:"all .15s"}}>
               {g.items.length===0?(
