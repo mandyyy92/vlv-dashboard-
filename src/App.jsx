@@ -3358,7 +3358,7 @@ function PrintHistory(){
 
 // 프린팅 외주 발주서 작성 (UI 뼈대 · state만, DB 저장 없음). 추천·엑셀은 다음 단계.
 function PrintOrderCreate(){
-  const[head,setHead]=useState({supplier:"",round_no:"",season:"",order_date:"",expected_date:""});
+  const[head,setHead]=useState({supplier:"",supplier_id:"",round_no:"",season:"",order_date:"",expected_date:""});
   const emptyItem=()=>({product_code:"",product_name:"",option:"",qty:"",unit_cost:"",note:""});
   const[items,setItems]=useState([]);
 
@@ -3379,25 +3379,26 @@ function PrintOrderCreate(){
   // 자동 추천 — RPC get_print_reorder(읽기)로 부족 품목 조회 → 품목표 채움
   const[recLoading,setRecLoading]=useState(false);
   const recommend=async()=>{
+    if(!head.supplier_id){alert("먼저 업체를 선택하세요");return;}
     setRecLoading(true);
     try{
       const r=await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_print_reorder`,{
         method:"POST",
         headers:{...sbHeaders,"Content-Type":"application/json"},
-        body:JSON.stringify({days_cover:30}),
+        body:JSON.stringify({days_cover:30,p_supplier_id:head.supplier_id}),
       });
       if(!r.ok){const b=await r.text().catch(()=>"");throw new Error(`HTTP ${r.status} ${b.slice(0,200)}`);}
       const rows=await r.json();
       const list=Array.isArray(rows)?rows:[];
-      if(list.length===0){alert("추천할 부족 품목이 없습니다");return;}
+      if(list.length===0){alert("이 업체의 승인 품목 중 추천할 부족 품목이 없습니다");return;}
       if(items.length>0&&!window.confirm("현재 품목을 추천 결과로 교체할까요?"))return;
-      // 추천수량 큰 순으로 이미 정렬돼 옴 → 그대로 매핑
+      // 추천수량 큰 순으로 이미 정렬돼 옴 → 그대로 매핑 (단가는 RPC 반환값 사용)
       const recItems=list.map(row=>({
         product_code:row.상품코드||"",
         product_name:row.상품명||"",
         option:row.옵션||"",           // 품목표 스키마 필드는 option
         qty:Number(row.추천수량)||0,
-        unit_cost:0,
+        unit_cost:Number(row.단가)||0,
         note:"",
       }));
       setItems(recItems);
@@ -3575,9 +3576,9 @@ function PrintOrderCreate(){
         </div>}>
         <div style={grid}>
           <div><label style={labelStyle}>업체</label>
-            <select value={head.supplier} onChange={e=>setHeadField("supplier",e.target.value)} style={{...inputStyle,cursor:"pointer"}}>
+            <select value={head.supplier_id||""} onChange={e=>{const id=e.target.value;const s=supplierList.find(x=>String(x.id)===String(id));setHead(p=>({...p,supplier_id:id,supplier:s?s.name:""}));}} style={{...inputStyle,cursor:"pointer"}}>
               <option value="">업체 선택</option>
-              {supplierList.map(s=>(<option key={s.id} value={s.name}>{s.name}</option>))}
+              {supplierList.map(s=>(<option key={s.id} value={s.id}>{s.name}</option>))}
             </select>
           </div>
           <div><label style={labelStyle}>차수</label><input type="number" value={head.round_no} onChange={e=>setHeadField("round_no",e.target.value)} placeholder="숫자" style={inputStyle}/></div>
