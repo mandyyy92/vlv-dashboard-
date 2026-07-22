@@ -797,12 +797,15 @@ function ScheduleTab(){
     const sumQty=arr=>arr.reduce((s,g)=>s+g.qty,0);
     return {all:groups,production,outsource,productionQty:sumQty(production),outsourceQty:sumQty(outsource)};
   },[thisWeekNotion]);
-  // "입고대기 현황": 오늘 이후의 모든 스케줄
-  const pendingSchedules=useMemo(()=>{
-    const today=new Date().toISOString().slice(0,10);
-    return schedules.filter(s=>{const d=s.kr_date||s.date;return d&&d>=today;}).sort((a,b)=>(a.kr_date||a.date||"").localeCompare(b.kr_date||b.date||""));
-  },[schedules]);
-  const pendingTotalQty=useMemo(()=>pendingSchedules.reduce((sum,s)=>sum+(s.qty||0),0),[pendingSchedules]);
+  // "입고대기 현황": Notion 발주DB(notionEvents) 기준, 오늘(00:00) 이후 예정건. 대상 5개 상태만("입고 완료" 제외)
+  const TARGET_ST=["발주중","생산중","선적 완료","입고 일정 확인중","입고 확정"];
+  const waitList=useMemo(()=>{
+    const _today=new Date();_today.setHours(0,0,0,0);
+    return (notionEvents||[])
+      .filter(e=>e.date&&TARGET_ST.includes(e.status)&&new Date(e.date)>=_today)
+      .sort((a,b)=>new Date(a.date)-new Date(b.date));
+  },[notionEvents]);
+  const cnt=useMemo(()=>{const c={};TARGET_ST.forEach(s=>c[s]=0);waitList.forEach(e=>{c[e.status]=(c[e.status]||0)+1;});return c;},[waitList]);
 
   // v77: 상세 패널 ESC 닫기
   useEffect(()=>{
@@ -1256,13 +1259,13 @@ function ScheduleTab(){
         <span style={{fontSize:22}}>📅</span>
         <span style={{fontSize:19,fontWeight:700,color:"#0F172A"}}>입고 스케줄 관리</span>
       </div>
-      <div style={{fontSize:15,fontWeight:600,color:"#3B82F6"}}>{year}년 {month+1}월 {new Date().getDate()}일</div>
+      {(()=>{const _t=new Date();return(<div style={{fontSize:15,fontWeight:600,color:"#3B82F6"}}>{_t.getFullYear()}년 {_t.getMonth()+1}월 {_t.getDate()}일</div>);})()}
     </div>
 
-    {/* 홈에서 이동: 이번주 입고건 / 입고대기 현황 (좌우 2단 · 좁은 폭이면 1단) */}
-    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(320px,1fr))",gap:16,marginBottom:16}}>
+    {/* 홈에서 이동: 이번주 입고건 / 입고대기 현황 (좌우 2단 · 좁은 폭이면 1단, 같은 높이) */}
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(320px,1fr))",gap:16,marginBottom:16,alignItems:"stretch"}}>
       {/* 왼쪽: 이번주 입고건 */}
-      <div style={{padding:"22px 24px",borderRadius:14,background:"linear-gradient(135deg,#EFF6FF 0%,#F5F3FF 100%)",border:"1px solid #BFDBFE",boxShadow:"0 2px 8px rgba(59,130,246,0.08)"}}>
+      <div style={{padding:"22px 24px",borderRadius:14,background:"linear-gradient(135deg,#EFF6FF 0%,#F5F3FF 100%)",border:"1px solid #BFDBFE",boxShadow:"0 2px 8px rgba(59,130,246,0.08)",height:"100%",boxSizing:"border-box"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div>
             <div style={{fontSize:13,fontWeight:600,color:"#6366F1",letterSpacing:0.5,textTransform:"uppercase",marginBottom:6}}>📦 이번주 입고건</div>
@@ -1291,31 +1294,36 @@ function ScheduleTab(){
         </div>
       </div>
 
-      {/* 오른쪽: 입고대기 현황 */}
-      <SectionCard title="📦 입고대기 현황" subtitle={`${pendingSchedules.length}건 · 총 ${pendingTotalQty.toLocaleString()}장`}>
-        {pendingSchedules.length===0?(
-          <div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:15}}>입고 대기 일정이 없습니다</div>
-        ):(<div style={{maxHeight:340,overflowY:"auto",paddingRight:2}}>
-          {pendingSchedules.map((s,i)=>{
-            const confirmed=s.status==="입고확정";
-            const sup=SCHEDULE_SUP_STYLES[s.supplier]||{color:"#64748B",bg:"#F8FAFC",icon:"📦"};
-            return(<div key={s.id||i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",borderRadius:8,marginBottom:6,background:sup.bg,border:`1px solid ${sup.color}33`,borderLeft:`4px solid ${sup.color}`}}>
-              <div style={{minWidth:0,flex:1}}>
-                <div style={{fontSize:15,fontWeight:600,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                  <span style={{marginRight:4}}>{confirmed?"🟢":"🟡"}</span>{translateItemName(s.item)||"(상품명)"}
-                </div>
-                <div style={{fontSize:13,color:"#64748B",marginTop:2,display:"flex",alignItems:"center",gap:4}}>
-                  <span>{s.kr_date||s.date||"-"}</span>
-                  <span style={{color:sup.color,fontWeight:700}}>· {sup.icon} {s.supplier||"-"}</span>
-                </div>
-              </div>
-              <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>
-                <div style={{fontSize:17,fontWeight:700,color:sup.color}}>{(s.qty||0).toLocaleString()}장</div>
-                <div style={{fontSize:12,color:confirmed?"#15803D":"#B45309",fontWeight:600}}>{confirmed?"입고 확정":"입고 일정 확인중"}</div>
-              </div>
-            </div>);
+      {/* 오른쪽: 입고대기 현황 (Notion notionEvents 기준) */}
+      <SectionCard title="📦 입고대기 현황" subtitle={`총 ${waitList.length}건`}>
+        {/* (a) 상태별 카운트 배지 (0건은 흐리게) */}
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
+          {TARGET_ST.map(st=>{
+            const c=NOTION_STATUS_COLOR[st]||{bg:"#F1F5F9",color:"#64748B"};
+            return(<div key={st} style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:c.bg,color:c.color,fontWeight:600,opacity:cnt[st]>0?1:0.4}}>{st} {cnt[st]}</div>);
           })}
-        </div>)}
+        </div>
+        {/* (b) 목록 / (c) 빈 상태 */}
+        {waitList.length===0?(
+          <div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:14}}>예정된 입고대기 건이 없습니다</div>
+        ):(
+          <div style={{maxHeight:260,overflowY:"auto",paddingRight:2}}>
+            {waitList.map((e,i)=>{
+              const c=NOTION_STATUS_COLOR[e.status]||{bg:"#EDE9FE",color:"#6D28D9"};
+              const d=new Date(e.date);
+              const ymd=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+              return(<div key={e.id||i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"9px 12px",borderRadius:8,marginBottom:6,background:"#F8FAFC",border:"1px solid #E2E8F0"}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0,flex:1}}>
+                  <span style={{flexShrink:0,width:8,height:8,borderRadius:"50%",background:c.color}} />
+                  <div style={{fontSize:13,color:"#334155",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0}}>
+                    <b style={{color:"#1E293B"}}>[{ymd}]</b> · {e.supplier||"-"} · {translateItemName(e.item)||"(품명)"}{e.code?` ${e.code}`:""}
+                  </div>
+                </div>
+                <span style={{flexShrink:0,fontSize:12,fontWeight:700,color:c.color,whiteSpace:"nowrap"}}>{e.status}</span>
+              </div>);
+            })}
+          </div>
+        )}
       </SectionCard>
     </div>
 
