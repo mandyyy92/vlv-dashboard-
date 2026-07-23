@@ -3479,7 +3479,7 @@ function PrintOrderCreate(){
       const ExcelJS=await loadExcelJS();
       const wb=new ExcelJS.Workbook();
       const ws=wb.addWorksheet("상품별 수량");
-      ws.getColumn(1).width=14; ws.getColumn(2).width=12; ws.getColumn(3).width=29.5;
+      ws.getColumn(1).width=16; ws.getColumn(2).width=12; ws.getColumn(3).width=29.5;
       ws.getColumn(4).width=20.5; ws.getColumn(5).width=8.1; ws.getColumn(6).width=33.4;
       const header=["이미지","상품코드","상품명","옵션","총수량","비고"];
       header.forEach((h,i)=>{ws.getRow(1).getCell(i+1).value=h;});
@@ -3526,8 +3526,14 @@ function PrintOrderCreate(){
           const imgId=wb.addImage({buffer:abuf,extension:"png"});
           // 정사각 픽셀 고정(ext) — A열 그룹 첫 행 좌상단부터, 원본 비율 유지(늘어남 방지)
           const IMG_PX=78;
+          const COL_A_PX=16*7+5;                                 // A열 너비(16) 픽셀폭 ≈117px
+          const hOff=Math.max(0,(COL_A_PX-IMG_PX)/2/COL_A_PX);   // 가로 중앙 비율
+          const ROW_H=20, PT2PX=4/3;
+          const rowsInGroup=x.end-x.start+1;
+          const GROUP_PX=rowsInGroup*ROW_H*PT2PX;                // 그룹 세로 픽셀 높이
+          const vOff=Math.max(0,(GROUP_PX-IMG_PX)/2/(ROW_H*PT2PX)); // 세로 중앙(행 단위)
           ws.addImage(imgId,{
-            tl:{col:0.1,row:(x.start-1)+0.1}, // A열 안쪽 살짝 여백
+            tl:{col:hOff,row:(x.start-1)+vOff}, // A열 가로 중앙 + 그룹 세로 중앙
             ext:{width:IMG_PX,height:IMG_PX},
             editAs:"oneCell", // 크기 고정(세로 늘어남 방지)
           });
