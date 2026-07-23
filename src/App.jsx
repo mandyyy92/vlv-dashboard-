@@ -3527,8 +3527,9 @@ function PrintOrderCreate(){
           // 정사각 픽셀 고정(ext) — A열 그룹 첫 행 좌상단부터, 원본 비율 유지(늘어남 방지)
           const IMG_PX=78;
           ws.addImage(imgId,{
-            tl:{col:0,row:(x.start-1)},
+            tl:{col:0.1,row:(x.start-1)+0.1}, // A열 안쪽 살짝 여백
             ext:{width:IMG_PX,height:IMG_PX},
+            editAs:"oneCell", // 크기 고정(세로 늘어남 방지)
           });
         }catch(_){/* 이미지 실패 시 그 행만 건너뜀 */}
       }));
