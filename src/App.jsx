@@ -3479,7 +3479,8 @@ function PrintOrderCreate(){
       const ExcelJS=await loadExcelJS();
       const wb=new ExcelJS.Workbook();
       const ws=wb.addWorksheet("상품별 수량");
-      ws.getColumn(1).width=14; ws.getColumn(2).width=12; ws.getColumn(3).width=29.5;
+      const IMG_PX=78;                                    // 이미지 정사각 픽셀 크기(A열 너비 기준)
+      ws.getColumn(1).width=(IMG_PX+6)/7; ws.getColumn(2).width=12; ws.getColumn(3).width=29.5; // A열은 이미지 폭에 맞춰 축소(엑셀 너비≈px/7, 약간의 여백)
       ws.getColumn(4).width=20.5; ws.getColumn(5).width=8.1; ws.getColumn(6).width=33.4;
       const header=["이미지","상품코드","상품명","옵션","총수량","비고"];
       header.forEach((h,i)=>{ws.getRow(1).getCell(i+1).value=h;});
@@ -3524,15 +3525,12 @@ function PrintOrderCreate(){
           if(!resp.ok)return;
           const abuf=await resp.arrayBuffer();
           const imgId=wb.addImage({buffer:abuf,extension:"png"});
-          // 고정값: 이미지 크기 / 행 높이(20pt) / pt→px 환산
-          const IMG_PX=78, ROW_H=20, PT2PX=4/3;
-          const COL_A_PX=Math.round(14*7+5);                   // A열 픽셀 너비(width 14 기준)
-          const hOff=Math.max(0,(COL_A_PX-IMG_PX)/2/COL_A_PX); // A열 안 가로 중앙 비율
-          // 그룹 병합 높이 기준 세로 중앙 오프셋(행 단위)
+          // 세로 중앙 오프셋(행 단위) — 그룹 병합 높이 기준(기존 유지)
+          const ROW_H=20, PT2PX=4/3;
           const rowsInGroup=x.end-x.start+1;
           const GROUP_PX=rowsInGroup*ROW_H*PT2PX;              // 그룹 전체 픽셀 높이
           const vOff=Math.max(0,(GROUP_PX-IMG_PX)/2/(ROW_H*PT2PX));
-          ws.addImage(imgId,{tl:{col:hOff,row:(x.start-1)+vOff},ext:{width:IMG_PX,height:IMG_PX},editAs:"oneCell"}); // 가로·세로 중앙
+          ws.addImage(imgId,{tl:{col:0,row:(x.start-1)+vOff},ext:{width:IMG_PX,height:IMG_PX}}); // A열 셀 좌상단부터 꽉 차게(가로 오프셋 제거)
         }catch(_){/* 이미지 실패 시 그 행만 건너뜀 */}
       }));
 
