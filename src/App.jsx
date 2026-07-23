@@ -3510,6 +3510,9 @@ function PrintOrderCreate(){
       ws.getRow(sumRow).getCell(1).font={bold:true};
       ws.getRow(sumRow).getCell(5).font={bold:true};
 
+      // 모든 행(헤더 1행 + 데이터행) 높이를 글씨에 맞춰 20으로 동일 고정 — 병합 그룹 각 구성 행에 개별 적용
+      for(let r=1;r<=lastDataRow;r++) ws.getRow(r).height=20;
+
       // A열 이미지 삽입 — 그룹(상품명)별 첫 이미지, weserv 프록시로 fetch. 병합된 A열 시작 행에 앵커.
       // 실패(핫링크/네트워크)해도 해당 이미지만 건너뛰고 엑셀 생성은 계속 진행.
       await Promise.all(eg.map(async x=>{
@@ -3521,17 +3524,15 @@ function PrintOrderCreate(){
           if(!resp.ok)return;
           const abuf=await resp.arrayBuffer();
           const imgId=wb.addImage({buffer:abuf,extension:"png"});
-          ws.getRow(x.start).height=48; // 이미지 들어갈 시작행 높이 확보(≥60px, 단일행이라도 이미지가 들어감)
-          // 병합된 A열 이미지 셀(start~end) 정중앙에 오도록 tl에 소수 오프셋 부여
-          const IMG=60, PT2PX=4/3, defH=ws.properties.defaultRowHeight||15;
-          const hpx=[]; for(let r=x.start;r<=x.end;r++) hpx.push((ws.getRow(r).height||defH)*PT2PX);
-          const totalPx=hpx.reduce((a,b)=>a+b,0);            // 그룹 병합 세로 총 높이(px)
-          let rem=Math.max(0,(totalPx-IMG)/2), rowAnchor=x.start-1; // 세로 중앙 오프셋(px)
-          for(let i=0;i<hpx.length;i++){ if(rem<hpx[i]){ rowAnchor=(x.start-1)+i+rem/hpx[i]; break; } rem-=hpx[i]; rowAnchor=(x.start-1)+i+1; }
-          const IMG_PX=78;                                     // 모든 이미지 동일 정사각 크기
+          // 고정값: 이미지 크기 / 행 높이(20pt) / pt→px 환산
+          const IMG_PX=78, ROW_H=20, PT2PX=4/3;
           const COL_A_PX=Math.round(14*7+5);                   // A열 픽셀 너비(width 14 기준)
           const hOff=Math.max(0,(COL_A_PX-IMG_PX)/2/COL_A_PX); // A열 안 가로 중앙 비율
-          ws.addImage(imgId,{tl:{col:hOff,row:rowAnchor},ext:{width:IMG_PX,height:IMG_PX},editAs:"oneCell"}); // 가로 중앙 + 세로는 기존 그룹 첫 행 기준
+          // 그룹 병합 높이 기준 세로 중앙 오프셋(행 단위)
+          const rowsInGroup=x.end-x.start+1;
+          const GROUP_PX=rowsInGroup*ROW_H*PT2PX;              // 그룹 전체 픽셀 높이
+          const vOff=Math.max(0,(GROUP_PX-IMG_PX)/2/(ROW_H*PT2PX));
+          ws.addImage(imgId,{tl:{col:hOff,row:(x.start-1)+vOff},ext:{width:IMG_PX,height:IMG_PX},editAs:"oneCell"}); // 가로·세로 중앙
         }catch(_){/* 이미지 실패 시 그 행만 건너뜀 */}
       }));
 
