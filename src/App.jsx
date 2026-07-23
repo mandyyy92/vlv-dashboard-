@@ -3515,6 +3515,22 @@ function PrintOrderCreate(){
       ws.getRow(sumRow).getCell(1).font={bold:true};
       ws.getRow(sumRow).getCell(5).font={bold:true};
 
+      // A열 이미지 삽입 — 그룹(상품명)별 첫 이미지, weserv 프록시로 fetch. 병합된 A열 시작 행에 앵커.
+      // 실패(핫링크/네트워크)해도 해당 이미지만 건너뛰고 엑셀 생성은 계속 진행.
+      await Promise.all(eg.map(async x=>{
+        const it=(seen.get(x.name)||[]).find(i=>i.image_url);
+        if(!it||!it.image_url)return;
+        try{
+          const proxied=`https://images.weserv.nl/?url=${encodeURIComponent(it.image_url.replace(/^https?:\/\//,""))}&w=100&h=100&fit=cover&output=png`;
+          const resp=await fetch(proxied);
+          if(!resp.ok)return;
+          const abuf=await resp.arrayBuffer();
+          const imgId=wb.addImage({buffer:abuf,extension:"png"});
+          ws.addImage(imgId,{tl:{col:0,row:x.start-1},ext:{width:60,height:60}}); // 앵커 행은 0-based → start-1
+          ws.getRow(x.start).height=48;
+        }catch(_){/* 이미지 실패 시 그 행만 건너뜀 */}
+      }));
+
       const today=new Date().toISOString().slice(0,10);
       const meta=orderMeta[g.supplier_name]||{};
       const fname=`프린팅발주_${g.supplier_name||""}_${meta.round_no||""}차_${meta.order_date||today}.xlsx`;
