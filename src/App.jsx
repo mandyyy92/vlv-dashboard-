@@ -3368,35 +3368,30 @@ function PrintOrderCreate(){
   const[orderMeta,setOrderMeta]=useState({});
   const setMeta=(name,key,val)=>setOrderMeta(p=>({...p,[name]:{...(p[name]||{}),[key]:val}}));
 
-  // 자동 추천 — RPC get_print_reorder_all(읽기): 전체 부족품 → 업체별 그룹
+  // 자동 추천 — 미리 계산된 print_reorder_cache 테이블 GET 읽기(무거운 RPC 대체, timeout 방지)
   const[recLoading,setRecLoading]=useState(false);
   const recommend=async()=>{
     setRecLoading(true);
     try{
-      const r=await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_print_reorder_all`,{
-        method:"POST",
-        headers:{...sbHeaders,"Content-Type":"application/json"},
-        body:JSON.stringify({days_cover:30}),
-      });
+      const r=await fetch(`${SUPABASE_URL}/rest/v1/print_reorder_cache?select=*&order=supplier.asc,상품코드.asc`,{headers:sbHeaders});
       if(!r.ok){const b=await r.text().catch(()=>"");throw new Error(`HTTP ${r.status} ${b.slice(0,200)}`);}
       const rows=await r.json();
       const list=Array.isArray(rows)?rows:[];
-      if(list[0])console.log("[추천응답] 첫 항목:",list[0],"· keys:",Object.keys(list[0])); // DEBUG(임시): 이미지 필드 실제 키 확인
       if(list.length===0){alert("추천할 부족 품목이 없습니다");return;}
       if(groups.length>0&&!window.confirm("현재 추천 결과를 새로 교체할까요?"))return;
-      // 업체명으로 그룹핑 (RPC 반환 컬럼은 한글 키)
+      // 업체 기준 그룹핑 — 캐시 컬럼명이 한글/영문 어느 쪽이든 대응해 매핑
       const bySup=new Map();
       list.forEach(row=>{
-        const name=row["업체명"]||"(미지정)";
+        const name=row["업체명"]||row["supplier"]||row["supplier_name"]||"(미지정)";
         if(!bySup.has(name))bySup.set(name,{supplier_id:row["supplier_id"]??null,supplier_name:name,items:[]});
         bySup.get(name).items.push({
           uid:nextUid(),
-          product_code:row["상품코드"]||"",
-          product_name:row["상품명"]||"",
-          option:row["옵션"]||"",
-          qty:Number(row["추천수량"])||0,
-          unit_cost:Number(row["단가"])||0,
-          image_url:row["이미지url"]||row["이미지URL"]||"",   // 실제 키는 소문자 url, 대문자도 대응
+          product_code:row["상품코드"]||row["product_code"]||"",
+          product_name:row["상품명"]||row["product_name"]||"",
+          option:row["옵션"]||row["option"]||"",
+          qty:Number(row["추천수량"]??row["qty"]??0)||0,
+          unit_cost:Number(row["단가"]??row["원가"]??row["unit_cost"]??0)||0,
+          image_url:row["이미지url"]||row["이미지URL"]||row["image_url"]||"",
         });
       });
       const arr=[...bySup.values()];
