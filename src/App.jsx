@@ -3529,13 +3529,11 @@ function PrintOrderCreate(){
           ws.getRow(x.start).height=48; // 이미지 들어갈 시작행 높이 확보(≥60px, 단일행이라도 이미지가 들어감)
           // 병합된 A열 이미지 셀(start~end) 정중앙에 오도록 tl에 소수 오프셋 부여
           const IMG=60, PT2PX=4/3, defH=ws.properties.defaultRowHeight||15;
-          const colWpx=Math.round(13.4*7+5);                 // A열 너비(13.4) → 약 99px
-          const colFrac=Math.max(0,(colWpx-IMG)/2)/colWpx;   // 수평 중앙(≈0.2)
           const hpx=[]; for(let r=x.start;r<=x.end;r++) hpx.push((ws.getRow(r).height||defH)*PT2PX);
           const totalPx=hpx.reduce((a,b)=>a+b,0);            // 그룹 병합 세로 총 높이(px)
           let rem=Math.max(0,(totalPx-IMG)/2), rowAnchor=x.start-1; // 세로 중앙 오프셋(px)
           for(let i=0;i<hpx.length;i++){ if(rem<hpx[i]){ rowAnchor=(x.start-1)+i+rem/hpx[i]; break; } rem-=hpx[i]; rowAnchor=(x.start-1)+i+1; }
-          ws.addImage(imgId,{tl:{col:colFrac,row:rowAnchor},ext:{width:IMG,height:IMG}}); // 병합셀 가로·세로 정중앙
+          ws.addImage(imgId,{tl:{col:0.25,row:rowAnchor},ext:{width:IMG,height:IMG}}); // 세로 정중앙 + 가로는 오른쪽으로 밀어 가운데쯤
         }catch(_){/* 이미지 실패 시 그 행만 건너뜀 */}
       }));
 
