@@ -3373,25 +3373,25 @@ function PrintOrderCreate(){
   const recommend=async()=>{
     setRecLoading(true);
     try{
-      const r=await fetch(`${SUPABASE_URL}/rest/v1/print_reorder_cache?select=*&order=supplier.asc,상품코드.asc`,{headers:sbHeaders});
+      const r=await fetch(`${SUPABASE_URL}/rest/v1/print_reorder_cache?select=*&order=업체명.asc,상품코드.asc`,{headers:sbHeaders});
       if(!r.ok){const b=await r.text().catch(()=>"");throw new Error(`HTTP ${r.status} ${b.slice(0,200)}`);}
       const rows=await r.json();
       const list=Array.isArray(rows)?rows:[];
       if(list.length===0){alert("추천할 부족 품목이 없습니다");return;}
       if(groups.length>0&&!window.confirm("현재 추천 결과를 새로 교체할까요?"))return;
-      // 업체 기준 그룹핑 — 캐시 컬럼명이 한글/영문 어느 쪽이든 대응해 매핑
+      // 업체명 기준 그룹핑 — print_reorder_cache 실제(한글) 컬럼명에 맞춰 매핑
       const bySup=new Map();
       list.forEach(row=>{
-        const name=row["업체명"]||row["supplier"]||row["supplier_name"]||"(미지정)";
+        const name=row["업체명"]||"(미지정)";
         if(!bySup.has(name))bySup.set(name,{supplier_id:row["supplier_id"]??null,supplier_name:name,items:[]});
         bySup.get(name).items.push({
           uid:nextUid(),
-          product_code:row["상품코드"]||row["product_code"]||"",
-          product_name:row["상품명"]||row["product_name"]||"",
-          option:row["옵션"]||row["option"]||"",
-          qty:Number(row["추천수량"]??row["qty"]??0)||0,
-          unit_cost:Number(row["단가"]??row["원가"]??row["unit_cost"]??0)||0,
-          image_url:row["이미지url"]||row["이미지URL"]||row["image_url"]||"",
+          product_code:row["상품코드"]||"",
+          product_name:row["상품명"]||"",
+          option:row["옵션"]||"",
+          qty:Number(row["추천수량"])||0,
+          unit_cost:Number(row["단가"])||0,
+          image_url:row["이미지url"]||"",
         });
       });
       const arr=[...bySup.values()];
