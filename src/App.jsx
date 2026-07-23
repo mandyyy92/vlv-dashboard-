@@ -3396,7 +3396,7 @@ function PrintOrderCreate(){
           option:row["옵션"]||"",
           qty:Number(row["추천수량"])||0,
           unit_cost:Number(row["단가"])||0,
-          image_url:row["이미지URL"]||"",   // 한글 키 명시적 접근
+          image_url:row["이미지url"]||row["이미지URL"]||"",   // 실제 키는 소문자 url, 대문자도 대응
         });
       });
       const arr=[...bySup.values()];
@@ -3595,7 +3595,7 @@ function PrintOrderCreate(){
                         <tr key={it.uid} draggable onDragStart={e=>onDragStart(e,g.supplier_name,it.uid)} style={{cursor:"grab"}}>
                           <td style={{...specTd,textAlign:"center"}}>
                             {it.image_url
-                              ?<img src={it.image_url} alt="" width={40} height={40} loading="lazy" referrerPolicy="no-referrer" onError={e=>{e.currentTarget.style.display="none";e.currentTarget.nextSibling.style.display="inline-block";}} style={{width:40,height:40,objectFit:"cover",borderRadius:6,verticalAlign:"middle",background:"#F1F5F9"}}/>
+                              ?<img src={`https://images.weserv.nl/?url=${encodeURIComponent(it.image_url.replace(/^https?:\/\//,""))}&w=80&h=80&fit=cover`} alt="" width={40} height={40} loading="lazy" referrerPolicy="no-referrer" onError={e=>{e.currentTarget.style.display="none";e.currentTarget.nextSibling.style.display="inline-block";}} style={{width:40,height:40,objectFit:"cover",borderRadius:6,verticalAlign:"middle",background:"#F1F5F9"}}/>
                               :null}
                             <span style={{display:it.image_url?"none":"inline-block",width:40,height:40,borderRadius:6,background:"#F1F5F9",verticalAlign:"middle"}} />
                           </td>
