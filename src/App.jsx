@@ -3524,10 +3524,11 @@ function PrintOrderCreate(){
           if(!resp.ok)return;
           const abuf=await resp.arrayBuffer();
           const imgId=wb.addImage({buffer:abuf,extension:"png"});
-          // tl+br 2점 앵커 — A열(0번) 그룹 병합 영역(x.start~x.end)에 맞춰 자동 크기(상하좌우 여백)
+          // 정사각 픽셀 고정(ext) — A열 그룹 첫 행 좌상단부터, 원본 비율 유지(늘어남 방지)
+          const IMG_PX=78;
           ws.addImage(imgId,{
-            tl:{col:0.08,row:(x.start-1)+0.12}, // A열 안쪽 살짝 여백 + 그룹 첫 행 위 여백
-            br:{col:0.92,row:(x.end-1)+0.88},   // 그룹 마지막 행까지 + 오른쪽/아래 여백
+            tl:{col:0,row:(x.start-1)},
+            ext:{width:IMG_PX,height:IMG_PX},
           });
         }catch(_){/* 이미지 실패 시 그 행만 건너뜀 */}
       }));
