@@ -758,7 +758,6 @@ function ScheduleTab(){
   const[baseQuery,setBaseQuery]=useState(""); // 베이스 아이템 검색어(상품명 영문)
   const[baseResults,setBaseResults]=useState(null); // null=미검색, []=결과없음
   const[baseSearching,setBaseSearching]=useState(false);
-  const baseDebounceRef=useRef(null); // 실시간 검색 debounce 타이머
 
   // inventory 상품명 ilike 검색 → "베이스 아이템(한글) + 상품명(영문)" 파싱
   const searchBaseItem=async(q)=>{
@@ -792,6 +791,14 @@ function ScheduleTab(){
       setBaseSearching(false);
     }
   };
+
+  // baseQuery 변화 감지 → debounce 300ms 자동 검색 (2글자 미만이면 결과 비움)
+  useEffect(()=>{
+    const q=baseQuery.trim();
+    if(q.length<2){setBaseResults([]);return;}
+    const t=setTimeout(()=>{searchBaseItem(q);},300);
+    return()=>clearTimeout(t);
+  },[baseQuery]);
 
   const SUPPLIERS=["인도","코니키즈","성은교역","오중"];
   const SUP_STYLES=SCHEDULE_SUP_STYLES;
@@ -1377,18 +1384,11 @@ function ScheduleTab(){
     {/* 베이스 아이템 검색 (상품명 영문 → 베이스 아이템 한글) */}
     <div style={{background:"#FFFFFF",borderRadius:14,padding:"18px 20px",border:"1px solid #E2E8F0",marginBottom:16,boxShadow:"0 1px 3px rgba(0,0,0,0.04)"}}>
       <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-        <input value={baseQuery} onChange={e=>{
-            const v=e.target.value; setBaseQuery(v);
-            if(baseDebounceRef.current)clearTimeout(baseDebounceRef.current);
-            const kw=v.trim();
-            if(kw.length<2){setBaseResults(null);return;} // 2글자 미만: 결과 비우고 호출 안 함
-            baseDebounceRef.current=setTimeout(()=>searchBaseItem(kw),300);
-          }} onKeyDown={e=>{if(e.key==="Enter"){if(baseDebounceRef.current)clearTimeout(baseDebounceRef.current);searchBaseItem(baseQuery);}}}
-          placeholder="상품명 검색 (예: Venue) → 베이스 아이템 찾기"
+        <input value={baseQuery} onChange={e=>setBaseQuery(e.target.value)}
+          placeholder="상품명 검색 (예: Venue)"
           style={{flex:1,minWidth:220,padding:"8px 12px",borderRadius:8,border:"1px solid #E2E8F0",fontSize:14,outline:"none",background:"#F8FAFC",boxSizing:"border-box"}} />
-        <SmallBtn primary onClick={()=>searchBaseItem(baseQuery)}>🔍 검색</SmallBtn>
       </div>
-      {baseResults!==null&&(
+      {baseQuery.trim().length>=2&&(
         <div style={{marginTop:14}}>
           {baseSearching?(
             <div style={{fontSize:13,color:"#94A3B8"}}>검색 중...</div>
