@@ -1342,10 +1342,10 @@ function ScheduleTab(){
       </div>
 
       {/* 오른쪽: 입고대기 현황 (Notion notionEvents 기준, 왼쪽 카드와 padding·높이 통일) */}
-      <div style={{padding:"22px 24px",borderRadius:14,background:"#FFF",border:"1px solid #E2E8F0",boxShadow:"0 2px 8px rgba(15,23,42,0.04)",height:"100%",boxSizing:"border-box",display:"flex",flexDirection:"column",minHeight:0}}>
-        {/* 헤더 (SectionCard 타이틀 스타일 재현) */}
+      <div style={{padding:"22px 24px",borderRadius:14,background:"linear-gradient(135deg,#FEFCE8 0%,#FFFBEB 100%)",border:"1px solid #FDE68A",boxShadow:"0 2px 8px rgba(234,179,8,0.08)",height:"100%",boxSizing:"border-box",display:"flex",flexDirection:"column",minHeight:0}}>
+        {/* 헤더 (이번주 입고건 카드 타이틀과 폰트 통일) */}
         <div style={{marginBottom:14}}>
-          <h3 style={{margin:0,fontSize:19,fontWeight:700,color:"#0F172A",letterSpacing:-0.3}}>📦 입고대기 현황</h3>
+          <h3 style={{margin:0,fontSize:13,fontWeight:600,color:"#0F172A",letterSpacing:0.5,textTransform:"uppercase"}}>📦 입고대기 현황</h3>
           <p style={{margin:"4px 0 0",fontSize:14,color:"#94A3B8"}}>총 {shownWait.length}건{waitFilter?` · ${waitFilter}`:""}</p>
         </div>
         {/* (a) 상태별 카운트 배지 (클릭 필터, 카운트는 전체 기준) */}
