@@ -777,6 +777,7 @@ function ScheduleTab(){
         const m=full.match(/^(.*?)\s*([A-Za-z].*)$/);
         const base=m?m[1].trim():full;
         const name=m?m[2].trim():"";
+        if(base.replace(/\s/g,"").startsWith("아트웍"))continue; // "아트웍"으로 시작하는 베이스 제외
         const key=base+"||"+name;
         if(seen.has(key))continue;
         seen.add(key);
