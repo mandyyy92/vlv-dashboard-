@@ -1382,8 +1382,16 @@ function ScheduleTab(){
       </div>
     </div>
 
-    {/* 베이스 아이템 검색 (상품명 영문 → 베이스 아이템 한글) */}
-    <div style={{background:"#FFFFFF",borderRadius:14,padding:"18px 20px",border:"1px solid #E2E8F0",marginBottom:8,boxShadow:"0 1px 3px rgba(0,0,0,0.04)"}}>
+    {/* 뷰 전환 */}
+    <div style={{display:"flex",gap:8,marginBottom:16}}>
+      <SmallBtn primary={viewMode==="calendar"} onClick={()=>setViewMode("calendar")}>📅 캘린더</SmallBtn>
+      <SmallBtn primary={viewMode==="supplier"} onClick={()=>setViewMode("supplier")}>🏢 업체별</SmallBtn>
+      <SmallBtn primary={viewMode==="input"} onClick={()=>setViewMode("input")}>✏️ 등록</SmallBtn>
+    </div>
+
+    {/* 베이스 아이템 검색 (탭 버튼 줄과 달력 사이) */}
+    <div style={{background:"#FFFFFF",borderRadius:14,padding:"18px 20px",border:"1px solid #E2E8F0",marginBottom:16,boxShadow:"0 1px 3px rgba(0,0,0,0.04)"}}>
+      <h3 style={{margin:"0 0 9px",fontSize:19,fontWeight:700,color:"#0F172A",letterSpacing:-0.3}}>베이스 아이템 검색</h3>
       <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
         <input value={baseQuery} onChange={e=>setBaseQuery(e.target.value)}
           placeholder="상품명 검색 (예: Venue)"
@@ -1407,13 +1415,6 @@ function ScheduleTab(){
           </div>
         )}
       </div>
-    </div>
-
-    {/* 뷰 전환 */}
-    <div style={{display:"flex",gap:8,marginBottom:16}}>
-      <SmallBtn primary={viewMode==="calendar"} onClick={()=>setViewMode("calendar")}>📅 캘린더</SmallBtn>
-      <SmallBtn primary={viewMode==="supplier"} onClick={()=>setViewMode("supplier")}>🏢 업체별</SmallBtn>
-      <SmallBtn primary={viewMode==="input"} onClick={()=>setViewMode("input")}>✏️ 등록</SmallBtn>
     </div>
 
     {/* 캘린더 뷰 */}
