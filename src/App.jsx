@@ -1383,14 +1383,14 @@ function ScheduleTab(){
     </div>
 
     {/* 베이스 아이템 검색 (상품명 영문 → 베이스 아이템 한글) */}
-    <div style={{background:"#FFFFFF",borderRadius:14,padding:"18px 20px",border:"1px solid #E2E8F0",marginBottom:16,boxShadow:"0 1px 3px rgba(0,0,0,0.04)"}}>
+    <div style={{background:"#FFFFFF",borderRadius:14,padding:"18px 20px",border:"1px solid #E2E8F0",marginBottom:8,boxShadow:"0 1px 3px rgba(0,0,0,0.04)"}}>
       <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
         <input value={baseQuery} onChange={e=>setBaseQuery(e.target.value)}
           placeholder="상품명 검색 (예: Venue)"
           style={{flex:1,minWidth:220,padding:"8px 12px",borderRadius:8,border:"1px solid #E2E8F0",fontSize:14,outline:"none",background:"#F8FAFC",boxSizing:"border-box"}} />
       </div>
       {/* 결과 영역: 항상 렌더 + 고정 높이 → 결과 유무에 따른 레이아웃 shift 방지 */}
-      <div style={{marginTop:14,height:120,overflowY:"auto"}}>
+      <div style={{marginTop:7,height:76,overflowY:"auto"}}>
         {baseQuery.trim().length<2?(
           null
         ):baseSearching?(
