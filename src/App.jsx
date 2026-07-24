@@ -1389,24 +1389,25 @@ function ScheduleTab(){
           placeholder="상품명 검색 (예: Venue)"
           style={{flex:1,minWidth:220,padding:"8px 12px",borderRadius:8,border:"1px solid #E2E8F0",fontSize:14,outline:"none",background:"#F8FAFC",boxSizing:"border-box"}} />
       </div>
-      {baseQuery.trim().length>=2&&(
-        <div style={{marginTop:14}}>
-          {baseSearching?(
-            <div style={{fontSize:13,color:"#94A3B8"}}>검색 중...</div>
-          ):baseResults.length===0?(
-            <div style={{fontSize:13,color:"#94A3B8"}}>검색 결과가 없습니다</div>
-          ):(
-            <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:280,overflowY:"auto"}}>
-              {baseResults.map((it,i)=>(
-                <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",borderRadius:8,background:"#F8FAFC",border:"1px solid #E2E8F0"}}>
-                  <span style={{fontSize:14,fontWeight:700,color:"#0F172A"}}>{it.base}</span>
-                  {it.name&&<><span style={{color:"#CBD5E1"}}>·</span><span style={{fontSize:14,color:"#475569"}}>{it.name}</span></>}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      {/* 결과 영역: 항상 렌더 + 고정 높이 → 결과 유무에 따른 레이아웃 shift 방지 */}
+      <div style={{marginTop:14,height:120,overflowY:"auto"}}>
+        {baseQuery.trim().length<2?(
+          null
+        ):baseSearching?(
+          <div style={{fontSize:13,color:"#94A3B8"}}>검색 중...</div>
+        ):baseResults.length===0?(
+          <div style={{fontSize:13,color:"#94A3B8"}}>검색 결과가 없습니다</div>
+        ):(
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {baseResults.map((it,i)=>(
+              <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",borderRadius:8,background:"#F8FAFC",border:"1px solid #E2E8F0"}}>
+                <span style={{fontSize:14,fontWeight:700,color:"#0F172A"}}>{it.base}</span>
+                {it.name&&<><span style={{color:"#CBD5E1"}}>·</span><span style={{fontSize:14,color:"#475569"}}>{it.name}</span></>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
 
     {/* 뷰 전환 */}
