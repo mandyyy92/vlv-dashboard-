@@ -755,6 +755,39 @@ function ScheduleTab(){
   const[calSearch,setCalSearch]=useState(""); // v77: 캘린더 Notion 검색
   const[selectedDay,setSelectedDay]=useState(null); // v77: 날짜 상세 패널(dayStr)
   const[commentData,setCommentData]=useState({}); // { [eventId]: {loading, data, error, open} } 노션 댓글·첨부
+  const[baseQuery,setBaseQuery]=useState(""); // 베이스 아이템 검색어(상품명 영문)
+  const[baseResults,setBaseResults]=useState(null); // null=미검색, []=결과없음
+  const[baseSearching,setBaseSearching]=useState(false);
+
+  // inventory 상품명 ilike 검색 → "베이스 아이템(한글) + 상품명(영문)" 파싱
+  const searchBaseItem=async(q)=>{
+    const kw=(q||"").trim();
+    if(!kw)return;
+    setBaseSearching(true);
+    try{
+      const r=await fetch(`${SUPABASE_URL}/rest/v1/inventory?select=상품명&상품명=ilike.*${encodeURIComponent(kw)}*&limit=200`,{headers:sbHeaders});
+      const rows=r.ok?await r.json():[];
+      const seen=new Set(); const out=[];
+      for(const row of (rows||[])){
+        const full=(row&&row.상품명)?String(row.상품명).trim():"";
+        if(!full)continue;
+        const m=full.match(/^(.*?)\s*([A-Za-z].*)$/);
+        const base=m?m[1].trim():full;
+        const name=m?m[2].trim():"";
+        const key=base+"||"+name;
+        if(seen.has(key))continue;
+        seen.add(key);
+        out.push({base,name});
+      }
+      out.sort((a,b)=>a.base.localeCompare(b.base,"ko")||a.name.localeCompare(b.name));
+      setBaseResults(out);
+    }catch(e){
+      console.warn("[베이스 아이템 검색] 실패",e);
+      setBaseResults([]);
+    }finally{
+      setBaseSearching(false);
+    }
+  };
 
   const SUPPLIERS=["인도","코니키즈","성은교역","오중"];
   const SUP_STYLES=SCHEDULE_SUP_STYLES;
@@ -1335,6 +1368,34 @@ function ScheduleTab(){
           </div>
         )}
       </div>
+    </div>
+
+    {/* 베이스 아이템 검색 (상품명 영문 → 베이스 아이템 한글) */}
+    <div style={{background:"#FFFFFF",borderRadius:14,padding:"18px 20px",border:"1px solid #E2E8F0",marginBottom:16,boxShadow:"0 1px 3px rgba(0,0,0,0.04)"}}>
+      <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+        <input value={baseQuery} onChange={e=>setBaseQuery(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")searchBaseItem(baseQuery);}}
+          placeholder="상품명 검색 (예: Venue) → 베이스 아이템 찾기"
+          style={{flex:1,minWidth:220,padding:"8px 12px",borderRadius:8,border:"1px solid #E2E8F0",fontSize:14,outline:"none",background:"#F8FAFC",boxSizing:"border-box"}} />
+        <SmallBtn primary onClick={()=>searchBaseItem(baseQuery)}>🔍 검색</SmallBtn>
+      </div>
+      {baseResults!==null&&(
+        <div style={{marginTop:14}}>
+          {baseSearching?(
+            <div style={{fontSize:13,color:"#94A3B8"}}>검색 중...</div>
+          ):baseResults.length===0?(
+            <div style={{fontSize:13,color:"#94A3B8"}}>검색 결과가 없습니다</div>
+          ):(
+            <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:280,overflowY:"auto"}}>
+              {baseResults.map((it,i)=>(
+                <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",borderRadius:8,background:"#F8FAFC",border:"1px solid #E2E8F0"}}>
+                  <span style={{fontSize:14,fontWeight:700,color:"#0F172A"}}>{it.base}</span>
+                  {it.name&&<><span style={{color:"#CBD5E1"}}>·</span><span style={{fontSize:14,color:"#475569"}}>{it.name}</span></>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
 
     {/* 뷰 전환 */}
