@@ -778,12 +778,12 @@ function ScheduleTab(){
         const base=m?m[1].trim():full;
         const name=m?m[2].trim():"";
         if(base.replace(/\s/g,"").startsWith("아트웍"))continue; // "아트웍"으로 시작하는 베이스 제외
-        const key=base+"||"+name;
+        const key=base; // base(베이스 아이템) 기준 중복 제거 — 같은 base면 한 번만
         if(seen.has(key))continue;
         seen.add(key);
         out.push({base,name});
       }
-      out.sort((a,b)=>a.base.localeCompare(b.base,"ko")||a.name.localeCompare(b.name));
+      out.sort((a,b)=>a.base.localeCompare(b.base,"ko"));
       setBaseResults(out);
     }catch(e){
       console.warn("[베이스 아이템 검색] 실패",e);
@@ -1402,7 +1402,6 @@ function ScheduleTab(){
             {baseResults.map((it,i)=>(
               <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",borderRadius:8,background:"#F8FAFC",border:"1px solid #E2E8F0"}}>
                 <span style={{fontSize:14,fontWeight:700,color:"#0F172A"}}>{it.base}</span>
-                {it.name&&<><span style={{color:"#CBD5E1"}}>·</span><span style={{fontSize:14,color:"#475569"}}>{it.name}</span></>}
               </div>
             ))}
           </div>
