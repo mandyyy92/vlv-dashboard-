@@ -5737,6 +5737,7 @@ function OrderSheetDashboard(){
   const[rows,setRows]=useState([]);
   const[loading,setLoading]=useState(true);
   const[error,setError]=useState("");
+  const[imgMap,setImgMap]=useState({}); // { 상품코드: 이미지url } — product_images 1회 로드(inventory 직접조회 금지)
 
   useEffect(()=>{
     let alive=true;
@@ -5762,12 +5763,35 @@ function OrderSheetDashboard(){
     return()=>{alive=false;};
   },[]);
 
+  // product_images 전량 1회 로드(썸네일용). 실패해도 표는 정상 동작 → 조용히 무시.
+  useEffect(()=>{
+    let alive=true;
+    (async()=>{
+      try{
+        const m={};const PAGE=1000;
+        for(let off=0;;off+=PAGE){
+          const r=await fetch(`${SUPABASE_URL}/rest/v1/product_images?select=상품코드,이미지url&limit=${PAGE}&offset=${off}`,{headers:sbHeaders});
+          if(!r.ok)break;
+          const chunk=await r.json();
+          for(const it of chunk){
+            const c=String(it["상품코드"]??"").trim();
+            const u=String(it["이미지url"]??"").trim();
+            if(c&&u&&!m[c])m[c]=u;
+          }
+          if(chunk.length<PAGE)break;
+        }
+        if(alive)setImgMap(m);
+      }catch{/* 썸네일 없이 진행 */}
+    })();
+    return()=>{alive=false;};
+  },[]);
+
   // ── 필터(연도·시즌·공장·검색) ── "" = 전체
   const[fYear,setFYear]=useState("");
   const[fSeason,setFSeason]=useState("");
   const[fFactory,setFFactory]=useState("");
   const[q,setQ]=useState("");
-  const[expanded,setExpanded]=useState(null); // 펼친 상품명(1개만)
+  const[selName,setSelName]=useState(null);   // 오른쪽 드로어로 열린 상품명(1개만)
   const[sortKey,setSortKey]=useState("");     // ""=기본(전량입고 하단), 그 외 컬럼키
   const[sortDir,setSortDir]=useState("desc");
 
@@ -5799,7 +5823,7 @@ function OrderSheetDashboard(){
     for(const r of filteredRows){
       const key=String(r[OS_COL.NAME]??"").trim()||"(상품명 없음)";
       let g=m.get(key);
-      if(!g){g={name:key,season:String(r[OS_COL.SEASON]??"").trim(),factory:String(r[OS_COL.FACTORY]??"").trim(),ord:0,inb:0,amt:0,deposit:0,lastIn:"",items:[]};m.set(key,g);}
+      if(!g){g={name:key,season:String(r[OS_COL.SEASON]??"").trim(),factory:String(r[OS_COL.FACTORY]??"").trim(),code:String(r[OS_COL.CODE]??"").trim(),ord:0,inb:0,amt:0,deposit:0,lastIn:"",items:[]};m.set(key,g);}
       g.ord+=osNum(r[OS_COL.ORD_QTY]);
       g.inb+=osNum(r[OS_COL.IN_QTY]);
       g.amt+=osNum(r[OS_COL.AMT]);
@@ -5828,6 +5852,27 @@ function OrderSheetDashboard(){
     if(sortKey!==k){setSortKey(k);setSortDir("desc");return;}
     if(sortDir==="desc"){setSortDir("asc");return;}
     setSortKey("");setSortDir("desc");
+  };
+
+  // 드로어로 열린 그룹(정렬/필터 바뀌어 사라지면 자동 닫힘 처리)
+  const selGroup=useMemo(()=>groups.find(g=>g.name===selName)||null,[groups,selName]);
+  useEffect(()=>{
+    if(!selName)return;
+    const onKey=e=>{if(e.key==="Escape")setSelName(null);};
+    window.addEventListener("keydown",onKey);
+    return()=>window.removeEventListener("keydown",onKey);
+  },[selName]);
+
+  // cafe24 핫링크 차단 우회 → weserv 프록시
+  const proxied=(url,px)=>url?`https://images.weserv.nl/?url=${encodeURIComponent(String(url).replace(/^https?:\/\//,""))}&w=${px}&h=${px}&fit=cover`:null;
+  // 상품코드 → 썸네일. 매칭 없거나 로드 실패면 회색 placeholder만 남는다.
+  const thumb=(code,size,radius=6)=>{
+    const url=proxied(imgMap[String(code??"").trim()],size*3);
+    return(
+      <span style={{display:"inline-block",width:size,height:size,borderRadius:radius,background:"#F1F5F9",overflow:"hidden",flexShrink:0,verticalAlign:"middle"}}>
+        {url&&<img src={url} alt="" loading="lazy" referrerPolicy="no-referrer" onError={e=>{e.currentTarget.style.display="none";}} style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}} />}
+      </span>
+    );
   };
 
   const box={padding:"14px 16px",borderRadius:10,textAlign:"center"};
@@ -5890,16 +5935,21 @@ function OrderSheetDashboard(){
           <span style={{marginLeft:"auto",fontSize:13,color:"#94A3B8"}}>{groups.length.toLocaleString()}개 상품 · {filteredRows.length.toLocaleString()}행</span>
         </div>
 
-        {/* ── 상품명별 묶음 표 (행 클릭 = 색상/사이즈 상세 토글) ── */}
+        {/* ── 상품명별 묶음 표 (행 클릭 = 오른쪽 드로어로 옵션 상세) ── */}
         {!filteredRows.length?(
           <div style={{textAlign:"center",padding:40,color:"#94A3B8",fontSize:14}}>조건에 맞는 데이터 없음</div>
         ):(
           <Table headers={["상품명","시즌",sortTh("ord","발주수량"),sortTh("inb","입고수량"),sortTh("short","미입고"),sortTh("rate","입고율"),sortTh("amt","발주금액"),sortTh("deposit","계약금"),sortTh("lastIn","최근입고일")]} maxH={560}>
             {sortedGroups.map(g=>{
-              const on=expanded===g.name;
-              return[
-                <tr key={g.name} onClick={()=>setExpanded(on?null:g.name)} style={{cursor:"pointer",background:on?"#F8FAFC":"transparent"}}>
-                  <Td style={{fontWeight:600,color:"#0F172A"}}><span style={{color:"#94A3B8",marginRight:6}}>{on?"▾":"▸"}</span>{g.name}<span style={{marginLeft:8,fontSize:12,color:"#94A3B8",fontWeight:400}}>{g.factory}</span></Td>
+              const on=selName===g.name;
+              return(
+                <tr key={g.name} onClick={()=>setSelName(on?null:g.name)} style={{cursor:"pointer",background:on?"#F8FAFC":"transparent"}}>
+                  <Td style={{fontWeight:600,color:"#0F172A"}}>
+                    <span style={{display:"flex",alignItems:"center",gap:10}}>
+                      {thumb(g.code,34)}
+                      <span>{g.name}<span style={{marginLeft:8,fontSize:12,color:"#94A3B8",fontWeight:400}}>{g.factory}</span></span>
+                    </span>
+                  </Td>
                   <Td style={{color:"#64748B"}}>{g.season||"-"}</Td>
                   <Td style={numTd}>{Math.round(g.ord).toLocaleString()}</Td>
                   <Td style={{...numTd,color:"#059669",fontWeight:600}}>{Math.round(g.inb).toLocaleString()}</Td>
@@ -5913,27 +5963,70 @@ function OrderSheetDashboard(){
                   <Td style={numTd}>₩{Math.round(g.amt).toLocaleString()}</Td>
                   <Td style={{...numTd,color:g.deposit>0?"#334155":"#94A3B8"}}>{g.deposit>0?`₩${Math.round(g.deposit).toLocaleString()}`:"-"}</Td>
                   <Td style={{color:g.lastIn?"#334155":"#94A3B8"}}>{g.lastIn?g.lastIn.slice(0,10):"-"}</Td>
-                </tr>,
-                on&&(
-                  <tr key={g.name+"__detail"}>
-                    <td colSpan={9} style={{padding:"10px 14px",background:"#F8FAFC",borderBottom:"1px solid #F1F5F9"}}>
-                      <Table headers={["색상/사이즈","발주수량","입고수량","상품코드"]} maxH={280}>
-                        {g.items.map((it,i)=>(
-                          <tr key={i}>
-                            <Td>{it[OS_COL.OPT]||"-"}</Td>
-                            <Td style={numTd}>{osNum(it[OS_COL.ORD_QTY]).toLocaleString()}</Td>
-                            <Td style={{...numTd,color:"#059669",fontWeight:600}}>{osNum(it[OS_COL.IN_QTY]).toLocaleString()}</Td>
-                            <Td style={{color:"#94A3B8"}}>{it[OS_COL.CODE]||"-"}</Td>
-                          </tr>
-                        ))}
-                      </Table>
-                    </td>
-                  </tr>
-                ),
-              ];
+                </tr>
+              );
             })}
           </Table>
         )}
+
+        {/* ── 오른쪽 드로어: 선택 상품의 옵션별 상세 ── */}
+        {selGroup&&(<>
+          <div onClick={()=>setSelName(null)} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.45)",zIndex:1000}} />
+          <aside style={{position:"fixed",top:0,right:0,bottom:0,width:"min(400px, 92vw)",background:"#FFFFFF",zIndex:1001,boxShadow:"-8px 0 28px rgba(0,0,0,0.12)",display:"flex",flexDirection:"column"}}>
+            <div style={{display:"flex",alignItems:"flex-start",gap:12,padding:"18px 20px",borderBottom:"1px solid #E2E8F0"}}>
+              {thumb(selGroup.code,88,10)}
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:12,color:"#94A3B8",marginBottom:4}}>{[selGroup.season,selGroup.factory].filter(Boolean).join(" · ")||"-"}</div>
+                <div style={{fontSize:17,fontWeight:700,color:"#0F172A",lineHeight:1.3}}>{selGroup.name}</div>
+                <div style={{fontSize:12,color:"#94A3B8",marginTop:4,fontFamily:"monospace"}}>{selGroup.code||"-"}</div>
+              </div>
+              <button onClick={()=>setSelName(null)} aria-label="닫기" style={{border:"none",background:"#F1F5F9",borderRadius:8,width:32,height:32,fontSize:16,cursor:"pointer",color:"#475569",flexShrink:0}}>✕</button>
+            </div>
+
+            <div style={{flex:1,overflowY:"auto",padding:20}}>
+              {/* 그룹 집계 요약 */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8,marginBottom:16}}>
+                {[
+                  ["발주수량",`${Math.round(selGroup.ord).toLocaleString()} pcs`,"#1E293B","#F8FAFC","#E2E8F0"],
+                  ["입고수량",`${Math.round(selGroup.inb).toLocaleString()} pcs`,"#059669","#F0FDF4","#BBF7D0"],
+                  ["미입고",`${Math.round(Math.max(selGroup.short,0)).toLocaleString()} pcs`,selGroup.short>0?"#DC2626":"#94A3B8","#F8FAFC","#E2E8F0"],
+                  ["입고율",`${selGroup.rate.toFixed(1)}%`,rateColor(selGroup.rate),"#EFF6FF","#BFDBFE"],
+                ].map(([l,v,c,bg,bd])=>(
+                  <div key={l} style={{padding:"10px 12px",borderRadius:8,background:bg,border:`1px solid ${bd}`}}>
+                    <div style={{fontSize:11,fontWeight:700,color:"#94A3B8"}}>{l}</div>
+                    <div style={{fontSize:17,fontWeight:800,color:c,marginTop:2}}>{v}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{padding:"10px 12px",borderRadius:8,background:"#F8FAFC",border:"1px solid #E2E8F0",marginBottom:20}}>
+                <div style={{fontSize:11,fontWeight:700,color:"#94A3B8"}}>발주금액</div>
+                <div style={{fontSize:19,fontWeight:800,color:"#1E293B",marginTop:2}}>₩{Math.round(selGroup.amt).toLocaleString()}</div>
+              </div>
+
+              {/* 옵션 리스트 */}
+              <div style={{fontSize:13,fontWeight:800,color:"#0F172A",marginBottom:10}}>옵션별 상세 <span style={{color:"#94A3B8",fontWeight:600}}>{selGroup.items.length}</span></div>
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {selGroup.items.map((it,i)=>{
+                  const o=osNum(it[OS_COL.ORD_QTY]),n=osNum(it[OS_COL.IN_QTY]);
+                  const rt=o>0?(n/o*100):0;
+                  return(
+                    <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",borderRadius:8,background:"#F8FAFC",border:"1px solid #E2E8F0"}}>
+                      {thumb(it[OS_COL.CODE],40)}
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:13,fontWeight:700,color:"#0F172A"}}>{it[OS_COL.OPT]||"-"}</div>
+                        <div style={{fontSize:11,color:"#94A3B8",fontFamily:"monospace"}}>{it[OS_COL.CODE]||"-"}</div>
+                      </div>
+                      <div style={{textAlign:"right",fontVariantNumeric:"tabular-nums",flexShrink:0}}>
+                        <div style={{fontSize:13,color:"#334155"}}>{o.toLocaleString()} → <span style={{color:"#059669",fontWeight:700}}>{n.toLocaleString()}</span></div>
+                        <div style={{fontSize:11,fontWeight:700,color:rateColor(rt)}}>{rt.toFixed(1)}%</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </aside>
+        </>)}
       </>)}
     </SectionCard>
   );
