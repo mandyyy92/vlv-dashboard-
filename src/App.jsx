@@ -5728,8 +5728,8 @@ function ProductMasterTab(){
 
 // ─── 오더 입고현황 (orders_sheet 기반) ───
 // 기존 ProductionDashboard(별도 파일)는 그대로 보존하고, ordertrack 탭 렌더만 이 컴포넌트로 교체.
-// 1단계: 조회 + 상단 요약카드 4개까지만. (표·필터·묶음은 다음 단계)
-const OS_COL={SEASON:"시즌",CODE:"상품코드",NAME:"상품명",OPT:"색상사이즈",ORD_QTY:"발주수량",IN_QTY:"실입고총수량",AMT:"발주총액_krw",FACTORY:"생산공장",IN_DATE:"실입고일",ETA:"입고예정일"};
+// 조회 + 요약카드 4개 + 필터(연도/시즌/공장/검색) + 상품명별 묶음표(펼침·헤더정렬).
+const OS_COL={SEASON:"시즌",YEAR:"제품운영연도",CODE:"상품코드",NAME:"상품명",OPT:"색상사이즈",ORD_QTY:"발주수량",IN_QTY:"실입고총수량",AMT:"발주총액_krw",DEPOSIT:"계약금_krw",FACTORY:"생산공장",IN_DATE:"실입고일",ETA:"입고예정일"};
 // 숫자 컬럼이 문자열("1,200" / "" / null)로 와도 안전하게 합산.
 const osNum=v=>{if(v==null)return 0;const n=Number(String(v).replace(/[^0-9.-]/g,""));return Number.isFinite(n)?n:0;};
 
@@ -5762,24 +5762,29 @@ function OrderSheetDashboard(){
     return()=>{alive=false;};
   },[]);
 
-  // ── 필터(시즌·공장·검색) ── "" = 전체
+  // ── 필터(연도·시즌·공장·검색) ── "" = 전체
+  const[fYear,setFYear]=useState("");
   const[fSeason,setFSeason]=useState("");
   const[fFactory,setFFactory]=useState("");
   const[q,setQ]=useState("");
   const[expanded,setExpanded]=useState(null); // 펼친 상품명(1개만)
+  const[sortKey,setSortKey]=useState("");     // ""=기본(전량입고 하단), 그 외 컬럼키
+  const[sortDir,setSortDir]=useState("desc");
 
+  const years=useMemo(()=>[...new Set(rows.map(r=>String(r[OS_COL.YEAR]??"").trim()).filter(Boolean))].sort((a,b)=>b.localeCompare(a)),[rows]);
   const seasons=useMemo(()=>[...new Set(rows.map(r=>String(r[OS_COL.SEASON]??"").trim()).filter(Boolean))].sort(),[rows]);
   const factories=useMemo(()=>[...new Set(rows.map(r=>String(r[OS_COL.FACTORY]??"").trim()).filter(Boolean))].sort(),[rows]);
 
   const filteredRows=useMemo(()=>{
     const kw=q.trim().toLowerCase();
     return rows.filter(r=>{
+      if(fYear&&String(r[OS_COL.YEAR]??"").trim()!==fYear)return false;
       if(fSeason&&String(r[OS_COL.SEASON]??"").trim()!==fSeason)return false;
       if(fFactory&&String(r[OS_COL.FACTORY]??"").trim()!==fFactory)return false;
       if(kw&&!`${r[OS_COL.NAME]??""} ${r[OS_COL.CODE]??""}`.toLowerCase().includes(kw))return false;
       return true;
     });
-  },[rows,fSeason,fFactory,q]);
+  },[rows,fYear,fSeason,fFactory,q]);
 
   // 요약카드는 filteredRows 기준(필터 없으면 전체 합계와 동일).
   const sum=useMemo(()=>{
@@ -5788,24 +5793,42 @@ function OrderSheetDashboard(){
     return{amt,ord,inb,rate:ord>0?(inb/ord*100):0};
   },[filteredRows]);
 
-  // 상품명 기준 묶음 → 발주금액 내림차순
+  // 상품명 기준 묶음
   const groups=useMemo(()=>{
     const m=new Map();
     for(const r of filteredRows){
       const key=String(r[OS_COL.NAME]??"").trim()||"(상품명 없음)";
       let g=m.get(key);
-      if(!g){g={name:key,season:String(r[OS_COL.SEASON]??"").trim(),factory:String(r[OS_COL.FACTORY]??"").trim(),ord:0,inb:0,amt:0,lastIn:"",items:[]};m.set(key,g);}
+      if(!g){g={name:key,season:String(r[OS_COL.SEASON]??"").trim(),factory:String(r[OS_COL.FACTORY]??"").trim(),ord:0,inb:0,amt:0,deposit:0,lastIn:"",items:[]};m.set(key,g);}
       g.ord+=osNum(r[OS_COL.ORD_QTY]);
       g.inb+=osNum(r[OS_COL.IN_QTY]);
       g.amt+=osNum(r[OS_COL.AMT]);
+      g.deposit+=osNum(r[OS_COL.DEPOSIT]);
       const d=String(r[OS_COL.IN_DATE]??"").trim();
       if(d&&d>g.lastIn)g.lastIn=d; // YYYY-MM-DD 문자열 비교 = 최신일
       g.items.push(r);
     }
-    return[...m.values()]
-      .map(g=>({...g,short:g.ord-g.inb,rate:g.ord>0?(g.inb/g.ord*100):0}))
-      .sort((a,b)=>b.amt-a.amt);
+    return[...m.values()].map(g=>({...g,short:g.ord-g.inb,rate:g.ord>0?(g.inb/g.ord*100):0}));
   },[filteredRows]);
+
+  // 기본 정렬: 미완료(입고율<100%) 먼저 → 완료(>=100%)는 맨 아래. 각 구간 내 발주금액 내림차순.
+  // 헤더 클릭 시(sortKey) 해당 컬럼 단일 정렬로 대체.
+  const sortedGroups=useMemo(()=>{
+    const arr=[...groups];
+    if(!sortKey)return arr.sort((a,b)=>(a.rate>=100?1:0)-(b.rate>=100?1:0)||b.amt-a.amt);
+    const dir=sortDir==="asc"?1:-1;
+    return arr.sort((a,b)=>{
+      if(sortKey==="lastIn")return (a.lastIn||"").localeCompare(b.lastIn||"")*dir||b.amt-a.amt;
+      return (a[sortKey]-b[sortKey])*dir||b.amt-a.amt;
+    });
+  },[groups,sortKey,sortDir]);
+
+  // desc → asc → 기본 순환
+  const toggleSort=k=>{
+    if(sortKey!==k){setSortKey(k);setSortDir("desc");return;}
+    if(sortDir==="desc"){setSortDir("asc");return;}
+    setSortKey("");setSortDir("desc");
+  };
 
   const box={padding:"14px 16px",borderRadius:10,textAlign:"center"};
   const lab={fontSize:12,fontWeight:600,textTransform:"uppercase"};
@@ -5813,6 +5836,12 @@ function OrderSheetDashboard(){
   const selSt={padding:"8px 10px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:14,color:"#1E293B",background:"#F8FAFC",outline:"none",cursor:"pointer"};
   const numTd={textAlign:"right",fontVariantNumeric:"tabular-nums"};
   const rateColor=v=>v>=100?"#059669":v>=70?"#2563EB":"#D97706";
+  // Table 헬퍼의 headers 항목에 그대로 넣는 클릭 정렬 헤더.
+  const sortTh=(k,label)=>(
+    <span onClick={()=>toggleSort(k)} style={{cursor:"pointer",userSelect:"none",whiteSpace:"nowrap",color:sortKey===k?"#2563EB":"inherit"}}>
+      {label}<span style={{marginLeft:4,color:sortKey===k?"#2563EB":"#CBD5E1"}}>{sortKey===k?(sortDir==="asc"?"▲":"▼"):"↕"}</span>
+    </span>
+  );
 
   if(loading)return <SectionCard title="📊 오더 입고현황"><div style={{textAlign:"center",padding:40,color:"#94A3B8"}}>⏳ 불러오는 중...</div></SectionCard>;
   if(error)return <SectionCard title="📊 오더 입고현황"><div style={{textAlign:"center",padding:40,color:"#DC2626",fontSize:14}}>불러오기 실패: {error}</div></SectionCard>;
@@ -5845,6 +5874,10 @@ function OrderSheetDashboard(){
 
         {/* ── 필터 줄 ── */}
         <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",margin:"16px 0 12px"}}>
+          <select value={fYear} onChange={e=>setFYear(e.target.value)} style={selSt}>
+            <option value="">전체 연도</option>
+            {years.map(y=><option key={y} value={y}>{y}</option>)}
+          </select>
           <select value={fSeason} onChange={e=>setFSeason(e.target.value)} style={selSt}>
             <option value="">전체 시즌</option>
             {seasons.map(s=><option key={s} value={s}>{s}</option>)}
@@ -5861,8 +5894,8 @@ function OrderSheetDashboard(){
         {!filteredRows.length?(
           <div style={{textAlign:"center",padding:40,color:"#94A3B8",fontSize:14}}>조건에 맞는 데이터 없음</div>
         ):(
-          <Table headers={["상품명","시즌","발주수량","입고수량","미입고","입고율","발주금액","최근입고일"]} maxH={560}>
-            {groups.map(g=>{
+          <Table headers={["상품명","시즌",sortTh("ord","발주수량"),sortTh("inb","입고수량"),sortTh("short","미입고"),sortTh("rate","입고율"),sortTh("amt","발주금액"),sortTh("deposit","계약금"),sortTh("lastIn","최근입고일")]} maxH={560}>
+            {sortedGroups.map(g=>{
               const on=expanded===g.name;
               return[
                 <tr key={g.name} onClick={()=>setExpanded(on?null:g.name)} style={{cursor:"pointer",background:on?"#F8FAFC":"transparent"}}>
@@ -5878,11 +5911,12 @@ function OrderSheetDashboard(){
                     <div style={{marginTop:3,height:4,background:"#E2E8F0",borderRadius:2}}><div style={{height:"100%",borderRadius:2,background:rateColor(g.rate),width:Math.min(g.rate,100)+"%"}} /></div>
                   </Td>
                   <Td style={numTd}>₩{Math.round(g.amt).toLocaleString()}</Td>
+                  <Td style={{...numTd,color:g.deposit>0?"#334155":"#94A3B8"}}>{g.deposit>0?`₩${Math.round(g.deposit).toLocaleString()}`:"-"}</Td>
                   <Td style={{color:g.lastIn?"#334155":"#94A3B8"}}>{g.lastIn?g.lastIn.slice(0,10):"-"}</Td>
                 </tr>,
                 on&&(
                   <tr key={g.name+"__detail"}>
-                    <td colSpan={8} style={{padding:"10px 14px",background:"#F8FAFC",borderBottom:"1px solid #F1F5F9"}}>
+                    <td colSpan={9} style={{padding:"10px 14px",background:"#F8FAFC",borderBottom:"1px solid #F1F5F9"}}>
                       <Table headers={["색상/사이즈","발주수량","입고수량","상품코드"]} maxH={280}>
                         {g.items.map((it,i)=>(
                           <tr key={i}>
