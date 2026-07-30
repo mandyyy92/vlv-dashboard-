@@ -5726,6 +5726,85 @@ function ProductMasterTab(){
   );
 }
 
+// ─── 오더 입고현황 (orders_sheet 기반) ───
+// 기존 ProductionDashboard(별도 파일)는 그대로 보존하고, ordertrack 탭 렌더만 이 컴포넌트로 교체.
+// 1단계: 조회 + 상단 요약카드 4개까지만. (표·필터·묶음은 다음 단계)
+const OS_COL={SEASON:"시즌",CODE:"상품코드",NAME:"상품명",OPT:"색상사이즈",ORD_QTY:"발주수량",IN_QTY:"실입고총수량",AMT:"발주총액_krw",FACTORY:"생산공장",IN_DATE:"실입고일",ETA:"입고예정일"};
+// 숫자 컬럼이 문자열("1,200" / "" / null)로 와도 안전하게 합산.
+const osNum=v=>{if(v==null)return 0;const n=Number(String(v).replace(/[^0-9.-]/g,""));return Number.isFinite(n)?n:0;};
+
+function OrderSheetDashboard(){
+  const[rows,setRows]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[error,setError]=useState("");
+
+  useEffect(()=>{
+    let alive=true;
+    (async()=>{
+      setLoading(true);setError("");
+      try{
+        // PostgREST 기본 1000행 제한 → offset 페이징으로 전량 확보(합계 정확도).
+        const all=[];const PAGE=1000;
+        for(let off=0;;off+=PAGE){
+          const r=await fetch(`${SUPABASE_URL}/rest/v1/orders_sheet?select=*&order=id.asc&limit=${PAGE}&offset=${off}`,{headers:sbHeaders});
+          if(!r.ok)throw new Error(`${r.status} ${await r.text()}`);
+          const chunk=await r.json();
+          all.push(...chunk);
+          if(chunk.length<PAGE)break;
+        }
+        if(alive)setRows(all);
+      }catch(e){
+        if(alive){setError(e.message||String(e));setRows([]);}
+      }finally{
+        if(alive)setLoading(false);
+      }
+    })();
+    return()=>{alive=false;};
+  },[]);
+
+  const sum=useMemo(()=>{
+    let amt=0,ord=0,inb=0;
+    for(const r of rows){amt+=osNum(r[OS_COL.AMT]);ord+=osNum(r[OS_COL.ORD_QTY]);inb+=osNum(r[OS_COL.IN_QTY]);}
+    return{amt,ord,inb,rate:ord>0?(inb/ord*100):0};
+  },[rows]);
+
+  const box={padding:"14px 16px",borderRadius:10,textAlign:"center"};
+  const lab={fontSize:12,fontWeight:600,textTransform:"uppercase"};
+  const val={fontSize:26,fontWeight:800,marginTop:2};
+
+  if(loading)return <SectionCard title="📊 오더 입고현황" subtitle="orders_sheet"><div style={{textAlign:"center",padding:40,color:"#94A3B8"}}>⏳ 불러오는 중...</div></SectionCard>;
+  if(error)return <SectionCard title="📊 오더 입고현황" subtitle="orders_sheet"><div style={{textAlign:"center",padding:40,color:"#DC2626",fontSize:14}}>불러오기 실패: {error}</div></SectionCard>;
+
+  return(
+    <SectionCard title="📊 오더 입고현황" subtitle={`orders_sheet · ${rows.length.toLocaleString()}건`}>
+      {!rows.length?(
+        <div style={{textAlign:"center",padding:40,color:"#94A3B8",fontSize:14}}>데이터 없음</div>
+      ):(
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}}>
+          <div style={{...box,background:"#F8FAFC",border:"1px solid #E2E8F0"}}>
+            <div style={{...lab,color:"#94A3B8"}}>총 발주금액</div>
+            <div style={{...val,color:"#1E293B"}}>₩{Math.round(sum.amt).toLocaleString()}</div>
+            <div style={{fontSize:12,color:"#94A3B8",marginTop:2}}>≈ {(sum.amt/1000000).toFixed(1)}M</div>
+          </div>
+          <div style={{...box,background:"#F8FAFC",border:"1px solid #E2E8F0"}}>
+            <div style={{...lab,color:"#94A3B8"}}>총 발주수량</div>
+            <div style={{...val,color:"#1E293B"}}>{Math.round(sum.ord).toLocaleString()}<span style={{fontSize:13,color:"#94A3B8"}}> pcs</span></div>
+          </div>
+          <div style={{...box,background:"#F0FDF4",border:"1px solid #BBF7D0"}}>
+            <div style={{...lab,color:"#059669"}}>총 입고수량</div>
+            <div style={{...val,color:"#059669"}}>{Math.round(sum.inb).toLocaleString()}<span style={{fontSize:13,color:"#6EE7B7"}}> pcs</span></div>
+          </div>
+          <div style={{...box,background:"#EFF6FF",border:"1px solid #BFDBFE"}}>
+            <div style={{...lab,color:"#2563EB"}}>평균 입고율</div>
+            <div style={{...val,color:"#2563EB"}}>{sum.rate.toFixed(1)}%</div>
+            <div style={{marginTop:4,height:5,background:"#E2E8F0",borderRadius:3}}><div style={{height:"100%",borderRadius:3,background:sum.rate>=100?"#059669":"#2563EB",width:Math.min(sum.rate,100)+"%"}} /></div>
+          </div>
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
 // ─── Main Dashboard ───
 export default function Dashboard(){
   const[activeTab,setActiveTab]=useState("schedule"); // 대시보드(overview) 탭 숨김 → 기본 탭을 입고 스케줄로
@@ -5798,7 +5877,7 @@ export default function Dashboard(){
         {activeTab==="sample"&&<SampleTabWorkorder />}
         {activeTab==="print"&&<PrintOutsourcingTab />}
         {activeTab==="reorder"&&<ReorderTab />}
-        {activeTab==="ordertrack"&&<ProductionDashboard />}
+        {activeTab==="ordertrack"&&<OrderSheetDashboard />}{/* 기존 <ProductionDashboard /> 는 보존(미사용) */}
         {activeTab==="productdb"&&<ProductDB />}
         {activeTab==="measure"&&<MeasurementTab />}
       </div>
