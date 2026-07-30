@@ -5772,11 +5772,11 @@ function OrderSheetDashboard(){
   const lab={fontSize:12,fontWeight:600,textTransform:"uppercase"};
   const val={fontSize:26,fontWeight:800,marginTop:2};
 
-  if(loading)return <SectionCard title="📊 오더 입고현황" subtitle="orders_sheet"><div style={{textAlign:"center",padding:40,color:"#94A3B8"}}>⏳ 불러오는 중...</div></SectionCard>;
-  if(error)return <SectionCard title="📊 오더 입고현황" subtitle="orders_sheet"><div style={{textAlign:"center",padding:40,color:"#DC2626",fontSize:14}}>불러오기 실패: {error}</div></SectionCard>;
+  if(loading)return <SectionCard title="📊 오더 입고현황"><div style={{textAlign:"center",padding:40,color:"#94A3B8"}}>⏳ 불러오는 중...</div></SectionCard>;
+  if(error)return <SectionCard title="📊 오더 입고현황"><div style={{textAlign:"center",padding:40,color:"#DC2626",fontSize:14}}>불러오기 실패: {error}</div></SectionCard>;
 
   return(
-    <SectionCard title="📊 오더 입고현황" subtitle={`orders_sheet · ${rows.length.toLocaleString()}건`}>
+    <SectionCard title="📊 오더 입고현황">
       {!rows.length?(
         <div style={{textAlign:"center",padding:40,color:"#94A3B8",fontSize:14}}>데이터 없음</div>
       ):(
