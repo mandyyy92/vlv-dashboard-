@@ -3735,8 +3735,11 @@ function PrintSupplierManage(){
   const[error,setError]=useState(null);
   const[nonce,setNonce]=useState(0); // 저장 후 재조회 트리거
   const[view,setView]=useState("supplier"); // supplier | product
-  const[search,setSearch]=useState("");
+  const[pspQuery,setPspQuery]=useState(""); // 상품명 검색(두 뷰 공통)
   const[costFocus,setCostFocus]=useState(null); // 포커스 중인 단가 셀 id(표시/편집 전환)
+  const[nameFocus,setNameFocus]=useState(null); // 포커스 중인 상품명 셀 id(편집 중 검색필터로 사라지는 것 방지)
+  const nameOrig=useRef(new Map());             // 상품명 편집 시작값(빈값 입력 시 원복용)
+  const[titleDraft,setTitleDraft]=useState({}); // [상품별] 카드 제목 편집중 문자열 {groupKey:string} — 타이핑 중 재그룹핑 방지
   // 추가 모달(팝업) 상태 — React state로만 열고닫기(브라우저 storage 미사용)
   const[showAdd,setShowAdd]=useState(false);
   const[mSup,setMSup]=useState("");       // 선택 업체 id 또는 "__new__"
@@ -3789,6 +3792,29 @@ function PrintSupplierManage(){
   };
   const commitCost=(id,raw)=>{const v=Number(String(raw).replace(/[^\d.]/g,""))||0;editLocal(id,"unit_cost",v);commit(id,"unit_cost",v);}; // 수기 입력은 변환 없이 그대로
   const changeSample=(id,value)=>{editLocal(id,"sample_status",value);commit(id,"sample_status",value);};
+  // 상품명: 숫자변환 없음. 빈값이면 편집 시작값으로 원복(저장 안 함), 변경 없으면 PATCH 생략.
+  const commitName=(id,raw)=>{
+    const k=String(id);
+    const orig=nameOrig.current.get(k)??"";
+    nameOrig.current.delete(k);
+    const v=String(raw).trim();
+    if(!v||v===String(orig).trim()){editLocal(id,"design_name",orig);return;}
+    editLocal(id,"design_name",v);
+    commit(id,"design_name",v);
+  };
+  // [상품별] 카드 제목 = 그 그룹의 design_name. 그룹의 모든 행(업체별 레코드)을 함께 rename.
+  const commitTitle=async(g,raw)=>{
+    setTitleDraft(d=>{const n={...d};delete n[g.key];return n;});
+    const v=String(raw).trim();
+    if(!v||v===(g.design_name||""))return; // 빈값/무변경 → 원복(드래프트만 제거)
+    const ids=g.rows.map(r=>String(r.id));
+    setProducts(ps=>ps.map(p=>ids.includes(String(p.id))?{...p,design_name:v}:p));
+    try{
+      const rs=await Promise.all(ids.map(id=>fetch(`${SUPABASE_URL}/rest/v1/print_supplier_products?id=eq.${id}`,{method:"PATCH",headers:sbHeaders,body:JSON.stringify({design_name:v})})));
+      const bad=rs.find(r=>!r.ok);
+      if(bad)throw new Error(`HTTP ${bad.status}`);
+    }catch(e){alert("저장 실패: "+String(e?.message||e));reload();}
+  };
 
   // "+ 추가" 모달 열기 — 폼 초기화
   const openAdd=()=>{
@@ -3849,6 +3875,15 @@ function PrintSupplierManage(){
       onBlur={e=>{setCostFocus(null);commitCost(p.id,e.target.value);}}
       style={{...cellInput,textAlign:"right"}}/>;
   };
+  // 상품명: 단가 셀과 같은 인라인 편집(숫자 변환만 제외). Enter = blur → 저장.
+  const nameInput=p=>(
+    <input value={p.design_name??""}
+      onFocus={()=>{nameOrig.current.set(String(p.id),p.design_name??"");setNameFocus(p.id);}}
+      onChange={e=>editLocal(p.id,"design_name",e.target.value)}
+      onBlur={e=>{setNameFocus(null);commitName(p.id,e.target.value);}}
+      onKeyDown={e=>{if(e.key==="Enter")e.currentTarget.blur();}}
+      style={{...cellInput,fontWeight:600,color:"#0F172A"}}/>
+  );
   const sampleSelect=p=>{
     const v=p.sample_status||"미승인";const c=pspSampleColor(v);
     return(
@@ -3875,19 +3910,29 @@ function PrintSupplierManage(){
     </div>
   );
 
+  // 상품명 검색(두 뷰 공통). 편집 중인 셀은 이름을 고쳐도 목록에서 사라지지 않게 항상 유지.
+  const visibleProducts=useMemo(()=>{
+    const q=pspQuery.trim().toLowerCase();
+    if(!q)return products;
+    return products.filter(p=>String(p.id)===String(nameFocus)||String(p.design_name||"").toLowerCase().includes(q));
+  },[products,pspQuery,nameFocus]);
+
   // [업체별] 업체 → 상품 목록
   const bySupplier=useMemo(()=>{
     const m=new Map();
-    products.forEach(p=>{const k=String(p.supplier_id);if(!m.has(k))m.set(k,[]);m.get(k).push(p);});
+    visibleProducts.forEach(p=>{const k=String(p.supplier_id);if(!m.has(k))m.set(k,[]);m.get(k).push(p);});
     return m;
-  },[products]);
+  },[visibleProducts]);
+
+  // 검색 중이면 매칭 상품이 하나도 없는 업체 카드는 숨김.
+  const visibleSuppliers=useMemo(()=>
+    pspQuery.trim()?suppliers.filter(s=>(bySupplier.get(String(s.id))||[]).length>0):suppliers
+  ,[suppliers,bySupplier,pspQuery]);
 
   // [상품별] style_group+design_name 그룹 → 업체별 단가 비교(단가 오름차순, 미입력 0은 뒤로)
   const byDesign=useMemo(()=>{
-    const q=search.trim().toLowerCase();
     const groups=new Map();
-    products.forEach(p=>{
-      if(q){const hay=`${p.design_name||""} ${p.style_group||""}`.toLowerCase();if(!hay.includes(q))return;}
+    visibleProducts.forEach(p=>{
       const key=`${p.style_group||""}||${p.design_name||""}`;
       if(!groups.has(key))groups.set(key,{key,style_group:p.style_group||"",design_name:p.design_name||"",rows:[]});
       groups.get(key).rows.push(p);
@@ -3900,7 +3945,7 @@ function PrintSupplierManage(){
     });
     arr.sort((a,b)=>`${a.style_group} ${a.design_name}`.localeCompare(`${b.style_group} ${b.design_name}`,"ko"));
     return arr;
-  },[products,search]);
+  },[visibleProducts]);
 
   // 내부 탭 (이 컴포넌트 전용 세그먼트 토글 · 소메뉴 pill과 구분)
   const viewTabs=(
@@ -3922,16 +3967,16 @@ function PrintSupplierManage(){
       {/* 내부 탭 + 뷰별 액션 */}
       <div style={{display:"flex",gap:12,alignItems:"center",marginBottom:16,flexWrap:"wrap"}}>
         {viewTabs}
+        <div style={{width:220}}><Input value={pspQuery} onChange={e=>setPspQuery(e.target.value)} placeholder="상품명 검색" /></div>
         <div style={{flex:1}}/>
-        {view==="product"&&<input value={search} onChange={e=>setSearch(e.target.value)} placeholder="디자인·스타일 검색" style={{...selStyle,minWidth:200}}/>}
         <SmallBtn primary onClick={openAdd}>+ 추가</SmallBtn>
       </div>
 
       {/* [업체별] */}
       {view==="supplier"&&(
-        suppliers.length===0?(
-          <SectionCard title="🏢 업체·단가·샘플 관리"><div style={{textAlign:"center",padding:40,color:"#94A3B8",fontSize:14}}>등록된 업체가 없습니다 · 상단 “+ 추가”</div></SectionCard>
-        ):suppliers.map(s=>{
+        visibleSuppliers.length===0?(
+          <SectionCard title="🏢 업체·단가·샘플 관리"><div style={{textAlign:"center",padding:40,color:"#94A3B8",fontSize:14}}>{pspQuery.trim()?"검색 결과가 없습니다":"등록된 업체가 없습니다 · 상단 “+ 추가”"}</div></SectionCard>
+        ):visibleSuppliers.map(s=>{
           const list=bySupplier.get(String(s.id))||[];
           const costs=list.map(p=>Number(p.unit_cost)||0).filter(v=>v>0);
           const avg=costs.length?Math.round(costs.reduce((a,b)=>a+b,0)/costs.length):null;
@@ -3943,7 +3988,7 @@ function PrintSupplierManage(){
                 fixedTable(["상품명","단가(VAT포함)","샘플상태",""],
                   list.map(p=>(
                     <tr key={p.id}>
-                      <Td style={{fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.design_name||"-"}</Td>
+                      <Td>{nameInput(p)}</Td>
                       <Td style={{textAlign:"right"}}>{costInput(p)}</Td>
                       <Td>{sampleSelect(p)}</Td>
                       <Td style={{textAlign:"center"}}>{delBtn(p)}</Td>
@@ -3959,9 +4004,20 @@ function PrintSupplierManage(){
       {/* [상품별] 디자인 기준 업체 단가 비교 */}
       {view==="product"&&(
         byDesign.length===0?(
-          <SectionCard title="📦 상품별 단가 비교"><div style={{textAlign:"center",padding:40,color:"#94A3B8",fontSize:14}}>표시할 디자인이 없습니다{search?" · 검색어를 확인하세요":""}</div></SectionCard>
+          <SectionCard title="📦 상품별 단가 비교"><div style={{textAlign:"center",padding:40,color:"#94A3B8",fontSize:14}}>표시할 디자인이 없습니다{pspQuery.trim()?" · 검색어를 확인하세요":""}</div></SectionCard>
         ):byDesign.map(g=>(
-          <SectionCard key={g.key} title={`📦 ${g.design_name||"(디자인 미지정)"}`} subtitle={`${g.style_group||"스타일그룹 미지정"} · 업체 ${g.rows.length}곳`}>
+          <SectionCard key={g.key} subtitle={`${g.style_group||"스타일그룹 미지정"} · 업체 ${g.rows.length}곳`}
+            title={
+              /* 카드 제목 = 그룹 상품명. 타이핑 중엔 draft만 갱신(재그룹핑·포커스 유실 방지), blur/Enter에 그룹 전체 rename */
+              <span style={{display:"inline-flex",alignItems:"center",gap:8}}>📦
+                <input value={titleDraft[g.key]??g.design_name??""}
+                  onChange={e=>setTitleDraft(d=>({...d,[g.key]:e.target.value}))}
+                  onBlur={e=>commitTitle(g,e.target.value)}
+                  onKeyDown={e=>{if(e.key==="Enter")e.currentTarget.blur();}}
+                  placeholder="(디자인 미지정)"
+                  style={{...cellInput,width:300,padding:"4px 8px",fontSize:19,fontWeight:700,color:"#0F172A"}}/>
+              </span>
+            }>
             {fixedTable(["업체","단가(VAT포함)","샘플상태",""],
               g.rows.map(p=>{
                 const cost=Number(p.unit_cost)||0;
