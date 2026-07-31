@@ -89,7 +89,10 @@ const SmallBtn=({children,onClick,primary,danger})=>(<button onClick={onClick} s
 
 const Input=({value,onChange,placeholder,style:s,...rest})=>(<input value={value} onChange={onChange} placeholder={placeholder} {...rest} style={{padding:"7px 12px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:15,color:"#1E293B",outline:"none",background:"#F8FAFC",width:"100%",boxSizing:"border-box",...s}} onFocus={e=>e.target.style.borderColor="#94A3B8"} onBlur={e=>e.target.style.borderColor="#E2E8F0"} />);
 
-const Table=({headers,children,maxH})=>(<div style={{overflowX:"auto",overflowY:maxH?"auto":"visible",maxHeight:maxH,borderRadius:10,border:"1px solid #E2E8F0"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:15}}><thead style={{position:maxH?"sticky":"static",top:0,zIndex:1}}><tr style={{background:"#F8FAFC"}}>{headers.map((h,i)=>(<th key={i} style={{padding:"10px 14px",textAlign:"left",fontWeight:600,color:"#64748B",fontSize:13,letterSpacing:0.4,borderBottom:"1px solid #E2E8F0",whiteSpace:"nowrap",textTransform:"uppercase"}}>{h}</th>))}</tr></thead><tbody>{children}</tbody></table></div>);
+// cols: 컬럼 폭 배열(주면 colgroup + table-layout:fixed → 헤더/바디 폭 일치, null 항목은 가변 폭)
+// aligns: 컬럼별 헤더 textAlign(바디는 호출부 Td에서 같은 값 지정) / minW: 표 최소 폭(좁을 때 찌그러짐 대신 가로스크롤)
+// 세 옵션 모두 생략하면 기존 동작 그대로.
+const Table=({headers,children,maxH,cols,aligns,minW})=>(<div style={{overflowX:"auto",overflowY:maxH?"auto":"visible",maxHeight:maxH,borderRadius:10,border:"1px solid #E2E8F0"}}><table style={{width:"100%",minWidth:minW,borderCollapse:"collapse",fontSize:15,tableLayout:cols?"fixed":"auto"}}>{cols&&<colgroup>{cols.map((w,i)=><col key={i} style={w?{width:w}:undefined} />)}</colgroup>}<thead style={{position:maxH?"sticky":"static",top:0,zIndex:1}}><tr style={{background:"#F8FAFC"}}>{headers.map((h,i)=>(<th key={i} style={{padding:"10px 14px",textAlign:(aligns&&aligns[i])||"left",fontWeight:600,color:"#64748B",fontSize:13,letterSpacing:0.4,borderBottom:"1px solid #E2E8F0",whiteSpace:"nowrap",textTransform:"uppercase"}}>{h}</th>))}</tr></thead><tbody>{children}</tbody></table></div>);
 
 const Td=({children,style:s})=>(<td style={{padding:"10px 14px",borderBottom:"1px solid #F1F5F9",color:"#334155",...s}}>{children}</td>);
 
@@ -5729,7 +5732,7 @@ function ProductMasterTab(){
 // ─── 오더 입고현황 (orders_sheet 기반) ───
 // 기존 ProductionDashboard(별도 파일)는 그대로 보존하고, ordertrack 탭 렌더만 이 컴포넌트로 교체.
 // 조회 + 요약카드 4개 + 필터(연도/시즌/공장/검색) + 상품명별 묶음표(펼침·헤더정렬).
-const OS_COL={SEASON:"시즌",YEAR:"제품운영연도",CODE:"상품코드",NAME:"상품명",OPT:"색상사이즈",ORD_QTY:"발주수량",IN_QTY:"실입고총수량",AMT:"발주총액_krw",DEPOSIT:"계약금_krw",FACTORY:"생산공장",IN_DATE:"실입고일",ETA:"입고예정일"};
+const OS_COL={SEASON:"시즌",YEAR:"제품운영연도",CODE:"상품코드",NAME:"상품명",OPT:"색상사이즈",ORD_QTY:"발주수량",IN_QTY:"실입고총수량",AMT:"발주총액_krw",DEPOSIT:"계약금_krw",FACTORY:"생산공장",IN_DATE:"실입고일",ETA:"입고예정일",ROUND:"발주차수"};
 // 숫자 컬럼이 문자열("1,200" / "" / null)로 와도 안전하게 합산.
 const osNum=v=>{if(v==null)return 0;const n=Number(String(v).replace(/[^0-9.-]/g,""));return Number.isFinite(n)?n:0;};
 
@@ -5791,7 +5794,7 @@ function OrderSheetDashboard(){
   const[fSeason,setFSeason]=useState("");
   const[fFactory,setFFactory]=useState("");
   const[q,setQ]=useState("");
-  const[selName,setSelName]=useState(null);   // 오른쪽 드로어로 열린 상품명(1개만)
+  const[selKey,setSelKey]=useState(null);     // 오른쪽 드로어로 열린 그룹키(상품명␟차수, 1개만)
   const[sortKey,setSortKey]=useState("");     // ""=기본(전량입고 하단), 그 외 컬럼키
   const[sortDir,setSortDir]=useState("desc");
 
@@ -5817,13 +5820,15 @@ function OrderSheetDashboard(){
     return{amt,ord,inb,rate:ord>0?(inb/ord*100):0};
   },[filteredRows]);
 
-  // 상품명 기준 묶음
+  // (상품명 + 발주차수) 조합 묶음 — 같은 상품이라도 차수가 다르면 별도 행.
   const groups=useMemo(()=>{
     const m=new Map();
     for(const r of filteredRows){
-      const key=String(r[OS_COL.NAME]??"").trim()||"(상품명 없음)";
+      const name=String(r[OS_COL.NAME]??"").trim()||"(상품명 없음)";
+      const round=String(r[OS_COL.ROUND]??"").trim();
+      const key=`${name}␟${round}`; // 상품명에 없는 구분자로 조합키
       let g=m.get(key);
-      if(!g){g={name:key,season:String(r[OS_COL.SEASON]??"").trim(),factory:String(r[OS_COL.FACTORY]??"").trim(),code:String(r[OS_COL.CODE]??"").trim(),ord:0,inb:0,amt:0,deposit:0,lastIn:"",items:[]};m.set(key,g);}
+      if(!g){g={key,name,round,roundN:osNum(round),season:String(r[OS_COL.SEASON]??"").trim(),factory:String(r[OS_COL.FACTORY]??"").trim(),code:String(r[OS_COL.CODE]??"").trim(),ord:0,inb:0,amt:0,deposit:0,lastIn:"",items:[]};m.set(key,g);}
       g.ord+=osNum(r[OS_COL.ORD_QTY]);
       g.inb+=osNum(r[OS_COL.IN_QTY]);
       g.amt+=osNum(r[OS_COL.AMT]);
@@ -5835,16 +5840,37 @@ function OrderSheetDashboard(){
     return[...m.values()].map(g=>({...g,short:g.ord-g.inb,rate:g.ord>0?(g.inb/g.ord*100):0}));
   },[filteredRows]);
 
-  // 기본 정렬: 미완료(입고율<100%) 먼저 → 완료(>=100%)는 맨 아래. 각 구간 내 발주금액 내림차순.
-  // 헤더 클릭 시(sortKey) 해당 컬럼 단일 정렬로 대체.
+  // 그룹이 (상품명+차수)라 groups.length ≠ 상품 수 → 상품 수는 따로 센다.
+  const nameCount=useMemo(()=>new Set(groups.map(g=>g.name)).size,[groups]);
+
+  // 기본 정렬: 같은 상품명끼리 반드시 인접(1차=상품명 블록, 2차=발주차수 오름차순).
+  //   상품명 블록의 순서는 그 상품의 전체 차수 합산 기준 — 미완료(입고율<100%) 먼저 → 전량입고는 맨 아래,
+  //   각 구간 내 발주금액 합계 내림차순. (차수별로 완료/미완료가 섞여도 상품 단위로 함께 움직인다)
+  // 헤더 클릭 시(sortKey)는 기존대로 해당 컬럼 단일 정렬.
   const sortedGroups=useMemo(()=>{
     const arr=[...groups];
-    if(!sortKey)return arr.sort((a,b)=>(a.rate>=100?1:0)-(b.rate>=100?1:0)||b.amt-a.amt);
-    const dir=sortDir==="asc"?1:-1;
-    return arr.sort((a,b)=>{
-      if(sortKey==="lastIn")return (a.lastIn||"").localeCompare(b.lastIn||"")*dir||b.amt-a.amt;
-      return (a[sortKey]-b[sortKey])*dir||b.amt-a.amt;
-    });
+    if(sortKey){
+      const dir=sortDir==="asc"?1:-1;
+      return arr.sort((a,b)=>{
+        if(sortKey==="lastIn")return (a.lastIn||"").localeCompare(b.lastIn||"")*dir||b.amt-a.amt;
+        return (a[sortKey]-b[sortKey])*dir||b.amt-a.amt;
+      });
+    }
+    const byName=new Map();
+    for(const g of arr){
+      let p=byName.get(g.name);
+      if(!p){p={name:g.name,ord:0,inb:0,amt:0};byName.set(g.name,p);}
+      p.ord+=g.ord;p.inb+=g.inb;p.amt+=g.amt;
+    }
+    const done=p=>(p.ord>0&&p.inb/p.ord*100>=100)?1:0;
+    const rank=new Map([...byName.values()]
+      .sort((a,b)=>done(a)-done(b)||b.amt-a.amt||a.name.localeCompare(b.name))
+      .map((p,i)=>[p.name,i]));
+    return arr.sort((a,b)=>
+      rank.get(a.name)-rank.get(b.name)
+      ||a.roundN-b.roundN                    // 숫자 차수 오름차순
+      ||a.round.localeCompare(b.round)       // 비숫자 차수 대비
+    );
   },[groups,sortKey,sortDir]);
 
   // desc → asc → 기본 순환
@@ -5855,13 +5881,13 @@ function OrderSheetDashboard(){
   };
 
   // 드로어로 열린 그룹(정렬/필터 바뀌어 사라지면 자동 닫힘 처리)
-  const selGroup=useMemo(()=>groups.find(g=>g.name===selName)||null,[groups,selName]);
+  const selGroup=useMemo(()=>groups.find(g=>g.key===selKey)||null,[groups,selKey]);
   useEffect(()=>{
-    if(!selName)return;
-    const onKey=e=>{if(e.key==="Escape")setSelName(null);};
+    if(!selKey)return;
+    const onKey=e=>{if(e.key==="Escape")setSelKey(null);};
     window.addEventListener("keydown",onKey);
     return()=>window.removeEventListener("keydown",onKey);
-  },[selName]);
+  },[selKey]);
 
   // cafe24 핫링크 차단 우회 → weserv 프록시
   const proxied=(url,px)=>url?`https://images.weserv.nl/?url=${encodeURIComponent(String(url).replace(/^https?:\/\//,""))}&w=${px}&h=${px}&fit=cover`:null;
@@ -5879,8 +5905,24 @@ function OrderSheetDashboard(){
   const lab={fontSize:12,fontWeight:600,textTransform:"uppercase"};
   const val={fontSize:26,fontWeight:800,marginTop:2};
   const selSt={padding:"8px 10px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:14,color:"#1E293B",background:"#F8FAFC",outline:"none",cursor:"pointer"};
-  const numTd={textAlign:"right",fontVariantNumeric:"tabular-nums"};
+  const numTd={fontVariantNumeric:"tabular-nums"};
   const rateColor=v=>v>=100?"#059669":v>=70?"#2563EB":"#D97706";
+
+  // 헤더/바디 컬럼을 한 곳에서 정의 → 개수·폭·정렬 불일치 방지.
+  // w=null 인 상품명 열만 가변, 나머지는 고정 폭(colgroup + table-layout:fixed).
+  const OSC=[
+    {w:64, a:"center"},  // 0 차수
+    {w:null,a:"left"},   // 1 상품명(썸네일 포함)
+    {w:88, a:"center"},  // 2 시즌
+    {w:96, a:"right"},   // 3 발주수량
+    {w:96, a:"right"},   // 4 입고수량
+    {w:96, a:"right"},   // 5 미입고
+    {w:112,a:"center"},  // 6 입고율
+    {w:136,a:"right"},   // 7 발주금액
+    {w:124,a:"right"},   // 8 계약금
+    {w:116,a:"center"},  // 9 최근입고일
+  ];
+  const cellAt=i=>({textAlign:OSC[i].a}); // 바디 셀에 헤더와 같은 정렬 적용
   // Table 헬퍼의 headers 항목에 그대로 넣는 클릭 정렬 헤더.
   const sortTh=(k,label)=>(
     <span onClick={()=>toggleSort(k)} style={{cursor:"pointer",userSelect:"none",whiteSpace:"nowrap",color:sortKey===k?"#2563EB":"inherit"}}>
@@ -5932,55 +5974,63 @@ function OrderSheetDashboard(){
             {factories.map(f=><option key={f} value={f}>{f}</option>)}
           </select>
           <Input value={q} onChange={e=>setQ(e.target.value)} placeholder="상품명·상품코드 검색" style={{width:240}} />
-          <span style={{marginLeft:"auto",fontSize:13,color:"#94A3B8"}}>{groups.length.toLocaleString()}개 상품 · {filteredRows.length.toLocaleString()}행</span>
+          <span style={{marginLeft:"auto",fontSize:13,color:"#94A3B8"}}>{nameCount.toLocaleString()}개 상품 · {groups.length.toLocaleString()}개 차수 · {filteredRows.length.toLocaleString()}행</span>
         </div>
 
-        {/* ── 상품명별 묶음 표 (행 클릭 = 오른쪽 드로어로 옵션 상세) ── */}
+        {/* ── (상품명+차수)별 묶음 표 (행 클릭 = 오른쪽 드로어로 옵션 상세) ── */}
         {!filteredRows.length?(
           <div style={{textAlign:"center",padding:40,color:"#94A3B8",fontSize:14}}>조건에 맞는 데이터 없음</div>
         ):(
-          <Table headers={["상품명","시즌",sortTh("ord","발주수량"),sortTh("inb","입고수량"),sortTh("short","미입고"),sortTh("rate","입고율"),sortTh("amt","발주금액"),sortTh("deposit","계약금"),sortTh("lastIn","최근입고일")]} maxH={560}>
+          <Table
+            headers={["차수","상품명","시즌",sortTh("ord","발주수량"),sortTh("inb","입고수량"),sortTh("short","미입고"),sortTh("rate","입고율"),sortTh("amt","발주금액"),sortTh("deposit","계약금"),sortTh("lastIn","최근입고일")]}
+            cols={OSC.map(c=>c.w)} aligns={OSC.map(c=>c.a)} minW={1120} maxH={560}>
             {sortedGroups.map(g=>{
-              const on=selName===g.name;
+              const on=selKey===g.key;
               return(
-                <tr key={g.name} onClick={()=>setSelName(on?null:g.name)} style={{cursor:"pointer",background:on?"#F8FAFC":"transparent"}}>
-                  <Td style={{fontWeight:600,color:"#0F172A"}}>
-                    <span style={{display:"flex",alignItems:"center",gap:10}}>
+                <tr key={g.key} onClick={()=>setSelKey(on?null:g.key)} style={{cursor:"pointer",background:on?"#F8FAFC":"transparent"}}>
+                  <Td style={{...cellAt(0),...numTd,color:g.round?"#334155":"#94A3B8",fontWeight:g.round?700:400}}>{g.round||"-"}</Td>
+                  <Td style={{...cellAt(1),fontWeight:600,color:"#0F172A"}}>
+                    <span style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}>
                       {thumb(g.code,34)}
-                      <span>{g.name}<span style={{marginLeft:8,fontSize:12,color:"#94A3B8",fontWeight:400}}>{g.factory}</span></span>
+                      <span style={{minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                        {g.name}<span style={{marginLeft:8,fontSize:12,color:"#94A3B8",fontWeight:400}}>{g.factory}</span>
+                      </span>
                     </span>
                   </Td>
-                  <Td style={{color:"#64748B"}}>{g.season||"-"}</Td>
-                  <Td style={numTd}>{Math.round(g.ord).toLocaleString()}</Td>
-                  <Td style={{...numTd,color:"#059669",fontWeight:600}}>{Math.round(g.inb).toLocaleString()}</Td>
-                  <Td style={{...numTd,color:g.short>0?"#DC2626":"#94A3B8",fontWeight:g.short>0?600:400}}>
+                  <Td style={{...cellAt(2),color:"#64748B"}}>{g.season||"-"}</Td>
+                  <Td style={{...cellAt(3),...numTd}}>{Math.round(g.ord).toLocaleString()}</Td>
+                  <Td style={{...cellAt(4),...numTd,color:"#059669",fontWeight:600}}>{Math.round(g.inb).toLocaleString()}</Td>
+                  <Td style={{...cellAt(5),...numTd,color:g.short>0?"#DC2626":"#94A3B8",fontWeight:g.short>0?600:400}}>
                     {g.short<0?<>0 <span style={{fontSize:12,color:"#94A3B8",fontWeight:400}}>({Math.round(g.short).toLocaleString()})</span></>:Math.round(g.short).toLocaleString()}
                   </Td>
-                  <Td style={{...numTd,color:rateColor(g.rate),fontWeight:700,minWidth:96}}>
+                  <Td style={{...cellAt(6),...numTd,color:rateColor(g.rate),fontWeight:700}}>
                     {g.rate.toFixed(1)}%
                     <div style={{marginTop:3,height:4,background:"#E2E8F0",borderRadius:2}}><div style={{height:"100%",borderRadius:2,background:rateColor(g.rate),width:Math.min(g.rate,100)+"%"}} /></div>
                   </Td>
-                  <Td style={numTd}>₩{Math.round(g.amt).toLocaleString()}</Td>
-                  <Td style={{...numTd,color:g.deposit>0?"#334155":"#94A3B8"}}>{g.deposit>0?`₩${Math.round(g.deposit).toLocaleString()}`:"-"}</Td>
-                  <Td style={{color:g.lastIn?"#334155":"#94A3B8"}}>{g.lastIn?g.lastIn.slice(0,10):"-"}</Td>
+                  <Td style={{...cellAt(7),...numTd}}>₩{Math.round(g.amt).toLocaleString()}</Td>
+                  <Td style={{...cellAt(8),...numTd,color:g.deposit>0?"#334155":"#94A3B8"}}>{g.deposit>0?`₩${Math.round(g.deposit).toLocaleString()}`:"-"}</Td>
+                  <Td style={{...cellAt(9),color:g.lastIn?"#334155":"#94A3B8"}}>{g.lastIn?g.lastIn.slice(0,10):"-"}</Td>
                 </tr>
               );
             })}
           </Table>
         )}
 
-        {/* ── 오른쪽 드로어: 선택 상품의 옵션별 상세 ── */}
+        {/* ── 오른쪽 드로어: 선택한 (상품명+차수)의 옵션별 상세 ── */}
         {selGroup&&(<>
-          <div onClick={()=>setSelName(null)} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.45)",zIndex:1000}} />
+          <div onClick={()=>setSelKey(null)} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.45)",zIndex:1000}} />
           <aside style={{position:"fixed",top:0,right:0,bottom:0,width:"min(400px, 92vw)",background:"#FFFFFF",zIndex:1001,boxShadow:"-8px 0 28px rgba(0,0,0,0.12)",display:"flex",flexDirection:"column"}}>
             <div style={{display:"flex",alignItems:"flex-start",gap:12,padding:"18px 20px",borderBottom:"1px solid #E2E8F0"}}>
               {thumb(selGroup.code,88,10)}
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontSize:12,color:"#94A3B8",marginBottom:4}}>{[selGroup.season,selGroup.factory].filter(Boolean).join(" · ")||"-"}</div>
-                <div style={{fontSize:17,fontWeight:700,color:"#0F172A",lineHeight:1.3}}>{selGroup.name}</div>
+                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                  {selGroup.round&&<span style={{flexShrink:0,fontSize:12,fontWeight:700,color:"#2563EB",background:"#EFF6FF",border:"1px solid #BFDBFE",borderRadius:6,padding:"1px 7px"}}>{selGroup.round}차</span>}
+                  <span style={{fontSize:17,fontWeight:700,color:"#0F172A",lineHeight:1.3}}>{selGroup.name}</span>
+                </div>
                 <div style={{fontSize:12,color:"#94A3B8",marginTop:4,fontFamily:"monospace"}}>{selGroup.code||"-"}</div>
               </div>
-              <button onClick={()=>setSelName(null)} aria-label="닫기" style={{border:"none",background:"#F1F5F9",borderRadius:8,width:32,height:32,fontSize:16,cursor:"pointer",color:"#475569",flexShrink:0}}>✕</button>
+              <button onClick={()=>setSelKey(null)} aria-label="닫기" style={{border:"none",background:"#F1F5F9",borderRadius:8,width:32,height:32,fontSize:16,cursor:"pointer",color:"#475569",flexShrink:0}}>✕</button>
             </div>
 
             <div style={{flex:1,overflowY:"auto",padding:20}}>
