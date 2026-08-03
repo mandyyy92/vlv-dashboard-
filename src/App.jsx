@@ -3174,7 +3174,9 @@ function WorkorderForm({editingRow,onSaved,onCancel}){
   );
 }
 
-// 프린팅 외주 발주 히스토리: print_order_items GET(읽기 전용) → 검색/차수/업체 필터 + 표
+// 프린팅 외주 발주 히스토리: print_orders_sheet GET(읽기 전용) → 검색/차수/업체 필터 + 표
+// 컬럼이 한글이라 문자열 키로 접근. 오타 방지용 상수로 모아둔다.
+const POS_COL={ROUND:"차수",SUPPLIER:"업체",SEASON:"시즌",CODE:"상품코드",NAME:"상품명",OPT:"색상사이즈",REQ_QTY:"의뢰수량",ORD_DATE:"발주일",ETA:"입고예정일",IN_DATE:"실입고일",COST:"원가_krw",AMT:"발주총액_krw",IN_QTY:"실입고총수량",DIFF:"입고차이",BASE_MAKER:"베이스생산업체",SHORT_REASON:"미입고사유",NOTE:"비고"};
 function PrintHistory(){
   const[rows,setRows]=useState([]);
   const[loading,setLoading]=useState(true);
@@ -3192,11 +3194,17 @@ function PrintHistory(){
     (async()=>{
       setLoading(true);setError(null);
       try{
-        const r=await fetch(`${SUPABASE_URL}/rest/v1/print_order_items?select=*&order=round_no.desc,product_code.asc`,{headers:sbHeaders});
-        const data=await r.json();
-        if(!r.ok)throw new Error(data?.message?data.message:`HTTP ${r.status}`);
-        if(!Array.isArray(data))throw new Error("예상치 못한 응답 형식");
-        if(alive)setRows(data);
+        // PostgREST 기본 1000행 제한 → offset 페이징으로 전량 확보(합계 정확도).
+        const all=[];const PAGE=1000;
+        for(let off=0;;off+=PAGE){
+          const r=await fetch(`${SUPABASE_URL}/rest/v1/print_orders_sheet?select=*&order=차수.desc,상품코드.asc&limit=${PAGE}&offset=${off}`,{headers:sbHeaders});
+          const data=await r.json();
+          if(!r.ok)throw new Error(data?.message?data.message:`HTTP ${r.status}`);
+          if(!Array.isArray(data))throw new Error("예상치 못한 응답 형식");
+          all.push(...data);
+          if(data.length<PAGE)break;
+        }
+        if(alive)setRows(all);
       }catch(e){
         if(alive){setError(String(e?.message||e));setRows([]);}
       }finally{
@@ -3207,28 +3215,29 @@ function PrintHistory(){
   },[nonce]);
 
   // 필터 셀렉트 값: 데이터에서 distinct
-  const distinct=useCallback((key)=>[...new Set(rows.map(r=>r[key]).filter(v=>v!==null&&v!==undefined&&v!==""))],[rows]);
-  const rounds=useMemo(()=>distinct("round_no").sort((a,b)=>Number(b)-Number(a)),[distinct]);
-  const suppliers=useMemo(()=>distinct("supplier_name").sort(),[distinct]);
+  const distinct=useCallback((key)=>[...new Set(rows.map(r=>String(r[key]??"").trim()).filter(v=>v!==""))],[rows]);
+  const rounds=useMemo(()=>distinct(POS_COL.ROUND).sort((a,b)=>Number(b)-Number(a)),[distinct]);
+  const suppliers=useMemo(()=>distinct(POS_COL.SUPPLIER).sort(),[distinct]);
 
   const filtered=useMemo(()=>{
     const q=search.trim().toLowerCase();
     return rows.filter(r=>{
       if(q){
-        const hay=`${r.product_name||""} ${r.product_code||""} ${r.supplier_name||""}`.toLowerCase();
+        const hay=`${r[POS_COL.NAME]||""} ${r[POS_COL.CODE]||""} ${r[POS_COL.SUPPLIER]||""}`.toLowerCase();
         if(!hay.includes(q))return false;
       }
-      if(fRound&&String(r.round_no)!==String(fRound))return false;
-      if(fSupplier&&r.supplier_name!==fSupplier)return false;
+      if(fRound&&String(r[POS_COL.ROUND]??"").trim()!==String(fRound))return false;
+      if(fSupplier&&String(r[POS_COL.SUPPLIER]??"").trim()!==fSupplier)return false;
       return true;
     });
   },[rows,search,fRound,fSupplier]);
 
-  const totalReq=useMemo(()=>filtered.reduce((s,r)=>s+(Number(r.req_qty)||0),0),[filtered]);
-
-  // 서식 헬퍼
-  const num=v=>(v!==null&&v!==undefined&&v!=="")?Number(v).toLocaleString():"-";
+  // 서식 헬퍼 — 시트 유래라 "1,200" 같은 문자열도 들어올 수 있어 숫자만 추려서 파싱.
+  const toNum=v=>{if(v==null||v==="")return 0;const n=Number(String(v).replace(/[^0-9.-]/g,""));return Number.isFinite(n)?n:0;};
+  const num=v=>(v!==null&&v!==undefined&&v!=="")?toNum(v).toLocaleString():"-";
   const dateFmt=v=>{if(!v)return "-";const s=String(v);return s.length>=10?s.slice(0,10):s;};
+
+  const totalReq=useMemo(()=>filtered.reduce((s,r)=>s+toNum(r[POS_COL.REQ_QTY]),0),[filtered]);
 
   const selectStyle={padding:"8px 12px",borderRadius:8,border:"1px solid #CBD5E1",background:"#FFF",color:"#475569",fontSize:14,fontWeight:600,cursor:"pointer",outline:"none"};
   const th={padding:"11px 12px",textAlign:"left",fontSize:12,fontWeight:700,color:"#64748B",whiteSpace:"nowrap",borderBottom:"2px solid #E2E8F0",textTransform:"uppercase",letterSpacing:0.3};
@@ -3398,23 +3407,24 @@ function PrintHistory(){
             </thead>
             <tbody>
               {filtered.map((r,i)=>{
-                const req=Number(r.req_qty)||0;
-                const recv=Number(r.recv_total)||0;
-                const recvDone=r.recv_total!=null&&recv>=req&&req>0;
+                const req=toNum(r[POS_COL.REQ_QTY]);
+                const recvRaw=r[POS_COL.IN_QTY];
+                const recvDone=recvRaw!=null&&recvRaw!==""&&toNum(recvRaw)>=req&&req>0;
+                const round=String(r[POS_COL.ROUND]??"").trim();
                 return(
                   <tr key={r.id!=null?r.id:i}>
-                    <td style={{...td,textAlign:"center",whiteSpace:"nowrap"}}>{r.round_no!=null?`${r.round_no}차`:"-"}</td>
-                    <td style={{...td,whiteSpace:"nowrap"}}>{r.supplier_name||"-"}</td>
-                    <td style={{...td,whiteSpace:"nowrap"}}>{r.season||"-"}</td>
-                    <td style={{...td,fontFamily:"monospace",whiteSpace:"nowrap"}}>{r.product_code||"-"}</td>
-                    <td style={{...td,fontWeight:600}}>{r.product_name||"-"}</td>
-                    <td style={{...td,whiteSpace:"nowrap"}}>{r.option_name||"-"}</td>
-                    <td style={{...td,textAlign:"right",fontWeight:700,whiteSpace:"nowrap"}}>{num(r.req_qty)}</td>
-                    <td style={{...td,whiteSpace:"nowrap"}}>{dateFmt(r.order_date)}</td>
-                    <td style={{...td,whiteSpace:"nowrap"}}>{dateFmt(r.expected_date)}</td>
-                    <td style={{...td,textAlign:"right",fontWeight:700,whiteSpace:"nowrap",color:recvDone?"#15803D":"#64748B"}}>{num(r.recv_total)}</td>
-                    <td style={{...td,textAlign:"right",whiteSpace:"nowrap"}}>{num(r.unit_cost)}</td>
-                    <td style={{...td,textAlign:"right",whiteSpace:"nowrap"}}>{num(r.order_amount)}</td>
+                    <td style={{...td,textAlign:"center",whiteSpace:"nowrap"}}>{round?`${round}차`:"-"}</td>
+                    <td style={{...td,whiteSpace:"nowrap"}}>{r[POS_COL.SUPPLIER]||"-"}</td>
+                    <td style={{...td,whiteSpace:"nowrap"}}>{r[POS_COL.SEASON]||"-"}</td>
+                    <td style={{...td,fontFamily:"monospace",whiteSpace:"nowrap"}}>{r[POS_COL.CODE]||"-"}</td>
+                    <td style={{...td,fontWeight:600}}>{r[POS_COL.NAME]||"-"}</td>
+                    <td style={{...td,whiteSpace:"nowrap"}}>{r[POS_COL.OPT]||"-"}</td>
+                    <td style={{...td,textAlign:"right",fontWeight:700,whiteSpace:"nowrap"}}>{num(r[POS_COL.REQ_QTY])}</td>
+                    <td style={{...td,whiteSpace:"nowrap"}}>{dateFmt(r[POS_COL.ORD_DATE])}</td>
+                    <td style={{...td,whiteSpace:"nowrap"}}>{dateFmt(r[POS_COL.ETA])}</td>
+                    <td style={{...td,textAlign:"right",fontWeight:700,whiteSpace:"nowrap",color:recvDone?"#15803D":"#64748B"}}>{num(r[POS_COL.IN_QTY])}</td>
+                    <td style={{...td,textAlign:"right",whiteSpace:"nowrap"}}>{num(r[POS_COL.COST])}</td>
+                    <td style={{...td,textAlign:"right",whiteSpace:"nowrap"}}>{num(r[POS_COL.AMT])}</td>
                   </tr>
                 );
               })}
