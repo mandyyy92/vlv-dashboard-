@@ -848,12 +848,16 @@ function ScheduleTab(){
   // "입고대기 현황": Notion 발주DB(notionEvents) 기준, 오늘(00:00) 이후 예정건. 대상 5개 상태만("입고 완료" 제외)
   const[waitFilter,setWaitFilter]=useState(null); // 상태 배지 클릭 필터 (null=전체)
   const TARGET_ST=["발주중","생산중","선적 완료","입고 일정 확인중","입고 확정"];
+  // 같은 발주(상품명+차수)의 옵션이 여러 건이면 대표 1건만 남김 — 캘린더 groupEvents와 동일 키, 대표=가장 이른 날짜
   const waitList=useMemo(()=>{
     const _today=new Date();_today.setHours(0,0,0,0);
-    return (notionEvents||[])
+    const rows=(notionEvents||[])
       .filter(e=>e.date&&TARGET_ST.includes(e.status)&&new Date(e.date)>=_today)
       .sort((a,b)=>new Date(a.date)-new Date(b.date));
+    const seen=new Set();
+    return rows.filter(e=>{const k=`${e.item||""}__${e.round||""}`;if(seen.has(k))return false;seen.add(k);return true;});
   },[notionEvents]);
+  // 배지 카운트도 대표(그룹) 기준 — 리스트 개수와 배지 합계가 일치
   const cnt=useMemo(()=>{const c={};TARGET_ST.forEach(s=>c[s]=0);waitList.forEach(e=>{c[e.status]=(c[e.status]||0)+1;});return c;},[waitList]);
   const shownWait=useMemo(()=>waitFilter?waitList.filter(e=>e.status===waitFilter):waitList,[waitList,waitFilter]);
 
@@ -1076,7 +1080,9 @@ function ScheduleTab(){
   const daysInMonth=new Date(year,month+1,0).getDate();
   const firstDayOfWeek=new Date(year,month,1).getDay();
   const monthStr=`${year}-${String(month+1).padStart(2,"0")}`;
-  const today=new Date().toISOString().slice(0,10);
+  // "오늘" 하이라이트 판정은 로컬(KST) 기준 — toISOString()은 UTC라 00~09시에 하루 밀림
+  const _t=new Date();
+  const today=`${_t.getFullYear()}-${String(_t.getMonth()+1).padStart(2,"0")}-${String(_t.getDate()).padStart(2,"0")}`;
 
   // 드래그앤드롭: 날짜 변경 후 Supabase 업데이트
   const moveEvent=async(eventId,eventType,newDayStr)=>{
@@ -1351,7 +1357,7 @@ function ScheduleTab(){
           <h3 style={{margin:0,fontSize:13,fontWeight:600,color:"#0F172A",letterSpacing:0.5,textTransform:"uppercase"}}>📦 입고대기 현황</h3>
           <p style={{margin:"4px 0 0",fontSize:14,color:"#94A3B8"}}>총 {shownWait.length}건{waitFilter?` · ${waitFilter}`:""}</p>
         </div>
-        {/* (a) 상태별 카운트 배지 (클릭 필터, 카운트는 전체 기준) */}
+        {/* (a) 상태별 카운트 배지 (클릭 필터, 카운트는 대표 그룹 기준) */}
         <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
           {TARGET_ST.map(st=>{
             const c=NOTION_STATUS_COLOR[st]||{bg:"#F1F5F9",color:"#64748B"};
@@ -1361,12 +1367,12 @@ function ScheduleTab(){
               style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:c.bg,color:c.color,fontWeight:sel?800:600,cursor:"pointer",border:sel?`1.5px solid ${c.color}`:"1.5px solid transparent",opacity:op}}>{st} {cnt[st]}</div>);
           })}
         </div>
-        {/* (b) 목록(내부 스크롤) / (c) 빈 상태 */}
-        {shownWait.length===0?(
-          <div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:14}}>{waitFilter?`'${waitFilter}' 상태 건이 없습니다`:"예정된 입고대기 건이 없습니다"}</div>
-        ):(
-          <div style={{flex:1,minHeight:0,maxHeight:260,overflowY:"auto",paddingRight:2}}>
-            {shownWait.map((e,i)=>{
+        {/* (b) 목록(내부 스크롤) / (c) 빈 상태 — 상태 배지 전환에도 높이 고정(260) */}
+        <div style={{height:260,flexShrink:0,overflowY:"auto",paddingRight:2}}>
+          {shownWait.length===0?(
+            <div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:14}}>{waitFilter?`'${waitFilter}' 상태 건이 없습니다`:"예정된 입고대기 건이 없습니다"}</div>
+          ):(
+            shownWait.map((e,i)=>{
               const c=NOTION_STATUS_COLOR[e.status]||{bg:"#EDE9FE",color:"#6D28D9"};
               const d=new Date(e.date);
               const ymd=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
@@ -1379,9 +1385,9 @@ function ScheduleTab(){
                 </div>
                 <span style={{flexShrink:0,fontSize:12,fontWeight:700,color:c.color,whiteSpace:"nowrap"}}>{e.status}</span>
               </div>);
-            })}
-          </div>
-        )}
+            })
+          )}
+        </div>
       </div>
     </div>
 
