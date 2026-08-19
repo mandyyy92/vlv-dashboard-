@@ -4102,40 +4102,52 @@ function splitMfsMemo(memo){
 }
 
 // 발주서 시트(2D 배열, 0-based) → mfs_shipout 행 배열.
-// 5컬럼(상품코드/상품명/옵션/MFS 수량/메모) 구조. 병합셀이 없어 forward-fill 하지 않음.
-// 열 순서가 파일마다 달라질 수 있어 1행 헤더 라벨로 인덱스를 잡고, 못 찾을 때만 A~E 고정으로 폴백.
+// 양식이 5컬럼·7컬럼·10컬럼으로 계속 바뀌어서 위치가 아닌 1행 헤더 라벨로 열을 찾는다.
+// 찾는 라벨: 상품코드 / 상품명 / 옵션 / 수량(또는 MFS 수량) / 바코드 / 메모 / 유형
+// 병합셀은 없다고 보고 forward-fill 하지 않음. 헤더를 못 찾을 때만 A~E 고정으로 폴백.
 function parseMfsShipoutGrid(grid){
   const txt=v=>String(v??"").trim();
   const nz=v=>{const n=Number(txt(v).replace(/[^0-9.-]/g,""));return Number.isFinite(n)?n:0;};
+  const norm=c=>txt(c).replace(/\s+/g,"").toUpperCase(); // "MFS 수량"→"MFS수량"
   // 헤더행 탐색(상품코드) — 상단 10행 안에서.
   let hIdx=-1;
   for(let i=0;i<Math.min(grid.length,10);i++){
-    if((grid[i]||[]).some(c=>txt(c).replace(/\s+/g,"").includes("상품코드"))){hIdx=i;break;}
+    if((grid[i]||[]).some(c=>norm(c).includes("상품코드"))){hIdx=i;break;}
   }
-  const header=(grid[hIdx<0?0:hIdx]||[]).map(c=>txt(c).replace(/\s+/g,"").toUpperCase()); // "MFS 수량"→"MFS수량"
-  const find=(fn,fallback)=>{const i=hIdx<0?-1:header.findIndex(fn);return i>=0?i:fallback;};
-  const cCode=find(c=>c.includes("상품코드"),0);
-  const cName=find(c=>c.includes("상품명"),1);
-  const cOpt =find(c=>c.includes("옵션"),2);
-  const cQty =find(c=>c.includes("MFS")&&c.includes("수량"),find(c=>c.includes("수량"),3));
-  const cMemo=find(c=>c.includes("메모")||c.includes("비고"),4);
+  const header=(grid[hIdx<0?0:hIdx]||[]).map(norm);
+  // 라벨 후보를 순서대로 시도. 위치 폴백(pos)은 헤더행 자체를 못 찾은 파일에만 적용한다
+  // — 헤더가 있는데 라벨이 없으면 -1(그 열 없음). 엉뚱한 열을 집어오는 게 빈 값보다 나쁘다.
+  const col=(pos,...fns)=>{
+    if(hIdx>=0){for(const fn of fns){const i=header.findIndex(fn);if(i>=0)return i;}}
+    return hIdx<0&&pos!=null?pos:-1;
+  };
+  const cCode=col(0,c=>c.includes("상품코드"));
+  const cName=col(1,c=>c.includes("상품명"));
+  const cOpt =col(2,c=>c.includes("옵션"));
+  // 수량: "MFS수량" 우선 → 의뢰가 아닌 "수량" → 아무 "수량". (구 통합양식엔 MFS수량·의뢰수량이 같이 있음)
+  const cQty =col(3,c=>c.includes("MFS")&&c.includes("수량"),c=>c.includes("수량")&&!c.includes("의뢰"),c=>c.includes("수량"));
+  const cMemo=col(4,c=>c.includes("메모")||c.includes("비고"));
+  const cBar =col(null,c=>c.includes("바코드"));
+  const cType=col(null,c=>c.includes("유형"));
+  console.log("[MFS파싱] 헤더행:",hIdx,"· 열(코드/명/옵션/수량/메모/바코드/유형):",cCode,cName,cOpt,cQty,cMemo,cBar,cType);
 
   const out=[];
   for(let i=(hIdx<0?0:hIdx)+1;i<grid.length;i++){
     const row=grid[i]||[];
     const at=c=>c>=0?txt(row[c]):"";
     const code=at(cCode),name=at(cName),opt=at(cOpt);
-    if(!code||!opt)continue;                          // 상품코드·옵션 중 하나라도 비면 제외(소계·빈행)
+    if(!code&&!opt)continue;                          // 상품코드·옵션 둘 다 빈 행(소계·빈행) 제외
     if(/소계|합계/.test(code)||/소계|합계/.test(name))continue;
     const memo=at(cMemo);
-    const{supplier,inDate}=splitMfsMemo(memo);
+    const{supplier,inDate}=splitMfsMemo(memo);        // 메모에 업체·센터입고일이 붙어 있으면 분리. 없으면 null.
     out.push({
       [MFS_COL.CODE]:code,[MFS_COL.NAME]:name,[MFS_COL.OPT]:opt,
       [MFS_COL.MFS_QTY]:nz(at(cQty)),
-      [MFS_COL.REQ_QTY]:null,                         // 이 파일엔 없음 — 추후 print_orders_sheet 매칭
+      [MFS_COL.REQ_QTY]:null,                         // 이 파일엔 없음 — print_orders_sheet 로 매칭
       [MFS_COL.SUP]:supplier,[MFS_COL.IN_DATE]:inDate,
       [MFS_COL.SHIP_DATE]:null,[MFS_COL.STOCK]:null,
-      _memo:memo,                                     // 원본 메모 — 화면 확인용(DB 컬럼 없어 저장 시 제외)
+      // _ 로 시작하는 키는 DB 컬럼이 아니라 저장 직전에 제외됨(화면·콘솔 확인용).
+      _memo:memo,_barcode:at(cBar),_type:at(cType),
     });
   }
   return out;
@@ -4288,14 +4300,12 @@ function MfsShipout(){
       const names=wb.SheetNames||[];
       console.log("[MFS업로드] 시트 목록:",names);
       if(names.length===0)throw new Error("시트가 없습니다.");
-      const sheetName=names[0]; // 첫 시트
+      const sheetName=names.find(n=>String(n).includes("발주"))||names[0]; // 이름에 "발주" 있으면 우선, 없으면 첫 시트
       console.log("[MFS업로드] 선택 시트:",sheetName);
       const grid=X.utils.sheet_to_json(wb.Sheets[sheetName],{header:1,defval:""});
       const parsed=parseMfsShipoutGrid(grid);
       console.log("[MFS업로드] 파싱된 행 수:",parsed.length,"· 샘플:",parsed.slice(0,3));
       if(parsed.length===0)throw new Error("등록할 데이터 행이 없습니다.");
-
-      if(!window.confirm(`'${sheetName}' 시트에서 ${parsed.length}건을 읽었습니다.\n기존 MFS 출고 데이터를 모두 지우고 새로 등록할까요?`)){console.log("[MFS업로드] 사용자 취소");return;}
 
       // 재업로드 중복 방지 — 저장 전에 반드시 전체 삭제 먼저.
       const tr=await fetch(`${SUPABASE_URL}/rest/v1/rpc/truncate_mfs_shipout`,{method:"POST",headers:sbHeaders,body:"{}"});
@@ -4309,7 +4319,8 @@ function MfsShipout(){
       // PostgREST 대량 INSERT — 요청이 커지지 않게 500건씩 끊어 보냄. _memo 는 DB 컬럼이 아니라 제외.
       let saved=0;
       for(let i=0;i<parsed.length;i+=500){
-        const chunk=parsed.slice(i,i+500).map(({_memo,...rest})=>rest);
+        // _memo/_barcode/_type 등 밑줄 키는 DB 컬럼이 아니라 저장에서 제외.
+        const chunk=parsed.slice(i,i+500).map(r=>Object.fromEntries(Object.entries(r).filter(([k])=>!k.startsWith("_"))));
         const r=await fetch(`${SUPABASE_URL}/rest/v1/mfs_shipout`,{method:"POST",headers:{...sbHeaders,Prefer:"return=minimal"},body:JSON.stringify(chunk)});
         if(!r.ok){
           const t=await r.text().catch(()=>"");
@@ -4331,8 +4342,10 @@ function MfsShipout(){
 
   // 부족분은 외주 발주 단위(20장)에 맞춰 올림. 0 이하는 0. 예: 21→40, 35→40, 40→40
   const ceil20=n=>n<=0?0:Math.ceil(n/20)*20;
-  // 부족분 = 올림(MFS수량 − 정상재고). 표·요약·필터·엑셀이 전부 이 한 식을 쓴다.
+  // 부족분A = 올림(MFS수량 − 정상재고). 표·요약·필터·엑셀이 전부 이 한 식을 쓴다.
   const shortWith=(r,map)=>ceil20(toNum(r[MFS_COL.MFS_QTY])-(map[String(r[MFS_COL.CODE]??"").trim()]||0));
+  // 부족분B = 올림(MFS수량 − 발주 히스토리 최근 의뢰수량). 매칭 없으면 의뢰수량 0 으로 본다.
+  const shortBWith=(r,map)=>ceil20(toNum(r[MFS_COL.MFS_QTY])-toNum(map[String(r[MFS_COL.CODE]??"").trim()]?.reqQty));
 
   // 시트 유래라 "1,200" 같은 문자열도 들어올 수 있어 숫자만 추려서 파싱.
   const toNum=v=>{if(v==null||v==="")return 0;const n=Number(String(v).replace(/[^0-9.-]/g,""));return Number.isFinite(n)?n:0;};
@@ -4361,8 +4374,10 @@ function MfsShipout(){
   const totalQty=useMemo(()=>groups.reduce((s,g)=>s+g.qty,0),[groups]);
   // 정상재고 / 부족분(외주 의뢰 필요량) — 재고 없거나 매칭 안 되면 0 으로 본다.
   const stockOf=r=>stockMap[String(r[MFS_COL.CODE]??"").trim()]||0;
-  const shortOf=r=>shortWith(r,stockMap);
+  const shortOf=r=>shortWith(r,stockMap);                  // 부족분A(센터재고 대비)
+  const shortBOf=r=>shortBWith(r,latestMap);               // 부족분B(기존 의뢰 대비)
   const totalShort=useMemo(()=>filtered.reduce((s,r)=>s+shortWith(r,stockMap),0),[filtered,stockMap]);
+  const totalShortB=useMemo(()=>filtered.reduce((s,r)=>s+shortBWith(r,latestMap),0),[filtered,latestMap]);
 
   // 발주 히스토리 매칭 행(가장 늦은 입고예정일 기준). 없으면 undefined → 각 열 "-".
   const latestOf=r=>latestMap[String(r[MFS_COL.CODE]??"").trim()];
@@ -4477,7 +4492,8 @@ function MfsShipout(){
           <div style={statBox}><div style={statLabel}>업체</div><div style={statValue}>{groups.length.toLocaleString()}<span style={{fontSize:14,fontWeight:600,color:"#64748B",marginLeft:3}}>곳</span></div></div>
           <div style={statBox}><div style={statLabel}>품목</div><div style={statValue}>{filtered.length.toLocaleString()}<span style={{fontSize:14,fontWeight:600,color:"#64748B",marginLeft:3}}>건</span></div></div>
           <div style={statBox}><div style={statLabel}>MFS수량 합계</div><div style={statValue}>{totalQty.toLocaleString()}<span style={{fontSize:14,fontWeight:600,color:"#64748B",marginLeft:3}}>장</span></div></div>
-          <div style={statBox}><div style={statLabel}>총 부족분 (외주 의뢰 필요)</div><div style={{...statValue,color:totalShort>0?"#DC2626":"#0F172A"}}>{totalShort.toLocaleString()}<span style={{fontSize:14,fontWeight:600,color:"#64748B",marginLeft:3}}>장</span></div></div>
+          <div style={statBox}><div style={statLabel}>총 부족분A (센터재고)</div><div style={{...statValue,color:totalShort>0?"#DC2626":"#0F172A"}}>{totalShort.toLocaleString()}<span style={{fontSize:14,fontWeight:600,color:"#64748B",marginLeft:3}}>장</span></div></div>
+          <div style={statBox}><div style={statLabel}>총 부족분B (외주)</div><div style={{...statValue,color:totalShortB>0?"#DC2626":"#0F172A"}}>{totalShortB.toLocaleString()}<span style={{fontSize:14,fontWeight:600,color:"#64748B",marginLeft:3}}>장</span></div></div>
         </div>
         {stockLoading&&<div style={{fontSize:13,color:"#94A3B8",marginBottom:12}}>재고 불러오는 중…</div>}
         {!stockLoading&&snapDate&&<div style={{fontSize:13,color:"#94A3B8",marginBottom:12}}>정상재고 기준일: {snapDate}</div>}
@@ -4508,7 +4524,8 @@ function MfsShipout(){
                 <thead><tr>
                   <th style={th}>{MFS_COL.CODE}</th><th style={th}>{MFS_COL.NAME}</th><th style={th}>{MFS_COL.OPT}</th>
                   <th style={{...th,textAlign:"right"}}>MFS수량</th>
-                  <th style={{...th,textAlign:"right"}}>정상재고</th><th style={{...th,textAlign:"right"}}>부족분</th><th style={th}>입고예정일</th>
+                  <th style={{...th,textAlign:"right"}}>정상재고</th><th style={{...th,textAlign:"right"}}>부족분A(센터재고)</th>
+                  <th style={{...th,textAlign:"right"}}>최근의뢰</th><th style={{...th,textAlign:"right"}}>부족분B(외주)</th><th style={th}>입고예정일</th>
                 </tr></thead>
                 <tbody>
                   {g.items.map(it=>(
@@ -4519,6 +4536,8 @@ function MfsShipout(){
                       <td style={{...td,textAlign:"right",fontWeight:700}}>{toNum(it[MFS_COL.MFS_QTY]).toLocaleString()}</td>
                       <td style={{...td,textAlign:"right"}}>{stockOf(it).toLocaleString()}</td>
                       <td style={{...td,textAlign:"right",fontWeight:700,color:shortOf(it)>0?"#DC2626":"#94A3B8"}}>{shortOf(it).toLocaleString()}</td>
+                      <td style={{...td,textAlign:"right"}}>{reqOf(it)===null?"-":reqOf(it).toLocaleString()}</td>
+                      <td style={{...td,textAlign:"right",fontWeight:700,color:shortBOf(it)>0?"#DC2626":"#94A3B8"}}>{shortBOf(it).toLocaleString()}</td>
                       <td style={td}>{dueOf(it)||"-"}</td>
                     </tr>
                   ))}
