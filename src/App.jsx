@@ -4149,6 +4149,10 @@ function MfsShipout(){
   const[nonce,setNonce]=useState(0);        // 업로드 후 재조회 트리거
   const[uploading,setUploading]=useState(false);
   const[latestMap,setLatestMap]=useState({}); // { 상품코드: {차수,업체,의뢰수량,입고예정일} } — 발주 히스토리 매칭
+  const[stockMap,setStockMap]=useState({});   // { 상품코드: 가용재고 } — inventory 최신 스냅샷
+  const[stockLoading,setStockLoading]=useState(false);
+  const[snapDate,setSnapDate]=useState("");   // 사용한 재고 스냅샷일자(표시용)
+  const[onlyShort,setOnlyShort]=useState(false); // 부족분 있는 것만 보기
   const fileRef=useRef(null);
   const reload=()=>setNonce(n=>n+1);
 
@@ -4211,6 +4215,43 @@ function MfsShipout(){
     return()=>{alive=false;};
   },[nonce]);
 
+  // 가용재고 맵 — inventory 는 대용량 보호테이블이라 "최신 스냅샷일자 + 해당 상품코드"로만 좁혀 조회.
+  // 상품코드 목록이 길면 URL 길이 때문에 100개씩 끊어 여러 번 호출한 뒤 합친다.
+  useEffect(()=>{
+    const codes=[...new Set(rows.map(r=>String(r[MFS_COL.CODE]??"").trim()).filter(Boolean))];
+    if(codes.length===0){setStockMap({});setSnapDate("");return;}
+    let alive=true;
+    (async()=>{
+      setStockLoading(true);
+      try{
+        const sr=await fetch(`${SUPABASE_URL}/rest/v1/inventory?select=${encodeURIComponent("스냅샷일자")}&order=${encodeURIComponent("스냅샷일자.desc")}&limit=1`,{headers:sbHeaders});
+        const sd=await sr.json();
+        if(!sr.ok)throw new Error(sd?.message?sd.message:`HTTP ${sr.status}`);
+        const snap=Array.isArray(sd)&&sd[0]?String(sd[0]["스냅샷일자"]??""):"";
+        if(!snap)throw new Error("재고 스냅샷일자를 찾지 못했습니다.");
+        const map={};
+        for(let i=0;i<codes.length;i+=100){
+          const list=codes.slice(i,i+100).map(c=>`"${c}"`).join(",");
+          const url=`${SUPABASE_URL}/rest/v1/inventory?select=${encodeURIComponent("상품코드,가용재고")}&${encodeURIComponent("스냅샷일자")}=eq.${encodeURIComponent(snap)}&${encodeURIComponent("상품코드")}=in.(${encodeURIComponent(list)})&limit=1000`;
+          const r=await fetch(url,{headers:sbHeaders});
+          const data=await r.json();
+          if(!r.ok)throw new Error(data?.message?data.message:`HTTP ${r.status}`);
+          if(!Array.isArray(data))throw new Error("예상치 못한 응답 형식");
+          // 같은 상품코드가 로케이션 등으로 여러 행이면 합산.
+          data.forEach(row=>{const c=String(row["상품코드"]??"").trim();if(c)map[c]=(map[c]||0)+toNum(row["가용재고"]);});
+        }
+        console.log("[MFS재고] 스냅샷",snap,"· 매칭 상품코드 수:",Object.keys(map).length,"/",codes.length);
+        if(alive){setSnapDate(snap);setStockMap(map);}
+      }catch(e){
+        console.warn("[MFS재고] 조회 실패:",e); // 실패해도 재고 0 으로 두고 화면은 살린다
+        if(alive){setStockMap({});setSnapDate("");}
+      }finally{
+        if(alive)setStockLoading(false);
+      }
+    })();
+    return()=>{alive=false;};
+  },[rows]);
+
   // 발주서 엑셀 업로드 → 파싱 → 전체 삭제(truncate) 후 재등록
   const handleUpload=async(file)=>{
     if(!file)return;
@@ -4269,9 +4310,15 @@ function MfsShipout(){
 
   const filtered=useMemo(()=>{
     const q=search.trim().toLowerCase();
-    if(!q)return rows;
-    return rows.filter(r=>`${r[MFS_COL.NAME]||""} ${r[MFS_COL.CODE]||""}`.toLowerCase().includes(q));
-  },[rows,search]);
+    return rows.filter(r=>{
+      if(q&&!`${r[MFS_COL.NAME]||""} ${r[MFS_COL.CODE]||""}`.toLowerCase().includes(q))return false;
+      if(onlyShort){
+        const stock=stockMap[String(r[MFS_COL.CODE]??"").trim()]||0;
+        if(Math.max(0,toNum(r[MFS_COL.MFS_QTY])-stock)<=0)return false;
+      }
+      return true;
+    });
+  },[rows,search,onlyShort,stockMap]);
 
   // 업체별 그룹핑 — 순서는 원본(id) 순서 유지. 업체 없으면 한 덩어리로 모음.
   const groups=useMemo(()=>{
@@ -4286,6 +4333,11 @@ function MfsShipout(){
     return[...m.values()];
   },[filtered]);
   const totalQty=useMemo(()=>groups.reduce((s,g)=>s+g.qty,0),[groups]);
+  // 가용재고 / 부족분(외주 의뢰 필요량) — 재고 없거나 매칭 안 되면 0 으로 본다.
+  const stockOf=r=>stockMap[String(r[MFS_COL.CODE]??"").trim()]||0;
+  const shortOf=r=>Math.max(0,toNum(r[MFS_COL.MFS_QTY])-stockOf(r));
+  const totalShort=useMemo(()=>filtered.reduce((s,r)=>s+Math.max(0,toNum(r[MFS_COL.MFS_QTY])-(stockMap[String(r[MFS_COL.CODE]??"").trim()]||0)),0),[filtered,stockMap]);
+
   // 발주 히스토리 매칭 행(가장 늦은 입고예정일 기준). 없으면 undefined → 각 열 "-".
   const latestOf=r=>latestMap[String(r[MFS_COL.CODE]??"").trim()];
   const dueOf=r=>latestOf(r)?.due||"";                                   // 입고예정일(YYYY-MM-DD)
@@ -4299,9 +4351,9 @@ function MfsShipout(){
       const ExcelJS=await loadExcelJS();
       const wb=new ExcelJS.Workbook();
       const ws=wb.addWorksheet("통합");
-      const header=["상품코드","상품명","옵션","MFS수량","업체","외주차수","의뢰수량","입고예정일"];
+      const header=["상품코드","상품명","옵션","MFS수량","업체","외주차수","의뢰수량","가용재고","부족분","입고예정일"];
       const COLS=header.length;
-      [16,30,20,10,20,10,10,18].forEach((w,i)=>{ws.getColumn(i+1).width=w;});
+      [16,30,20,10,20,10,10,10,10,18].forEach((w,i)=>{ws.getColumn(i+1).width=w;});
       header.forEach((h,i)=>{ws.getRow(1).getCell(i+1).value=h;});
 
       let ri=2;
@@ -4316,7 +4368,9 @@ function MfsShipout(){
           row.getCell(5).value=it[MFS_COL.SUP]||"";
           row.getCell(6).value=roundOf(it)||"";
           const rq=reqOf(it); row.getCell(7).value=rq===null?"":rq;
-          row.getCell(8).value=dueOf(it)||"";
+          row.getCell(8).value=stockOf(it);
+          row.getCell(9).value=shortOf(it);
+          row.getCell(10).value=dueOf(it)||"";
           ri++;
         });
         const sub=ws.getRow(ri);           // 업체가 바뀌는 지점 = 소계 행
@@ -4396,7 +4450,10 @@ function MfsShipout(){
           <div style={statBox}><div style={statLabel}>업체</div><div style={statValue}>{groups.length.toLocaleString()}<span style={{fontSize:14,fontWeight:600,color:"#64748B",marginLeft:3}}>곳</span></div></div>
           <div style={statBox}><div style={statLabel}>품목</div><div style={statValue}>{filtered.length.toLocaleString()}<span style={{fontSize:14,fontWeight:600,color:"#64748B",marginLeft:3}}>건</span></div></div>
           <div style={statBox}><div style={statLabel}>MFS수량 합계</div><div style={statValue}>{totalQty.toLocaleString()}<span style={{fontSize:14,fontWeight:600,color:"#64748B",marginLeft:3}}>장</span></div></div>
+          <div style={statBox}><div style={statLabel}>총 부족분 (외주 의뢰 필요)</div><div style={{...statValue,color:totalShort>0?"#DC2626":"#0F172A"}}>{totalShort.toLocaleString()}<span style={{fontSize:14,fontWeight:600,color:"#64748B",marginLeft:3}}>장</span></div></div>
         </div>
+        {stockLoading&&<div style={{fontSize:13,color:"#94A3B8",marginBottom:12}}>재고 불러오는 중…</div>}
+        {!stockLoading&&snapDate&&<div style={{fontSize:13,color:"#94A3B8",marginBottom:12}}>가용재고 기준일: {snapDate}</div>}
 
         {/* 검색 */}
         <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:18}}>
@@ -4404,6 +4461,10 @@ function MfsShipout(){
             value={search} onChange={e=>setSearch(e.target.value)}
             placeholder="상품명 · 상품코드 검색"
             style={{flex:"1 1 240px",minWidth:200,padding:"8px 14px",borderRadius:8,border:"1px solid #CBD5E1",fontSize:14,outline:"none"}}/>
+          <label style={{display:"flex",alignItems:"center",gap:6,padding:"8px 12px",borderRadius:8,border:"1px solid #CBD5E1",background:onlyShort?"#FEF2F2":"#FFF",color:onlyShort?"#DC2626":"#475569",fontSize:14,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>
+            <input type="checkbox" checked={onlyShort} onChange={e=>setOnlyShort(e.target.checked)} style={{cursor:"pointer"}}/>
+            부족분 있는 것만 보기
+          </label>
         </div>
 
         {groups.length===0&&<div style={{padding:"30px 0",textAlign:"center",fontSize:14,color:"#94A3B8"}}>검색 결과가 없습니다.</div>}
@@ -4420,7 +4481,7 @@ function MfsShipout(){
                 <thead><tr>
                   <th style={th}>{MFS_COL.CODE}</th><th style={th}>{MFS_COL.NAME}</th><th style={th}>{MFS_COL.OPT}</th>
                   <th style={{...th,textAlign:"right"}}>MFS수량</th>
-                  <th style={{...th,textAlign:"center"}}>외주차수</th><th style={{...th,textAlign:"right"}}>의뢰수량</th><th style={th}>입고예정일</th>
+                  <th style={{...th,textAlign:"right"}}>가용재고</th><th style={{...th,textAlign:"right"}}>부족분</th><th style={th}>입고예정일</th>
                 </tr></thead>
                 <tbody>
                   {g.items.map(it=>(
@@ -4429,8 +4490,8 @@ function MfsShipout(){
                       <td style={{...td,whiteSpace:"normal"}}>{it[MFS_COL.NAME]||"-"}</td>
                       <td style={td}>{it[MFS_COL.OPT]||"-"}</td>
                       <td style={{...td,textAlign:"right",fontWeight:700}}>{toNum(it[MFS_COL.MFS_QTY]).toLocaleString()}</td>
-                      <td style={{...td,textAlign:"center"}}>{roundOf(it)||"-"}</td>
-                      <td style={{...td,textAlign:"right"}}>{reqOf(it)===null?"-":reqOf(it).toLocaleString()}</td>
+                      <td style={{...td,textAlign:"right"}}>{stockOf(it).toLocaleString()}</td>
+                      <td style={{...td,textAlign:"right",fontWeight:700,color:shortOf(it)>0?"#DC2626":"#94A3B8"}}>{shortOf(it).toLocaleString()}</td>
                       <td style={td}>{dueOf(it)||"-"}</td>
                     </tr>
                   ))}
