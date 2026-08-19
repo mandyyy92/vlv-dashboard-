@@ -4167,8 +4167,9 @@ function MfsShipout(){
   const[onlyShort,setOnlyShort]=useState(false); // 부족분 있는 것만 보기
   const[clearing,setClearing]=useState(false);   // 리스트 비우는 중
   const[lowestByDesign,setLowestByDesign]=useState({}); // { design_name: {supplier_id,supplier,unit_cost} } — 디자인별 최저단가 업체
-  const[centerInDate,setCenterInDate]=useState("");  // 발주서에 찍을 센터 입고일(미입력 시 빈칸)
-  const[mfsShipDate,setMfsShipDate]=useState("");    // 발주서에 찍을 MFS 발송일(미입력 시 빈칸)
+  const[mfsShipDate,setMfsShipDate]=useState("");         // 발주서 공통 MFS 발송일(미입력 시 빈칸)
+  const[centerDateBySupplier,setCenterDateBySupplier]=useState({}); // { 업체명: 센터입고일 } — 업체별로 다름
+  const[dlOpen,setDlOpen]=useState(false);                // 발주서 다운로드 설정 모달
   const fileRef=useRef(null);
   const reload=()=>setNonce(n=>n+1);
 
@@ -4507,7 +4508,7 @@ function MfsShipout(){
         if(q<=0)return;
         const k=assignOf(r)?.supplier||"미배치";
         if(!bySup.has(k))bySup.set(k,[]);
-        bySup.get(k).push([r[MFS_COL.CODE]||"",r[MFS_COL.NAME]||"",r[MFS_COL.OPT]||"",q,centerInDate,mfsShipDate]);
+        bySup.get(k).push([r[MFS_COL.CODE]||"",r[MFS_COL.NAME]||"",r[MFS_COL.OPT]||"",q,centerDateBySupplier[k]||"",mfsShipDate]);
       });
       const supKeys=[...bySup.keys()].filter(k=>k!=="미배치");
       if(bySup.has("미배치"))supKeys.push("미배치"); // 미배치는 항상 마지막 시트
@@ -4524,6 +4525,7 @@ function MfsShipout(){
       const url=URL.createObjectURL(blob);
       const a=document.createElement("a");a.href=url;a.download=`MFS발주서_${ymd}.xlsx`;document.body.appendChild(a);a.click();a.remove();
       setTimeout(()=>URL.revokeObjectURL(url),1000);
+      setDlOpen(false);
     }catch(e){
       console.error("[MFS다운로드] 실패:",e);
       alert("엑셀 생성 실패: "+(e?.message||e));
@@ -4552,13 +4554,7 @@ function MfsShipout(){
           {uploading
             ?<span style={{padding:"6px 14px",borderRadius:6,border:"1px solid #CBD5E1",background:"#F8FAFC",color:"#94A3B8",fontSize:14,fontWeight:600,cursor:"not-allowed"}}>⏳ 업로드 중...</span>
             :<SmallBtn primary onClick={()=>fileRef.current?.click()}>📤 발주서 업로드</SmallBtn>}
-          <label style={dateLabel}>센터 입고일
-            <input type="date" value={centerInDate} onChange={e=>setCenterInDate(e.target.value)} style={dateInput}/>
-          </label>
-          <label style={dateLabel}>MFS 발송일
-            <input type="date" value={mfsShipDate} onChange={e=>setMfsShipDate(e.target.value)} style={dateInput}/>
-          </label>
-          <SmallBtn onClick={downloadExcel}>📥 발주서 다운로드</SmallBtn>
+          <SmallBtn onClick={()=>setDlOpen(true)}>📥 발주서 다운로드</SmallBtn>
         </div>
       </>
     }>
@@ -4648,6 +4644,34 @@ function MfsShipout(){
           </div>
         ))}
       </>)}
+
+      {/* 발주서 다운로드 설정 모달 — 공통 MFS발송일 + 업체별 센터입고일. 기존 단가 추가 모달과 같은 패턴. */}
+      {dlOpen&&(
+        <div onClick={()=>setDlOpen(false)} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.45)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:16}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"#FFF",borderRadius:14,padding:24,width:"100%",maxWidth:440,maxHeight:"86vh",overflowY:"auto",boxShadow:"0 10px 40px rgba(0,0,0,0.2)"}}>
+            <h3 style={{margin:"0 0 16px",fontSize:18,fontWeight:700,color:"#0F172A",letterSpacing:-0.3}}>발주서 다운로드 설정</h3>
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              <label style={{...dateLabel,justifyContent:"space-between"}}>MFS 발송일 (공통)
+                <input type="date" value={mfsShipDate} onChange={e=>setMfsShipDate(e.target.value)} style={dateInput}/>
+              </label>
+              <div style={{height:1,background:"#E2E8F0"}}/>
+              <div style={{fontSize:12,fontWeight:700,color:"#64748B"}}>업체별 센터 입고일</div>
+              {shortBySupplier.length===0
+                ?<div style={{fontSize:13,color:"#94A3B8"}}>부족분이 있는 업체가 없습니다. "센터 재고 있음" 시트만 생성됩니다.</div>
+                :shortBySupplier.map(([sup,q])=>(
+                  <label key={sup} style={{...dateLabel,justifyContent:"space-between"}}>
+                    <span>{sup} <span style={{color:"#94A3B8"}}>({q.toLocaleString()}장)</span></span>
+                    <input type="date" value={centerDateBySupplier[sup]||""} onChange={e=>setCenterDateBySupplier(p=>({...p,[sup]:e.target.value}))} style={dateInput}/>
+                  </label>
+                ))}
+            </div>
+            <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:20}}>
+              <SmallBtn onClick={()=>setDlOpen(false)}>취소</SmallBtn>
+              <SmallBtn primary onClick={downloadExcel}>📥 다운로드</SmallBtn>
+            </div>
+          </div>
+        </div>
+      )}
     </SectionCard>
   );
 }
