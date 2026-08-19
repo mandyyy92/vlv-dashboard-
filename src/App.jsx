@@ -4646,7 +4646,8 @@ function MfsShipout(){
                       <td style={{...td,...bgC,...sep,textAlign:"right",fontWeight:700,color:shortOf(it)>0?"#DC2626":"#94A3B8"}}>{shortOf(it).toLocaleString()}</td>
                       <td style={{...td,...bgC,color:assignOf(it)?"#1E293B":"#94A3B8"}}>{assignOf(it)?.supplier||"-"}</td>
                       <td style={{...td,...bgC,textAlign:"right",color:assignOf(it)?"#1E293B":"#94A3B8"}}>{assignOf(it)?`${assignOf(it).unit_cost.toLocaleString()}원`:"-"}</td>
-                      <td style={{...td,...bgC}}>{dueOf(it)||"-"}</td>
+                      {/* 업체 배치·미배치 건은 새로 의뢰하는 물량이라 기존 입고예정일이 의미 없음 → "-" */}
+                      <td style={{...td,...bgC}}>{g.kind==="covered"?(dueOf(it)||"-"):"-"}</td>
                     </tr>
                   ))}
                 </tbody>
