@@ -1542,12 +1542,15 @@ function ScheduleTab(){
               const ev=g.rep;
               const nc=NOTION_STATUS_COLOR[ev.status]||{bg:"#EDE9FE",color:"#6D28D9"};
               const rawId=String(ev.id).replace(/^notion-/,"").replace(/-/g,"");
+              // 생산공장(업체): 노션 vendor→supplier. 그룹 내 중복 제거, 없으면 미표시.
+              const gSuppliers=[...new Set(g.events.map(o=>String(o.supplier||"").trim()).filter(Boolean))].join(", ");
               return(<div key={g.key} style={{border:"1px solid #E2E8F0",borderRadius:12,padding:16,marginBottom:14}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:10}}>
                   <div style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}>
                     {ev.image&&<img src={ev.image} alt="" loading="lazy" onError={e=>{e.currentTarget.style.display="none";}} style={{width:44,height:44,borderRadius:8,objectFit:"cover",flexShrink:0,background:"#F8FAFC",border:"1px solid #E2E8F0"}} />}
                     <div style={{minWidth:0}}>
                       <div style={{fontSize:16,fontWeight:700,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.name}</div>
+                      {gSuppliers&&<div style={{fontSize:12,color:"#94A3B8",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>🏭 {gSuppliers}</div>}
                       <div style={{fontSize:12,color:"#94A3B8",marginTop:2}}>총 {g.totalQty.toLocaleString()}장 · {g.events.length}옵션</div>
                     </div>
                   </div>
