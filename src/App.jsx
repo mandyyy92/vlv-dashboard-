@@ -4379,13 +4379,19 @@ function MfsShipout(){
     }
   };
 
+  // 오늘(로컬 KST) — toISOString(UTC)은 자정 전후로 하루가 밀린다.
+  const _t=new Date();
+  const todayStr=`${_t.getFullYear()}-${String(_t.getMonth()+1).padStart(2,"0")}-${String(_t.getDate()).padStart(2,"0")}`;
   // 부족분은 외주 발주 단위(20장)에 맞춰 올림. 0 이하는 0. 예: 21→40, 35→40, 40→40
   const ceil20=n=>n<=0?0:Math.ceil(n/20)*20;
-  // 부족분 = 올림(MFS수량 − 정상재고 − 최근 의뢰수량). 표·요약·필터·엑셀이 전부 이 한 식을 쓴다.
-  // 재고/의뢰 매칭이 없으면 0 으로 본다.
+  // 부족분 — 표·요약·필터·엑셀·그룹핑이 전부 이 한 식을 쓴다.
+  //  · 입고예정일이 오늘 = 오늘 센터에 들어오는 물량이라 의뢰 불필요 → 0
+  //  · 그 외(다른 날짜·매칭 없음) = 정상재고만 차감해서 판단(최근 의뢰수량은 차감하지 않음)
+  // 재고 매칭이 없으면 0 으로 본다.
   const shortCalc=(r,sMap,lMap)=>{
     const code=String(r[MFS_COL.CODE]??"").trim();
-    return ceil20(toNum(r[MFS_COL.MFS_QTY])-(sMap[code]||0)-toNum(lMap[code]?.reqQty));
+    if((lMap[code]?.due||"")===todayStr)return 0;
+    return ceil20(toNum(r[MFS_COL.MFS_QTY])-(sMap[code]||0));
   };
 
   // 시트 유래라 "1,200" 같은 문자열도 들어올 수 있어 숫자만 추려서 파싱.
