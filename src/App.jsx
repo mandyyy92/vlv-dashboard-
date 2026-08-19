@@ -4551,7 +4551,7 @@ function MfsShipout(){
   const statValue={fontSize:22,fontWeight:800,color:"#0F172A",letterSpacing:-0.5};
 
   return(
-    <SectionCard title="🚚 MFS 출고" subtitle="발주서 엑셀 업로드(전체 교체) · 업체별 통합표" actions={
+    <SectionCard title="🚚 MFS 출고" actions={
       <>
         <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];e.target.value="";handleUpload(f);}}/>
         <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",justifyContent:"flex-end"}}>
