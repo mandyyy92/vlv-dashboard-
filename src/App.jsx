@@ -4148,32 +4148,36 @@ function MfsShipout(){
   const[search,setSearch]=useState("");
   const[nonce,setNonce]=useState(0);        // 업로드 후 재조회 트리거
   const[uploading,setUploading]=useState(false);
-  const[dueMap,setDueMap]=useState({});     // { 상품코드: 입고예정일 } — 발주 히스토리에서 매칭
+  const[latestMap,setLatestMap]=useState({}); // { 상품코드: {차수,업체,의뢰수량,입고예정일} } — 발주 히스토리 매칭
   const fileRef=useRef(null);
   const reload=()=>setNonce(n=>n+1);
 
-  // 입고예정일 맵 — print_orders_sheet 에서 상품코드별 최근 차수의 입고예정일 1건만 남김.
-  // (차수.desc 정렬이라 상품코드마다 먼저 오는 행이 최근 차수. 업로드와 무관하므로 1회만 조회.)
+  // 발주 히스토리 매칭 맵 — print_orders_sheet 에서 상품코드별 "가장 늦은 입고예정일" 행 전체를 남김.
+  // 입고예정일.desc 로 받되, 정렬에만 기대지 않고 JS 에서도 더 늦은 날짜면 갱신(YYYY-MM-DD 라 문자열 비교로 충분).
+  // 업로드와 무관한 데이터라 1회만 조회.
   useEffect(()=>{
     let alive=true;
     (async()=>{
       try{
         const map={};const PAGE=1000;
         for(let off=0;;off+=PAGE){
-          const url=`${SUPABASE_URL}/rest/v1/print_orders_sheet?select=${encodeURIComponent("상품코드,입고예정일,차수")}&${encodeURIComponent("입고예정일")}=not.is.null&order=${encodeURIComponent("상품코드.asc,차수.desc")}&limit=${PAGE}&offset=${off}`;
+          const url=`${SUPABASE_URL}/rest/v1/print_orders_sheet?select=${encodeURIComponent("상품코드,차수,업체,의뢰수량,입고예정일")}&${encodeURIComponent("입고예정일")}=not.is.null&order=${encodeURIComponent("상품코드.asc,입고예정일.desc")}&limit=${PAGE}&offset=${off}`;
           const r=await fetch(url,{headers:sbHeaders});
           const data=await r.json();
           if(!r.ok)throw new Error(data?.message?data.message:`HTTP ${r.status}`);
           if(!Array.isArray(data))throw new Error("예상치 못한 응답 형식");
           data.forEach(row=>{
             const code=String(row["상품코드"]??"").trim();
-            const due=String(row["입고예정일"]??"").trim();
-            if(code&&due&&map[code]===undefined)map[code]=due.slice(0,10); // 상품코드별 첫 값 = 최근 차수
+            const d=String(row["입고예정일"]??"").trim().slice(0,10);
+            if(!code||!d)return;
+            const cur=map[code];
+            if(cur===undefined||d>cur.due) // 상품코드별 최댓값 = 가장 늦은 입고예정일 → 그 행 전체를 보관
+              map[code]={due:d,round:row["차수"],supplier:row["업체"],reqQty:row["의뢰수량"]};
           });
           if(data.length<PAGE)break;
         }
         console.log("[MFS입고예정일] 매칭 맵 상품코드 수:",Object.keys(map).length);
-        if(alive)setDueMap(map);
+        if(alive)setLatestMap(map);
       }catch(e){
         console.warn("[MFS입고예정일] 조회 실패:",e); // 실패해도 표는 "-" 로 뜨게 두고 화면은 살린다
       }
@@ -4282,8 +4286,11 @@ function MfsShipout(){
     return[...m.values()];
   },[filtered]);
   const totalQty=useMemo(()=>groups.reduce((s,g)=>s+g.qty,0),[groups]);
-  // 입고예정일 = 발주 히스토리(print_orders_sheet) 상품코드 매칭값. mfs_shipout.센터입고일 은 쓰지 않음.
-  const dueOf=r=>dueMap[String(r[MFS_COL.CODE]??"").trim()]||"";
+  // 발주 히스토리 매칭 행(가장 늦은 입고예정일 기준). 없으면 undefined → 각 열 "-".
+  const latestOf=r=>latestMap[String(r[MFS_COL.CODE]??"").trim()];
+  const dueOf=r=>latestOf(r)?.due||"";                                   // 입고예정일(YYYY-MM-DD)
+  const roundOf=r=>{const v=latestOf(r)?.round;return v===null||v===undefined||v===""?"":String(v);}; // 외주차수
+  const reqOf=r=>{const v=latestOf(r)?.reqQty;return v===null||v===undefined||v===""?null:toNum(v);}; // 의뢰수량
 
   // 발주서 엑셀 다운로드 — 통합 시트 1개, 업체별로 모아 소계 행 + 마지막 총합계. 이미지·병합 없음.
   const downloadExcel=async()=>{
@@ -4292,8 +4299,9 @@ function MfsShipout(){
       const ExcelJS=await loadExcelJS();
       const wb=new ExcelJS.Workbook();
       const ws=wb.addWorksheet("통합");
-      const header=["상품코드","상품명","옵션","MFS수량","업체","입고예정일"];
-      [16,30,20,10,20,18].forEach((w,i)=>{ws.getColumn(i+1).width=w;});
+      const header=["상품코드","상품명","옵션","MFS수량","업체","외주차수","의뢰수량","입고예정일"];
+      const COLS=header.length;
+      [16,30,20,10,20,10,10,18].forEach((w,i)=>{ws.getColumn(i+1).width=w;});
       header.forEach((h,i)=>{ws.getRow(1).getCell(i+1).value=h;});
 
       let ri=2;
@@ -4306,7 +4314,9 @@ function MfsShipout(){
           row.getCell(3).value=it[MFS_COL.OPT]||"";
           row.getCell(4).value=toNum(it[MFS_COL.MFS_QTY]);
           row.getCell(5).value=it[MFS_COL.SUP]||"";
-          row.getCell(6).value=dueOf(it)||"";
+          row.getCell(6).value=roundOf(it)||"";
+          const rq=reqOf(it); row.getCell(7).value=rq===null?"":rq;
+          row.getCell(8).value=dueOf(it)||"";
           ri++;
         });
         const sub=ws.getRow(ri);           // 업체가 바뀌는 지점 = 소계 행
@@ -4325,19 +4335,19 @@ function MfsShipout(){
       const thin={style:"thin",color:{argb:"FFCBD5E1"}};
       for(let r=1;r<=totalRow;r++){
         ws.getRow(r).height=20;
-        for(let c=1;c<=6;c++){
+        for(let c=1;c<=COLS;c++){
           const cell=ws.getRow(r).getCell(c);
           cell.border={top:thin,left:thin,bottom:thin,right:thin};
           cell.alignment={vertical:"middle",horizontal:c===2?"left":"center",wrapText:false};
         }
       }
-      for(let c=1;c<=6;c++){
+      for(let c=1;c<=COLS;c++){
         const cell=ws.getRow(1).getCell(c);
         cell.font={bold:true,color:{argb:"FF1E293B"}};
         cell.fill={type:"pattern",pattern:"solid",fgColor:{argb:"FFF1F5F9"}};
       }
       [...subRows,totalRow].forEach(r=>{
-        for(let c=1;c<=6;c++){
+        for(let c=1;c<=COLS;c++){
           const cell=ws.getRow(r).getCell(c);
           cell.font={bold:true,color:{argb:"FF1E293B"}};
           cell.fill={type:"pattern",pattern:"solid",fgColor:{argb:"FFF8FAFC"}};
@@ -4409,7 +4419,8 @@ function MfsShipout(){
               <table style={{width:"100%",borderCollapse:"collapse"}}>
                 <thead><tr>
                   <th style={th}>{MFS_COL.CODE}</th><th style={th}>{MFS_COL.NAME}</th><th style={th}>{MFS_COL.OPT}</th>
-                  <th style={{...th,textAlign:"right"}}>MFS수량</th><th style={th}>입고예정일</th>
+                  <th style={{...th,textAlign:"right"}}>MFS수량</th>
+                  <th style={{...th,textAlign:"center"}}>외주차수</th><th style={{...th,textAlign:"right"}}>의뢰수량</th><th style={th}>입고예정일</th>
                 </tr></thead>
                 <tbody>
                   {g.items.map(it=>(
@@ -4418,6 +4429,8 @@ function MfsShipout(){
                       <td style={{...td,whiteSpace:"normal"}}>{it[MFS_COL.NAME]||"-"}</td>
                       <td style={td}>{it[MFS_COL.OPT]||"-"}</td>
                       <td style={{...td,textAlign:"right",fontWeight:700}}>{toNum(it[MFS_COL.MFS_QTY]).toLocaleString()}</td>
+                      <td style={{...td,textAlign:"center"}}>{roundOf(it)||"-"}</td>
+                      <td style={{...td,textAlign:"right"}}>{reqOf(it)===null?"-":reqOf(it).toLocaleString()}</td>
                       <td style={td}>{dueOf(it)||"-"}</td>
                     </tr>
                   ))}
