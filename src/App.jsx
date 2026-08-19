@@ -4533,6 +4533,11 @@ function MfsShipout(){
   const th={padding:"11px 12px",textAlign:"left",fontSize:12,fontWeight:700,color:"#64748B",whiteSpace:"nowrap",borderBottom:"2px solid #E2E8F0",letterSpacing:0.3};
   const td={padding:"11px 12px",fontSize:14,color:"#1E293B",borderBottom:"1px solid #F1F5F9",verticalAlign:"middle",whiteSpace:"nowrap"};
   const statBox={flex:"1 1 140px",background:"#F8FAFC",border:"1px solid #E2E8F0",borderRadius:10,padding:"14px 16px"};
+  // 표 3덩어리(상품정보/수량/발주판단) 파스텔 배경 — 전부 파일에서 이미 쓰는 옅은 톤.
+  // 배경만 입히고 글자색은 그대로 둬서 가독성 유지. 덩어리 시작 셀에 세로 구분선.
+  const bgA={background:"#F8FAFC"}, bgB={background:"#F0FDF4"}, bgC={background:"#FFFBEB"};
+  const sep={borderLeft:"2px solid #E2E8F0"};
+  const grpTh={padding:"6px 12px",textAlign:"center",fontSize:11,fontWeight:800,color:"#64748B",letterSpacing:0.5,borderBottom:"1px solid #E2E8F0",whiteSpace:"nowrap"};
   const dateLabel={display:"flex",alignItems:"center",gap:6,fontSize:13,fontWeight:600,color:"#64748B",whiteSpace:"nowrap"};
   const dateInput={padding:"6px 10px",borderRadius:6,border:"1px solid #CBD5E1",fontSize:13,color:"#1E293B",outline:"none"};
   const statLabel={fontSize:12,fontWeight:700,color:"#64748B",marginBottom:6};
@@ -4609,25 +4614,32 @@ function MfsShipout(){
             </div>
             <div style={{overflowX:"auto"}}>
               <table style={{width:"100%",borderCollapse:"collapse"}}>
-                <thead><tr>
-                  <th style={th}>{MFS_COL.CODE}</th><th style={th}>{MFS_COL.NAME}</th><th style={th}>{MFS_COL.OPT}</th>
-                  <th style={{...th,textAlign:"right"}}>MFS수량</th>
-                  <th style={{...th,textAlign:"right"}}>정상재고</th><th style={{...th,textAlign:"right"}}>최근의뢰</th>
-                  <th style={{...th,textAlign:"right"}}>부족분</th><th style={th}>배치업체</th><th style={{...th,textAlign:"right"}}>단가</th><th style={th}>입고예정일</th>
-                </tr></thead>
+                <thead>
+                  <tr>
+                    <th style={{...grpTh,...bgA}} colSpan={3}>상품정보</th>
+                    <th style={{...grpTh,...bgB,...sep}} colSpan={3}>수량</th>
+                    <th style={{...grpTh,...bgC,...sep}} colSpan={4}>발주판단</th>
+                  </tr>
+                  <tr>
+                    <th style={{...th,...bgA}}>{MFS_COL.CODE}</th><th style={{...th,...bgA}}>{MFS_COL.NAME}</th><th style={{...th,...bgA}}>{MFS_COL.OPT}</th>
+                    <th style={{...th,...bgB,...sep,textAlign:"right"}}>MFS수량</th>
+                    <th style={{...th,...bgB,textAlign:"right"}}>정상재고</th><th style={{...th,...bgB,textAlign:"right"}}>최근의뢰</th>
+                    <th style={{...th,...bgC,...sep,textAlign:"right"}}>부족분</th><th style={{...th,...bgC}}>배치업체</th><th style={{...th,...bgC,textAlign:"right"}}>단가</th><th style={{...th,...bgC}}>입고예정일</th>
+                  </tr>
+                </thead>
                 <tbody>
                   {g.items.map(it=>(
                     <tr key={it.id}>
-                      <td style={td}>{it[MFS_COL.CODE]||"-"}</td>
-                      <td style={{...td,whiteSpace:"normal"}}>{it[MFS_COL.NAME]||"-"}</td>
-                      <td style={td}>{it[MFS_COL.OPT]||"-"}</td>
-                      <td style={{...td,textAlign:"right",fontWeight:700}}>{toNum(it[MFS_COL.MFS_QTY]).toLocaleString()}</td>
-                      <td style={{...td,textAlign:"right"}}>{stockOf(it).toLocaleString()}</td>
-                      <td style={{...td,textAlign:"right"}}>{reqOf(it)===null?"-":reqOf(it).toLocaleString()}</td>
-                      <td style={{...td,textAlign:"right",fontWeight:700,color:shortOf(it)>0?"#DC2626":"#94A3B8"}}>{shortOf(it).toLocaleString()}</td>
-                      <td style={{...td,color:assignOf(it)?"#1E293B":"#94A3B8"}}>{assignOf(it)?.supplier||"-"}</td>
-                      <td style={{...td,textAlign:"right",color:assignOf(it)?"#1E293B":"#94A3B8"}}>{assignOf(it)?`${assignOf(it).unit_cost.toLocaleString()}원`:"-"}</td>
-                      <td style={td}>{dueOf(it)||"-"}</td>
+                      <td style={{...td,...bgA}}>{it[MFS_COL.CODE]||"-"}</td>
+                      <td style={{...td,...bgA,whiteSpace:"normal"}}>{it[MFS_COL.NAME]||"-"}</td>
+                      <td style={{...td,...bgA}}>{it[MFS_COL.OPT]||"-"}</td>
+                      <td style={{...td,...bgB,...sep,textAlign:"right",fontWeight:700}}>{toNum(it[MFS_COL.MFS_QTY]).toLocaleString()}</td>
+                      <td style={{...td,...bgB,textAlign:"right"}}>{stockOf(it).toLocaleString()}</td>
+                      <td style={{...td,...bgB,textAlign:"right"}}>{reqOf(it)===null?"-":reqOf(it).toLocaleString()}</td>
+                      <td style={{...td,...bgC,...sep,textAlign:"right",fontWeight:700,color:shortOf(it)>0?"#DC2626":"#94A3B8"}}>{shortOf(it).toLocaleString()}</td>
+                      <td style={{...td,...bgC,color:assignOf(it)?"#1E293B":"#94A3B8"}}>{assignOf(it)?.supplier||"-"}</td>
+                      <td style={{...td,...bgC,textAlign:"right",color:assignOf(it)?"#1E293B":"#94A3B8"}}>{assignOf(it)?`${assignOf(it).unit_cost.toLocaleString()}원`:"-"}</td>
+                      <td style={{...td,...bgC}}>{dueOf(it)||"-"}</td>
                     </tr>
                   ))}
                 </tbody>
