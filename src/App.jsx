@@ -4085,12 +4085,22 @@ function PrintSupplierManage(){
   );
 }
 
-// ─── 전사프린팅 외주 (UI 틀 · 발주 히스토리 표) ───
-// 소메뉴 3개: 발주서 작성 / 업체·단가·샘플 관리 / 발주 히스토리.
+// ─── MFS 출고 (UI 뼈대 · 업로드·표는 다음 단계) ───
+function MfsShipout(){
+  return(
+    <SectionCard title="🚚 MFS 출고" subtitle="준비 중">
+      <div style={{padding:"40px 0",textAlign:"center",fontSize:14,color:"#94A3B8"}}>준비 중입니다.</div>
+    </SectionCard>
+  );
+}
+
+// ─── MFS 출고 및 프린팅 외주 (UI 틀 · 발주 히스토리 표) ───
+// 소메뉴 4개: MFS 출고 / 발주서 작성 / 업체·단가·샘플 관리 / 발주 히스토리.
 function PrintOutsourcingTab(){
-  const [sub,setSub]=useState("order"); // order | supplier | history
+  const [sub,setSub]=useState("order"); // mfsship | order | supplier | history
 
   const subTabs=[
+    {id:"mfsship",label:"MFS 출고"},
     {id:"order",label:"발주서 작성"},
     {id:"supplier",label:"업체·단가·샘플 관리"},
     {id:"history",label:"발주 히스토리"},
@@ -4113,6 +4123,7 @@ function PrintOutsourcingTab(){
         })}
       </div>
 
+      {sub==="mfsship"&&<MfsShipout />}
       {sub==="order"&&<PrintOrderCreate />}
       {sub==="supplier"&&<PrintSupplierManage />}
       {sub==="history"&&<PrintHistory />}
@@ -6197,7 +6208,7 @@ export default function Dashboard(){
     {id:"overview",label:"대시보드",icon:"⬡",hidden:true}, // 메뉴에서만 숨김(컴포넌트·renderOverview 유지, hidden 제거 시 복원)
     {id:"schedule",label:"입고 스케줄",icon:"📅"},
     {id:"ordertrack",label:"오더 입고현황",icon:"📊"},
-    {id:"print",label:"프린팅 외주",icon:"🖨️"},
+    {id:"print",label:"MFS 출고 및 프린팅 외주",icon:"🖨️"},
     {id:"productdb",label:"제품 DB",icon:"🗃"},
     {id:"planning",label:"아이템 기획",icon:"💡",hidden:true},
     {id:"sample",label:"작업지시서",icon:"📝"},
