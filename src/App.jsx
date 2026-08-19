@@ -4142,9 +4142,40 @@ function parseMfsShipoutGrid(grid){
 }
 
 function MfsShipout(){
+  const[rows,setRows]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[error,setError]=useState(null);
+  const[search,setSearch]=useState("");
+  const[nonce,setNonce]=useState(0);        // 업로드 후 재조회 트리거
   const[uploading,setUploading]=useState(false);
-  const[result,setResult]=useState(null); // {sheetName, rows, saved}
   const fileRef=useRef(null);
+  const reload=()=>setNonce(n=>n+1);
+
+  // mfs_shipout 조회 — 업로드와 무관하게 화면 진입 시 항상 최신 데이터 표시
+  useEffect(()=>{
+    let alive=true;
+    (async()=>{
+      setLoading(true);setError(null);
+      try{
+        // PostgREST 기본 1000행 제한 → offset 페이징으로 전량 확보(합계 정확도).
+        const all=[];const PAGE=1000;
+        for(let off=0;;off+=PAGE){
+          const r=await fetch(`${SUPABASE_URL}/rest/v1/mfs_shipout?select=*&order=id.asc&limit=${PAGE}&offset=${off}`,{headers:sbHeaders});
+          const data=await r.json();
+          if(!r.ok)throw new Error(data?.message?data.message:`HTTP ${r.status}`);
+          if(!Array.isArray(data))throw new Error("예상치 못한 응답 형식");
+          all.push(...data);
+          if(data.length<PAGE)break;
+        }
+        if(alive)setRows(all);
+      }catch(e){
+        if(alive){setError(String(e?.message||e));setRows([]);}
+      }finally{
+        if(alive)setLoading(false);
+      }
+    })();
+    return()=>{alive=false;};
+  },[nonce]);
 
   // 발주서 엑셀 업로드 → 파싱 → 전체 삭제(truncate) 후 재등록
   const handleUpload=async(file)=>{
@@ -4161,11 +4192,11 @@ function MfsShipout(){
       const sheetName=names[0]; // 첫 시트
       console.log("[MFS업로드] 선택 시트:",sheetName);
       const grid=X.utils.sheet_to_json(wb.Sheets[sheetName],{header:1,defval:""});
-      const rows=parseMfsShipoutGrid(grid);
-      console.log("[MFS업로드] 파싱된 행 수:",rows.length,"· 샘플:",rows.slice(0,3));
-      if(rows.length===0)throw new Error("등록할 데이터 행이 없습니다.");
+      const parsed=parseMfsShipoutGrid(grid);
+      console.log("[MFS업로드] 파싱된 행 수:",parsed.length,"· 샘플:",parsed.slice(0,3));
+      if(parsed.length===0)throw new Error("등록할 데이터 행이 없습니다.");
 
-      if(!window.confirm(`'${sheetName}' 시트에서 ${rows.length}건을 읽었습니다.\n기존 MFS 출고 데이터를 모두 지우고 새로 등록할까요?`)){console.log("[MFS업로드] 사용자 취소");return;}
+      if(!window.confirm(`'${sheetName}' 시트에서 ${parsed.length}건을 읽었습니다.\n기존 MFS 출고 데이터를 모두 지우고 새로 등록할까요?`)){console.log("[MFS업로드] 사용자 취소");return;}
 
       // 재업로드 중복 방지 — 저장 전에 반드시 전체 삭제 먼저.
       const tr=await fetch(`${SUPABASE_URL}/rest/v1/rpc/truncate_mfs_shipout`,{method:"POST",headers:sbHeaders,body:"{}"});
@@ -4178,8 +4209,8 @@ function MfsShipout(){
 
       // PostgREST 대량 INSERT — 요청이 커지지 않게 500건씩 끊어 보냄. _memo 는 DB 컬럼이 아니라 제외.
       let saved=0;
-      for(let i=0;i<rows.length;i+=500){
-        const chunk=rows.slice(i,i+500).map(({_memo,...rest})=>rest);
+      for(let i=0;i<parsed.length;i+=500){
+        const chunk=parsed.slice(i,i+500).map(({_memo,...rest})=>rest);
         const r=await fetch(`${SUPABASE_URL}/rest/v1/mfs_shipout`,{method:"POST",headers:{...sbHeaders,Prefer:"return=minimal"},body:JSON.stringify(chunk)});
         if(!r.ok){
           const t=await r.text().catch(()=>"");
@@ -4187,10 +4218,10 @@ function MfsShipout(){
           throw new Error(`저장 실패 HTTP ${r.status} ${t.slice(0,200)}`);
         }
         saved+=chunk.length;
-        console.log(`[MFS업로드] 저장 ${saved}/${rows.length}`);
+        console.log(`[MFS업로드] 저장 ${saved}/${parsed.length}`);
       }
-      setResult({sheetName,rows,saved});
       alert(`${saved}건 등록`);
+      reload();
     }catch(e){
       console.error("[MFS업로드] 실패:",e);
       alert("업로드 실패: "+String(e?.message||e));
@@ -4199,44 +4230,170 @@ function MfsShipout(){
     }
   };
 
+  // 시트 유래라 "1,200" 같은 문자열도 들어올 수 있어 숫자만 추려서 파싱.
+  const toNum=v=>{if(v==null||v==="")return 0;const n=Number(String(v).replace(/[^0-9.-]/g,""));return Number.isFinite(n)?n:0;};
+
+  const filtered=useMemo(()=>{
+    const q=search.trim().toLowerCase();
+    if(!q)return rows;
+    return rows.filter(r=>`${r[MFS_COL.NAME]||""} ${r[MFS_COL.CODE]||""}`.toLowerCase().includes(q));
+  },[rows,search]);
+
+  // 업체별 그룹핑 — 순서는 원본(id) 순서 유지. 업체 없으면 한 덩어리로 모음.
+  const groups=useMemo(()=>{
+    const m=new Map();
+    filtered.forEach(r=>{
+      const k=String(r[MFS_COL.SUP]??"").trim()||"(업체 미지정)";
+      if(!m.has(k))m.set(k,{supplier:k,items:[],qty:0});
+      const g=m.get(k);
+      g.items.push(r);
+      g.qty+=toNum(r[MFS_COL.MFS_QTY]);
+    });
+    return[...m.values()];
+  },[filtered]);
+  const totalQty=useMemo(()=>groups.reduce((s,g)=>s+g.qty,0),[groups]);
+
+  // 발주서 엑셀 다운로드 — 통합 시트 1개, 업체별로 모아 소계 행 + 마지막 총합계. 이미지·병합 없음.
+  const downloadExcel=async()=>{
+    if(filtered.length===0){alert("다운로드할 데이터가 없습니다.");return;}
+    try{
+      const ExcelJS=await loadExcelJS();
+      const wb=new ExcelJS.Workbook();
+      const ws=wb.addWorksheet("통합");
+      const header=["상품코드","상품명","옵션","MFS수량","업체","센터입고일"];
+      [16,30,20,10,20,18].forEach((w,i)=>{ws.getColumn(i+1).width=w;});
+      header.forEach((h,i)=>{ws.getRow(1).getCell(i+1).value=h;});
+
+      let ri=2;
+      const subRows=[]; // 업체 소계 행 번호(스타일용)
+      groups.forEach(g=>{
+        g.items.forEach(it=>{
+          const row=ws.getRow(ri);
+          row.getCell(1).value=it[MFS_COL.CODE]||"";
+          row.getCell(2).value=it[MFS_COL.NAME]||"";
+          row.getCell(3).value=it[MFS_COL.OPT]||"";
+          row.getCell(4).value=toNum(it[MFS_COL.MFS_QTY]);
+          row.getCell(5).value=it[MFS_COL.SUP]||"";
+          row.getCell(6).value=it[MFS_COL.IN_DATE]||"";
+          ri++;
+        });
+        const sub=ws.getRow(ri);           // 업체가 바뀌는 지점 = 소계 행
+        sub.getCell(1).value=`${g.supplier} 소계`;
+        sub.getCell(4).value=g.qty;
+        sub.getCell(5).value=`${g.items.length}건`;
+        subRows.push(ri);
+        ri++;
+      });
+      const totalRow=ri;
+      ws.getRow(totalRow).getCell(1).value="총 합계";
+      ws.getRow(totalRow).getCell(4).value=totalQty;
+      ws.getRow(totalRow).getCell(5).value=`${filtered.length}건`;
+
+      // 테두리·정렬(기존 발주서 엑셀과 동일 팔레트)
+      const thin={style:"thin",color:{argb:"FFCBD5E1"}};
+      for(let r=1;r<=totalRow;r++){
+        ws.getRow(r).height=20;
+        for(let c=1;c<=6;c++){
+          const cell=ws.getRow(r).getCell(c);
+          cell.border={top:thin,left:thin,bottom:thin,right:thin};
+          cell.alignment={vertical:"middle",horizontal:c===2?"left":"center",wrapText:false};
+        }
+      }
+      for(let c=1;c<=6;c++){
+        const cell=ws.getRow(1).getCell(c);
+        cell.font={bold:true,color:{argb:"FF1E293B"}};
+        cell.fill={type:"pattern",pattern:"solid",fgColor:{argb:"FFF1F5F9"}};
+      }
+      [...subRows,totalRow].forEach(r=>{
+        for(let c=1;c<=6;c++){
+          const cell=ws.getRow(r).getCell(c);
+          cell.font={bold:true,color:{argb:"FF1E293B"}};
+          cell.fill={type:"pattern",pattern:"solid",fgColor:{argb:"FFF8FAFC"}};
+        }
+      });
+
+      // 파일명 날짜는 로컬(KST) 기준 — toISOString(UTC)은 자정 전후로 하루가 밀림.
+      const d=new Date();
+      const ymd=`${d.getFullYear()}${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}`;
+      const buf=await wb.xlsx.writeBuffer();
+      const blob=new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement("a");a.href=url;a.download=`MFS출고_${ymd}.xlsx`;document.body.appendChild(a);a.click();a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),1000);
+    }catch(e){
+      console.error("[MFS다운로드] 실패:",e);
+      alert("엑셀 생성 실패: "+(e?.message||e));
+    }
+  };
+
   const th={padding:"11px 12px",textAlign:"left",fontSize:12,fontWeight:700,color:"#64748B",whiteSpace:"nowrap",borderBottom:"2px solid #E2E8F0",letterSpacing:0.3};
   const td={padding:"11px 12px",fontSize:14,color:"#1E293B",borderBottom:"1px solid #F1F5F9",verticalAlign:"middle",whiteSpace:"nowrap"};
-  const num=v=>(v===null||v===undefined||v==="")?"-":Number(v).toLocaleString();
-  const preview=result?result.rows.slice(0,20):[];
+  const statBox={flex:"1 1 140px",background:"#F8FAFC",border:"1px solid #E2E8F0",borderRadius:10,padding:"14px 16px"};
+  const statLabel={fontSize:12,fontWeight:700,color:"#64748B",marginBottom:6};
+  const statValue={fontSize:22,fontWeight:800,color:"#0F172A",letterSpacing:-0.5};
 
   return(
-    <SectionCard title="🚚 MFS 출고" subtitle="발주서 엑셀 업로드 → mfs_shipout 저장(전체 교체)" actions={
+    <SectionCard title="🚚 MFS 출고" subtitle="발주서 엑셀 업로드(전체 교체) · 업체별 통합표" actions={
       <>
         <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];e.target.value="";handleUpload(f);}}/>
-        {uploading
-          ?<span style={{padding:"6px 14px",borderRadius:6,border:"1px solid #CBD5E1",background:"#F8FAFC",color:"#94A3B8",fontSize:14,fontWeight:600,cursor:"not-allowed"}}>⏳ 업로드 중...</span>
-          :<SmallBtn primary onClick={()=>fileRef.current?.click()}>📤 발주서 업로드</SmallBtn>}
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          {uploading
+            ?<span style={{padding:"6px 14px",borderRadius:6,border:"1px solid #CBD5E1",background:"#F8FAFC",color:"#94A3B8",fontSize:14,fontWeight:600,cursor:"not-allowed"}}>⏳ 업로드 중...</span>
+            :<SmallBtn primary onClick={()=>fileRef.current?.click()}>📤 발주서 업로드</SmallBtn>}
+          <SmallBtn onClick={downloadExcel}>📥 발주서 다운로드</SmallBtn>
+        </div>
       </>
     }>
-      {!result&&<div style={{padding:"40px 0",textAlign:"center",fontSize:14,color:"#94A3B8"}}>발주서 엑셀(.xlsx)을 업로드하세요. 첫 시트를 읽습니다.</div>}
-      {result&&(<>
-        <div style={{fontSize:14,color:"#64748B",marginBottom:14}}>
-          '{result.sheetName}' 시트 · <strong style={{color:"#0F172A"}}>{result.saved.toLocaleString()}건</strong> 등록 완료
-          {result.rows.length>preview.length?` (아래는 앞 ${preview.length}건 미리보기)`:""}
+      {loading&&<div style={{padding:"40px 0",textAlign:"center",fontSize:14,color:"#94A3B8"}}>불러오는 중…</div>}
+      {!loading&&error&&<div style={{padding:"20px 0",textAlign:"center",fontSize:14,color:"#DC2626"}}>{error}</div>}
+      {!loading&&!error&&rows.length===0&&<div style={{padding:"40px 0",textAlign:"center",fontSize:14,color:"#94A3B8"}}>등록된 데이터가 없습니다. 발주서 엑셀(.xlsx)을 업로드하세요.</div>}
+
+      {!loading&&!error&&rows.length>0&&(<>
+        {/* 요약 */}
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:16}}>
+          <div style={statBox}><div style={statLabel}>업체</div><div style={statValue}>{groups.length.toLocaleString()}<span style={{fontSize:14,fontWeight:600,color:"#64748B",marginLeft:3}}>곳</span></div></div>
+          <div style={statBox}><div style={statLabel}>품목</div><div style={statValue}>{filtered.length.toLocaleString()}<span style={{fontSize:14,fontWeight:600,color:"#64748B",marginLeft:3}}>건</span></div></div>
+          <div style={statBox}><div style={statLabel}>MFS수량 합계</div><div style={statValue}>{totalQty.toLocaleString()}<span style={{fontSize:14,fontWeight:600,color:"#64748B",marginLeft:3}}>장</span></div></div>
         </div>
-        <div style={{overflowX:"auto"}}>
-          <table style={{width:"100%",borderCollapse:"collapse"}}>
-            <thead><tr>
-              <th style={th}>{MFS_COL.CODE}</th><th style={th}>{MFS_COL.NAME}</th><th style={th}>{MFS_COL.OPT}</th>
-              <th style={{...th,textAlign:"right"}}>{MFS_COL.MFS_QTY}</th>
-              <th style={th}>{MFS_COL.SUP}</th><th style={th}>{MFS_COL.IN_DATE}</th>
-            </tr></thead>
-            <tbody>
-              {preview.map((r,i)=>(
-                <tr key={i}>
-                  <td style={td}>{r[MFS_COL.CODE]||"-"}</td><td style={td}>{r[MFS_COL.NAME]||"-"}</td><td style={td}>{r[MFS_COL.OPT]||"-"}</td>
-                  <td style={{...td,textAlign:"right",fontWeight:700}}>{num(r[MFS_COL.MFS_QTY])}</td>
-                  <td style={td}>{r[MFS_COL.SUP]||"-"}</td><td style={td}>{r[MFS_COL.IN_DATE]||"-"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+
+        {/* 검색 */}
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:18}}>
+          <input
+            value={search} onChange={e=>setSearch(e.target.value)}
+            placeholder="상품명 · 상품코드 검색"
+            style={{flex:"1 1 240px",minWidth:200,padding:"8px 14px",borderRadius:8,border:"1px solid #CBD5E1",fontSize:14,outline:"none"}}/>
         </div>
+
+        {groups.length===0&&<div style={{padding:"30px 0",textAlign:"center",fontSize:14,color:"#94A3B8"}}>검색 결과가 없습니다.</div>}
+
+        {/* 업체별 카드 */}
+        {groups.map(g=>(
+          <div key={g.supplier} style={{border:"1px solid #E2E8F0",borderRadius:12,padding:16,marginBottom:14}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+              <div style={{fontSize:16,fontWeight:700,color:"#1E293B"}}>🏭 {g.supplier}</div>
+              <div style={{fontSize:13,color:"#64748B"}}>등록 {g.items.length.toLocaleString()}건 · MFS수량 <strong style={{color:"#0F172A"}}>{g.qty.toLocaleString()}</strong>장</div>
+            </div>
+            <div style={{overflowX:"auto"}}>
+              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead><tr>
+                  <th style={th}>{MFS_COL.CODE}</th><th style={th}>{MFS_COL.NAME}</th><th style={th}>{MFS_COL.OPT}</th>
+                  <th style={{...th,textAlign:"right"}}>MFS수량</th><th style={th}>{MFS_COL.IN_DATE}</th>
+                </tr></thead>
+                <tbody>
+                  {g.items.map(it=>(
+                    <tr key={it.id}>
+                      <td style={td}>{it[MFS_COL.CODE]||"-"}</td>
+                      <td style={{...td,whiteSpace:"normal"}}>{it[MFS_COL.NAME]||"-"}</td>
+                      <td style={td}>{it[MFS_COL.OPT]||"-"}</td>
+                      <td style={{...td,textAlign:"right",fontWeight:700}}>{toNum(it[MFS_COL.MFS_QTY]).toLocaleString()}</td>
+                      <td style={td}>{it[MFS_COL.IN_DATE]||"-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ))}
       </>)}
     </SectionCard>
   );
