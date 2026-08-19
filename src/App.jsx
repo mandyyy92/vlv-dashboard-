@@ -4173,13 +4173,17 @@ function MfsShipout(){
   const fileRef=useRef(null);
   const reload=()=>setNonce(n=>n+1);
 
-  // 발주 히스토리 매칭 맵 — print_orders_sheet 에서 상품코드별 "가장 늦은 입고예정일" 행 전체를 남김.
+  // 발주 히스토리 매칭 맵 — print_orders_sheet 에서 상품코드별 "오늘 이하 중 가장 최근" 입고예정일 행 전체를 남김.
+  // 미래 입고예정일은 아직 안 들어온 물량이라 제외 → 그런 상품은 최근의뢰 0 이 되어 부족분에 잡힌다.
   // 입고예정일.desc 로 받되, 정렬에만 기대지 않고 JS 에서도 더 늦은 날짜면 갱신(YYYY-MM-DD 라 문자열 비교로 충분).
   // 업로드와 무관한 데이터라 1회만 조회.
   useEffect(()=>{
     let alive=true;
     (async()=>{
       try{
+        // 오늘(로컬 KST) — toISOString(UTC)은 자정 전후로 하루가 밀려 미래 건이 섞인다.
+        const _t=new Date();
+        const todayStr=`${_t.getFullYear()}-${String(_t.getMonth()+1).padStart(2,"0")}-${String(_t.getDate()).padStart(2,"0")}`;
         const map={};const PAGE=1000;
         for(let off=0;;off+=PAGE){
           const url=`${SUPABASE_URL}/rest/v1/print_orders_sheet?select=${encodeURIComponent("상품코드,차수,업체,의뢰수량,입고예정일")}&${encodeURIComponent("입고예정일")}=not.is.null&order=${encodeURIComponent("상품코드.asc,입고예정일.desc")}&limit=${PAGE}&offset=${off}`;
@@ -4191,13 +4195,14 @@ function MfsShipout(){
             const code=String(row["상품코드"]??"").trim();
             const d=String(row["입고예정일"]??"").trim().slice(0,10);
             if(!code||!d)return;
+            if(d>todayStr)return;          // 미래 입고예정일 제외 — 오늘 이하만 후보
             const cur=map[code];
-            if(cur===undefined||d>cur.due) // 상품코드별 최댓값 = 가장 늦은 입고예정일 → 그 행 전체를 보관
+            if(cur===undefined||d>cur.due) // 후보 중 최댓값 = 오늘 이하에서 가장 최근 → 그 행 전체를 보관
               map[code]={due:d,round:row["차수"],supplier:row["업체"],reqQty:row["의뢰수량"]};
           });
           if(data.length<PAGE)break;
         }
-        console.log("[MFS입고예정일] 매칭 맵 상품코드 수:",Object.keys(map).length);
+        console.log("[MFS입고예정일] 기준일(오늘 이하):",todayStr,"· 매칭 맵 상품코드 수:",Object.keys(map).length);
         if(alive)setLatestMap(map);
       }catch(e){
         console.warn("[MFS입고예정일] 조회 실패:",e); // 실패해도 표는 "-" 로 뜨게 두고 화면은 살린다
