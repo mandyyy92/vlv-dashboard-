@@ -4085,11 +4085,149 @@ function PrintSupplierManage(){
   );
 }
 
-// ─── MFS 출고 (UI 뼈대 · 업로드·표는 다음 단계) ───
+// ─── MFS 출고 (발주서 엑셀 '통합' 시트 업로드 → mfs_shipout 저장) ───
+// mfs_shipout 컬럼이 한글이라 문자열 키로 접근. 오타 방지용 상수로 모아둔다.
+const MFS_COL={CODE:"상품코드",NAME:"상품명",OPT:"옵션",MFS_QTY:"mfs수량",REQ_QTY:"의뢰수량",SUP:"업체",IN_DATE:"센터입고일",SHIP_DATE:"mfs발송일",STOCK:"센터재고"};
+
+// 발주서 '통합' 시트(2D 배열, 0-based) → mfs_shipout 행 배열.
+// 상품명·업체·센터입고일·MFS발송일은 그룹 첫 행에만 값이 있는 병합셀 → 빈칸이면 위 행 값으로 forward-fill.
+// 날짜 2종은 "8/18일(화)" 같은 자유 표기라 파싱하지 않고 텍스트 그대로 저장(컬럼도 text).
+function parseMfsShipoutGrid(grid){
+  const txt=v=>String(v??"").trim();
+  const nz=v=>{const n=Number(txt(v).replace(/[^0-9.-]/g,""));return Number.isFinite(n)?n:0;};
+  // 헤더행 탐색(상품코드+옵션). 못 찾으면 1행 헤더 · A~J 고정 순서로 폴백.
+  let hIdx=-1;
+  for(let i=0;i<Math.min(grid.length,10);i++){
+    const cells=(grid[i]||[]).map(c=>txt(c).replace(/\s+/g,""));
+    if(cells.some(c=>c.includes("상품코드"))&&cells.some(c=>c.includes("옵션"))){hIdx=i;break;}
+  }
+  const header=(grid[hIdx<0?0:hIdx]||[]).map(c=>txt(c).replace(/\s+/g,"").toUpperCase());
+  const find=(fn,fallback)=>{const i=hIdx<0?-1:header.findIndex(fn);return i>=0?i:fallback;};
+  const cCode =find(c=>c.includes("상품코드"),1);
+  const cName =find(c=>c.includes("상품명"),2);
+  const cOpt  =find(c=>c.includes("옵션"),3);
+  const cMfs  =find(c=>c.includes("MFS")&&c.includes("수량"),4);
+  const cReq  =find(c=>c.includes("의뢰"),5);
+  const cSup  =find(c=>c==="업체",6);
+  const cIn   =find(c=>c.includes("센터")&&c.includes("입고"),7);
+  const cShip =find(c=>c.includes("MFS")&&c.includes("발송"),8);
+  const cStock=find(c=>c.includes("센터")&&c.includes("재고"),9);
+
+  const out=[];
+  let fName="",fSup="",fIn="",fShip=""; // forward-fill 보관값
+  for(let i=(hIdx<0?0:hIdx)+1;i<grid.length;i++){
+    const row=grid[i]||[];
+    const at=c=>c>=0?txt(row[c]):"";
+    const rawName=at(cName);
+    if(/소계|합계/.test(rawName))continue;     // 소계·합계 행 — fill 오염을 막으려 채우기 전에 걸러냄
+    if(rawName)fName=rawName;
+    const rawSup=at(cSup);   if(rawSup)fSup=rawSup;
+    const rawIn=at(cIn);     if(rawIn)fIn=rawIn;
+    const rawShip=at(cShip); if(rawShip)fShip=rawShip;
+    const code=at(cCode),opt=at(cOpt);
+    if(!code&&!opt)continue;                   // 상품코드·옵션 둘 다 빈 행(소계·구분행) 제외
+    const stock=at(cStock);
+    out.push({
+      [MFS_COL.CODE]:code,[MFS_COL.NAME]:fName,[MFS_COL.OPT]:opt,
+      [MFS_COL.MFS_QTY]:nz(at(cMfs)),[MFS_COL.REQ_QTY]:nz(at(cReq)),
+      [MFS_COL.SUP]:fSup,[MFS_COL.IN_DATE]:fIn,[MFS_COL.SHIP_DATE]:fShip,
+      [MFS_COL.STOCK]:stock===""?null:nz(stock),
+    });
+  }
+  return out;
+}
+
 function MfsShipout(){
+  const[uploading,setUploading]=useState(false);
+  const[result,setResult]=useState(null); // {sheetName, rows, saved}
+  const fileRef=useRef(null);
+
+  // 발주서 엑셀('통합' 시트) 업로드 → 파싱 → mfs_shipout 추가 등록
+  const handleUpload=async(file)=>{
+    if(!file)return;
+    setUploading(true);
+    try{
+      console.log("[MFS업로드] 시작 · 파일:",file.name);
+      const X=await loadWorkorderXLSX();
+      const buf=await file.arrayBuffer();
+      const wb=X.read(new Uint8Array(buf),{type:"array"});
+      const names=wb.SheetNames||[];
+      console.log("[MFS업로드] 시트 목록:",names);
+      if(names.length===0)throw new Error("시트가 없습니다.");
+      const sheetName=names.find(n=>String(n).includes("통합"))||names[0]; // '통합' 없으면 첫 시트
+      console.log("[MFS업로드] 선택 시트:",sheetName);
+      const grid=X.utils.sheet_to_json(wb.Sheets[sheetName],{header:1,defval:""});
+      const rows=parseMfsShipoutGrid(grid);
+      console.log("[MFS업로드] 파싱된 행 수:",rows.length,"· 샘플:",rows.slice(0,3));
+      if(rows.length===0)throw new Error("등록할 데이터 행이 없습니다.");
+
+      if(!window.confirm(`'${sheetName}' 시트에서 ${rows.length}건을 읽었습니다. mfs_shipout에 추가 등록할까요?`)){console.log("[MFS업로드] 사용자 취소");return;}
+
+      // PostgREST 대량 INSERT — 요청이 커지지 않게 500건씩 끊어 보냄
+      let saved=0;
+      for(let i=0;i<rows.length;i+=500){
+        const chunk=rows.slice(i,i+500);
+        const r=await fetch(`${SUPABASE_URL}/rest/v1/mfs_shipout`,{method:"POST",headers:{...sbHeaders,Prefer:"return=minimal"},body:JSON.stringify(chunk)});
+        if(!r.ok){
+          const t=await r.text().catch(()=>"");
+          console.error("[MFS업로드] 저장 실패 · body:",t.slice(0,500));
+          throw new Error(`저장 실패 HTTP ${r.status} ${t.slice(0,200)}`);
+        }
+        saved+=chunk.length;
+        console.log(`[MFS업로드] 저장 ${saved}/${rows.length}`);
+      }
+      setResult({sheetName,rows,saved});
+      alert(`${saved}건 등록`);
+    }catch(e){
+      console.error("[MFS업로드] 실패:",e);
+      alert("업로드 실패: "+String(e?.message||e));
+    }finally{
+      setUploading(false);
+    }
+  };
+
+  const th={padding:"11px 12px",textAlign:"left",fontSize:12,fontWeight:700,color:"#64748B",whiteSpace:"nowrap",borderBottom:"2px solid #E2E8F0",letterSpacing:0.3};
+  const td={padding:"11px 12px",fontSize:14,color:"#1E293B",borderBottom:"1px solid #F1F5F9",verticalAlign:"middle",whiteSpace:"nowrap"};
+  const num=v=>(v===null||v===undefined||v==="")?"-":Number(v).toLocaleString();
+  const preview=result?result.rows.slice(0,20):[];
+
   return(
-    <SectionCard title="🚚 MFS 출고" subtitle="준비 중">
-      <div style={{padding:"40px 0",textAlign:"center",fontSize:14,color:"#94A3B8"}}>준비 중입니다.</div>
+    <SectionCard title="🚚 MFS 출고" subtitle="발주서 엑셀('통합' 시트) 업로드 → mfs_shipout 저장" actions={
+      <>
+        <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];e.target.value="";handleUpload(f);}}/>
+        {uploading
+          ?<span style={{padding:"6px 14px",borderRadius:6,border:"1px solid #CBD5E1",background:"#F8FAFC",color:"#94A3B8",fontSize:14,fontWeight:600,cursor:"not-allowed"}}>⏳ 업로드 중...</span>
+          :<SmallBtn primary onClick={()=>fileRef.current?.click()}>📤 발주서 업로드</SmallBtn>}
+      </>
+    }>
+      {!result&&<div style={{padding:"40px 0",textAlign:"center",fontSize:14,color:"#94A3B8"}}>발주서 엑셀(.xlsx)을 업로드하세요. '통합' 시트를 읽습니다.</div>}
+      {result&&(<>
+        <div style={{fontSize:14,color:"#64748B",marginBottom:14}}>
+          '{result.sheetName}' 시트 · <strong style={{color:"#0F172A"}}>{result.saved.toLocaleString()}건</strong> 등록 완료
+          {result.rows.length>preview.length?` (아래는 앞 ${preview.length}건 미리보기)`:""}
+        </div>
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse"}}>
+            <thead><tr>
+              <th style={th}>{MFS_COL.CODE}</th><th style={th}>{MFS_COL.NAME}</th><th style={th}>{MFS_COL.OPT}</th>
+              <th style={{...th,textAlign:"right"}}>{MFS_COL.MFS_QTY}</th><th style={{...th,textAlign:"right"}}>{MFS_COL.REQ_QTY}</th>
+              <th style={th}>{MFS_COL.SUP}</th><th style={th}>{MFS_COL.IN_DATE}</th><th style={th}>{MFS_COL.SHIP_DATE}</th>
+              <th style={{...th,textAlign:"right"}}>{MFS_COL.STOCK}</th>
+            </tr></thead>
+            <tbody>
+              {preview.map((r,i)=>(
+                <tr key={i}>
+                  <td style={td}>{r[MFS_COL.CODE]||"-"}</td><td style={td}>{r[MFS_COL.NAME]||"-"}</td><td style={td}>{r[MFS_COL.OPT]||"-"}</td>
+                  <td style={{...td,textAlign:"right",fontWeight:700}}>{num(r[MFS_COL.MFS_QTY])}</td>
+                  <td style={{...td,textAlign:"right",fontWeight:700}}>{num(r[MFS_COL.REQ_QTY])}</td>
+                  <td style={td}>{r[MFS_COL.SUP]||"-"}</td><td style={td}>{r[MFS_COL.IN_DATE]||"-"}</td><td style={td}>{r[MFS_COL.SHIP_DATE]||"-"}</td>
+                  <td style={{...td,textAlign:"right"}}>{num(r[MFS_COL.STOCK])}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </>)}
     </SectionCard>
   );
 }
