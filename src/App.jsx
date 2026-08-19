@@ -4153,6 +4153,7 @@ function MfsShipout(){
   const[stockLoading,setStockLoading]=useState(false);
   const[snapDate,setSnapDate]=useState("");   // 사용한 재고 스냅샷일자(표시용)
   const[onlyShort,setOnlyShort]=useState(false); // 부족분 있는 것만 보기
+  const[clearing,setClearing]=useState(false);   // 리스트 비우는 중
   const fileRef=useRef(null);
   const reload=()=>setNonce(n=>n+1);
 
@@ -4252,6 +4253,29 @@ function MfsShipout(){
     return()=>{alive=false;};
   },[rows]);
 
+  // 업로드된 리스트 전체 삭제 — mfs_shipout 을 비우고 화면도 즉시 빈 상태로.
+  const handleClear=async()=>{
+    if(!window.confirm("업로드된 MFS 출고 리스트를 모두 삭제할까요?"))return;
+    setClearing(true);
+    try{
+      const tr=await fetch(`${SUPABASE_URL}/rest/v1/rpc/truncate_mfs_shipout`,{method:"POST",headers:sbHeaders,body:"{}"});
+      if(!tr.ok){
+        const t=await tr.text().catch(()=>"");
+        console.error("[MFS비우기] 실패 · body:",t.slice(0,500));
+        throw new Error(`삭제 실패 HTTP ${tr.status} ${t.slice(0,200)}`);
+      }
+      console.log("[MFS비우기] truncate 완료");
+      setRows([]);
+      alert("리스트를 비웠습니다");
+      reload(); // 서버 기준으로 한 번 더 맞춤
+    }catch(e){
+      console.error("[MFS비우기] 실패:",e);
+      alert("삭제 실패: "+String(e?.message||e));
+    }finally{
+      setClearing(false);
+    }
+  };
+
   // 발주서 엑셀 업로드 → 파싱 → 전체 삭제(truncate) 후 재등록
   const handleUpload=async(file)=>{
     if(!file)return;
@@ -4305,6 +4329,11 @@ function MfsShipout(){
     }
   };
 
+  // 부족분은 외주 발주 단위(20장)에 맞춰 올림. 0 이하는 0. 예: 21→40, 35→40, 40→40
+  const ceil20=n=>n<=0?0:Math.ceil(n/20)*20;
+  // 부족분 = 올림(MFS수량 − 정상재고). 표·요약·필터·엑셀이 전부 이 한 식을 쓴다.
+  const shortWith=(r,map)=>ceil20(toNum(r[MFS_COL.MFS_QTY])-(map[String(r[MFS_COL.CODE]??"").trim()]||0));
+
   // 시트 유래라 "1,200" 같은 문자열도 들어올 수 있어 숫자만 추려서 파싱.
   const toNum=v=>{if(v==null||v==="")return 0;const n=Number(String(v).replace(/[^0-9.-]/g,""));return Number.isFinite(n)?n:0;};
 
@@ -4312,10 +4341,7 @@ function MfsShipout(){
     const q=search.trim().toLowerCase();
     return rows.filter(r=>{
       if(q&&!`${r[MFS_COL.NAME]||""} ${r[MFS_COL.CODE]||""}`.toLowerCase().includes(q))return false;
-      if(onlyShort){
-        const stock=stockMap[String(r[MFS_COL.CODE]??"").trim()]||0;
-        if(Math.max(0,toNum(r[MFS_COL.MFS_QTY])-stock)<=0)return false;
-      }
+      if(onlyShort&&shortWith(r,stockMap)<=0)return false;
       return true;
     });
   },[rows,search,onlyShort,stockMap]);
@@ -4335,8 +4361,8 @@ function MfsShipout(){
   const totalQty=useMemo(()=>groups.reduce((s,g)=>s+g.qty,0),[groups]);
   // 정상재고 / 부족분(외주 의뢰 필요량) — 재고 없거나 매칭 안 되면 0 으로 본다.
   const stockOf=r=>stockMap[String(r[MFS_COL.CODE]??"").trim()]||0;
-  const shortOf=r=>Math.max(0,toNum(r[MFS_COL.MFS_QTY])-stockOf(r));
-  const totalShort=useMemo(()=>filtered.reduce((s,r)=>s+Math.max(0,toNum(r[MFS_COL.MFS_QTY])-(stockMap[String(r[MFS_COL.CODE]??"").trim()]||0)),0),[filtered,stockMap]);
+  const shortOf=r=>shortWith(r,stockMap);
+  const totalShort=useMemo(()=>filtered.reduce((s,r)=>s+shortWith(r,stockMap),0),[filtered,stockMap]);
 
   // 발주 히스토리 매칭 행(가장 늦은 입고예정일 기준). 없으면 undefined → 각 열 "-".
   const latestOf=r=>latestMap[String(r[MFS_COL.CODE]??"").trim()];
@@ -4433,6 +4459,7 @@ function MfsShipout(){
       <>
         <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];e.target.value="";handleUpload(f);}}/>
         <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <SmallBtn onClick={handleClear}>{clearing?"⏳ 삭제 중...":"🔄 새로고침"}</SmallBtn>
           {uploading
             ?<span style={{padding:"6px 14px",borderRadius:6,border:"1px solid #CBD5E1",background:"#F8FAFC",color:"#94A3B8",fontSize:14,fontWeight:600,cursor:"not-allowed"}}>⏳ 업로드 중...</span>
             :<SmallBtn primary onClick={()=>fileRef.current?.click()}>📤 발주서 업로드</SmallBtn>}
