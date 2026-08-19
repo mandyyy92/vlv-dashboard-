@@ -4148,8 +4148,38 @@ function MfsShipout(){
   const[search,setSearch]=useState("");
   const[nonce,setNonce]=useState(0);        // 업로드 후 재조회 트리거
   const[uploading,setUploading]=useState(false);
+  const[dueMap,setDueMap]=useState({});     // { 상품코드: 입고예정일 } — 발주 히스토리에서 매칭
   const fileRef=useRef(null);
   const reload=()=>setNonce(n=>n+1);
+
+  // 입고예정일 맵 — print_orders_sheet 에서 상품코드별 최근 차수의 입고예정일 1건만 남김.
+  // (차수.desc 정렬이라 상품코드마다 먼저 오는 행이 최근 차수. 업로드와 무관하므로 1회만 조회.)
+  useEffect(()=>{
+    let alive=true;
+    (async()=>{
+      try{
+        const map={};const PAGE=1000;
+        for(let off=0;;off+=PAGE){
+          const url=`${SUPABASE_URL}/rest/v1/print_orders_sheet?select=${encodeURIComponent("상품코드,입고예정일,차수")}&${encodeURIComponent("입고예정일")}=not.is.null&order=${encodeURIComponent("상품코드.asc,차수.desc")}&limit=${PAGE}&offset=${off}`;
+          const r=await fetch(url,{headers:sbHeaders});
+          const data=await r.json();
+          if(!r.ok)throw new Error(data?.message?data.message:`HTTP ${r.status}`);
+          if(!Array.isArray(data))throw new Error("예상치 못한 응답 형식");
+          data.forEach(row=>{
+            const code=String(row["상품코드"]??"").trim();
+            const due=String(row["입고예정일"]??"").trim();
+            if(code&&due&&map[code]===undefined)map[code]=due.slice(0,10); // 상품코드별 첫 값 = 최근 차수
+          });
+          if(data.length<PAGE)break;
+        }
+        console.log("[MFS입고예정일] 매칭 맵 상품코드 수:",Object.keys(map).length);
+        if(alive)setDueMap(map);
+      }catch(e){
+        console.warn("[MFS입고예정일] 조회 실패:",e); // 실패해도 표는 "-" 로 뜨게 두고 화면은 살린다
+      }
+    })();
+    return()=>{alive=false;};
+  },[]);
 
   // mfs_shipout 조회 — 업로드와 무관하게 화면 진입 시 항상 최신 데이터 표시
   useEffect(()=>{
@@ -4252,6 +4282,8 @@ function MfsShipout(){
     return[...m.values()];
   },[filtered]);
   const totalQty=useMemo(()=>groups.reduce((s,g)=>s+g.qty,0),[groups]);
+  // 입고예정일 = 발주 히스토리(print_orders_sheet) 상품코드 매칭값. mfs_shipout.센터입고일 은 쓰지 않음.
+  const dueOf=r=>dueMap[String(r[MFS_COL.CODE]??"").trim()]||"";
 
   // 발주서 엑셀 다운로드 — 통합 시트 1개, 업체별로 모아 소계 행 + 마지막 총합계. 이미지·병합 없음.
   const downloadExcel=async()=>{
@@ -4260,7 +4292,7 @@ function MfsShipout(){
       const ExcelJS=await loadExcelJS();
       const wb=new ExcelJS.Workbook();
       const ws=wb.addWorksheet("통합");
-      const header=["상품코드","상품명","옵션","MFS수량","업체","센터입고일"];
+      const header=["상품코드","상품명","옵션","MFS수량","업체","입고예정일"];
       [16,30,20,10,20,18].forEach((w,i)=>{ws.getColumn(i+1).width=w;});
       header.forEach((h,i)=>{ws.getRow(1).getCell(i+1).value=h;});
 
@@ -4274,7 +4306,7 @@ function MfsShipout(){
           row.getCell(3).value=it[MFS_COL.OPT]||"";
           row.getCell(4).value=toNum(it[MFS_COL.MFS_QTY]);
           row.getCell(5).value=it[MFS_COL.SUP]||"";
-          row.getCell(6).value=it[MFS_COL.IN_DATE]||"";
+          row.getCell(6).value=dueOf(it)||"";
           ri++;
         });
         const sub=ws.getRow(ri);           // 업체가 바뀌는 지점 = 소계 행
@@ -4377,7 +4409,7 @@ function MfsShipout(){
               <table style={{width:"100%",borderCollapse:"collapse"}}>
                 <thead><tr>
                   <th style={th}>{MFS_COL.CODE}</th><th style={th}>{MFS_COL.NAME}</th><th style={th}>{MFS_COL.OPT}</th>
-                  <th style={{...th,textAlign:"right"}}>MFS수량</th><th style={th}>{MFS_COL.IN_DATE}</th>
+                  <th style={{...th,textAlign:"right"}}>MFS수량</th><th style={th}>입고예정일</th>
                 </tr></thead>
                 <tbody>
                   {g.items.map(it=>(
@@ -4386,7 +4418,7 @@ function MfsShipout(){
                       <td style={{...td,whiteSpace:"normal"}}>{it[MFS_COL.NAME]||"-"}</td>
                       <td style={td}>{it[MFS_COL.OPT]||"-"}</td>
                       <td style={{...td,textAlign:"right",fontWeight:700}}>{toNum(it[MFS_COL.MFS_QTY]).toLocaleString()}</td>
-                      <td style={td}>{it[MFS_COL.IN_DATE]||"-"}</td>
+                      <td style={td}>{dueOf(it)||"-"}</td>
                     </tr>
                   ))}
                 </tbody>
