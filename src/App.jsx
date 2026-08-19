@@ -4447,7 +4447,7 @@ function MfsShipout(){
 // ─── MFS 출고 및 프린팅 외주 (UI 틀 · 발주 히스토리 표) ───
 // 소메뉴 4개: MFS 출고 / 발주서 작성 / 업체·단가·샘플 관리 / 발주 히스토리.
 function PrintOutsourcingTab(){
-  const [sub,setSub]=useState("order"); // mfsship | order | supplier | history
+  const [sub,setSub]=useState("mfsship"); // mfsship | order | supplier | history
 
   const subTabs=[
     {id:"mfsship",label:"MFS 출고"},
