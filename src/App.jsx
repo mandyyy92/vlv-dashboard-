@@ -4149,7 +4149,7 @@ function MfsShipout(){
   const[nonce,setNonce]=useState(0);        // 업로드 후 재조회 트리거
   const[uploading,setUploading]=useState(false);
   const[latestMap,setLatestMap]=useState({}); // { 상품코드: {차수,업체,의뢰수량,입고예정일} } — 발주 히스토리 매칭
-  const[stockMap,setStockMap]=useState({});   // { 상품코드: 가용재고 } — inventory 최신 스냅샷
+  const[stockMap,setStockMap]=useState({});   // { 상품코드: 정상재고 } — inventory 최신 스냅샷
   const[stockLoading,setStockLoading]=useState(false);
   const[snapDate,setSnapDate]=useState("");   // 사용한 재고 스냅샷일자(표시용)
   const[onlyShort,setOnlyShort]=useState(false); // 부족분 있는 것만 보기
@@ -4215,7 +4215,7 @@ function MfsShipout(){
     return()=>{alive=false;};
   },[nonce]);
 
-  // 가용재고 맵 — inventory 는 대용량 보호테이블이라 "최신 스냅샷일자 + 해당 상품코드"로만 좁혀 조회.
+  // 정상재고 맵 — inventory 는 대용량 보호테이블이라 "최신 스냅샷일자 + 해당 상품코드"로만 좁혀 조회.
   // 상품코드 목록이 길면 URL 길이 때문에 100개씩 끊어 여러 번 호출한 뒤 합친다.
   useEffect(()=>{
     const codes=[...new Set(rows.map(r=>String(r[MFS_COL.CODE]??"").trim()).filter(Boolean))];
@@ -4232,13 +4232,13 @@ function MfsShipout(){
         const map={};
         for(let i=0;i<codes.length;i+=100){
           const list=codes.slice(i,i+100).map(c=>`"${c}"`).join(",");
-          const url=`${SUPABASE_URL}/rest/v1/inventory?select=${encodeURIComponent("상품코드,가용재고")}&${encodeURIComponent("스냅샷일자")}=eq.${encodeURIComponent(snap)}&${encodeURIComponent("상품코드")}=in.(${encodeURIComponent(list)})&limit=1000`;
+          const url=`${SUPABASE_URL}/rest/v1/inventory?select=${encodeURIComponent("상품코드,정상재고")}&${encodeURIComponent("스냅샷일자")}=eq.${encodeURIComponent(snap)}&${encodeURIComponent("상품코드")}=in.(${encodeURIComponent(list)})&limit=1000`;
           const r=await fetch(url,{headers:sbHeaders});
           const data=await r.json();
           if(!r.ok)throw new Error(data?.message?data.message:`HTTP ${r.status}`);
           if(!Array.isArray(data))throw new Error("예상치 못한 응답 형식");
           // 같은 상품코드가 로케이션 등으로 여러 행이면 합산.
-          data.forEach(row=>{const c=String(row["상품코드"]??"").trim();if(c)map[c]=(map[c]||0)+toNum(row["가용재고"]);});
+          data.forEach(row=>{const c=String(row["상품코드"]??"").trim();if(c)map[c]=(map[c]||0)+toNum(row["정상재고"]);});
         }
         console.log("[MFS재고] 스냅샷",snap,"· 매칭 상품코드 수:",Object.keys(map).length,"/",codes.length);
         if(alive){setSnapDate(snap);setStockMap(map);}
@@ -4333,7 +4333,7 @@ function MfsShipout(){
     return[...m.values()];
   },[filtered]);
   const totalQty=useMemo(()=>groups.reduce((s,g)=>s+g.qty,0),[groups]);
-  // 가용재고 / 부족분(외주 의뢰 필요량) — 재고 없거나 매칭 안 되면 0 으로 본다.
+  // 정상재고 / 부족분(외주 의뢰 필요량) — 재고 없거나 매칭 안 되면 0 으로 본다.
   const stockOf=r=>stockMap[String(r[MFS_COL.CODE]??"").trim()]||0;
   const shortOf=r=>Math.max(0,toNum(r[MFS_COL.MFS_QTY])-stockOf(r));
   const totalShort=useMemo(()=>filtered.reduce((s,r)=>s+Math.max(0,toNum(r[MFS_COL.MFS_QTY])-(stockMap[String(r[MFS_COL.CODE]??"").trim()]||0)),0),[filtered,stockMap]);
@@ -4351,7 +4351,7 @@ function MfsShipout(){
       const ExcelJS=await loadExcelJS();
       const wb=new ExcelJS.Workbook();
       const ws=wb.addWorksheet("통합");
-      const header=["상품코드","상품명","옵션","MFS수량","업체","외주차수","의뢰수량","가용재고","부족분","입고예정일"];
+      const header=["상품코드","상품명","옵션","MFS수량","업체","외주차수","의뢰수량","정상재고","부족분","입고예정일"];
       const COLS=header.length;
       [16,30,20,10,20,10,10,10,10,18].forEach((w,i)=>{ws.getColumn(i+1).width=w;});
       header.forEach((h,i)=>{ws.getRow(1).getCell(i+1).value=h;});
@@ -4453,7 +4453,7 @@ function MfsShipout(){
           <div style={statBox}><div style={statLabel}>총 부족분 (외주 의뢰 필요)</div><div style={{...statValue,color:totalShort>0?"#DC2626":"#0F172A"}}>{totalShort.toLocaleString()}<span style={{fontSize:14,fontWeight:600,color:"#64748B",marginLeft:3}}>장</span></div></div>
         </div>
         {stockLoading&&<div style={{fontSize:13,color:"#94A3B8",marginBottom:12}}>재고 불러오는 중…</div>}
-        {!stockLoading&&snapDate&&<div style={{fontSize:13,color:"#94A3B8",marginBottom:12}}>가용재고 기준일: {snapDate}</div>}
+        {!stockLoading&&snapDate&&<div style={{fontSize:13,color:"#94A3B8",marginBottom:12}}>정상재고 기준일: {snapDate}</div>}
 
         {/* 검색 */}
         <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:18}}>
@@ -4481,7 +4481,7 @@ function MfsShipout(){
                 <thead><tr>
                   <th style={th}>{MFS_COL.CODE}</th><th style={th}>{MFS_COL.NAME}</th><th style={th}>{MFS_COL.OPT}</th>
                   <th style={{...th,textAlign:"right"}}>MFS수량</th>
-                  <th style={{...th,textAlign:"right"}}>가용재고</th><th style={{...th,textAlign:"right"}}>부족분</th><th style={th}>입고예정일</th>
+                  <th style={{...th,textAlign:"right"}}>정상재고</th><th style={{...th,textAlign:"right"}}>부족분</th><th style={th}>입고예정일</th>
                 </tr></thead>
                 <tbody>
                   {g.items.map(it=>(
