@@ -4394,19 +4394,6 @@ function MfsShipout(){
     });
   },[rows,search,onlyShort,stockMap,latestMap]);
 
-  // 업체별 그룹핑 — 순서는 원본(id) 순서 유지. 업체 없으면 한 덩어리로 모음.
-  const groups=useMemo(()=>{
-    const m=new Map();
-    filtered.forEach(r=>{
-      const k=String(r[MFS_COL.SUP]??"").trim()||"(업체 미지정)";
-      if(!m.has(k))m.set(k,{supplier:k,items:[],qty:0});
-      const g=m.get(k);
-      g.items.push(r);
-      g.qty+=toNum(r[MFS_COL.MFS_QTY]);
-    });
-    return[...m.values()];
-  },[filtered]);
-  const totalQty=useMemo(()=>groups.reduce((s,g)=>s+g.qty,0),[groups]);
   // 정상재고 / 부족분 — 재고·의뢰 매칭이 없으면 0 으로 본다.
   const stockOf=r=>stockMap[String(r[MFS_COL.CODE]??"").trim()]||0;
   const shortOf=r=>shortCalc(r,stockMap,latestMap);
@@ -4414,6 +4401,7 @@ function MfsShipout(){
 
   // 디자인 매칭 — 상품명에 포함되는 design_name 중 "가장 긴 것"을 그 상품의 디자인으로 본다.
   // (예: "Chaser 1" 이 "Chaser" 보다 우선. 짧은 이름이 부분일치로 먼저 걸리는 걸 막는다.)
+  // 그룹핑이 이 결과를 쓰므로 groups 보다 먼저 선언해야 한다.
   const designNames=useMemo(()=>Object.keys(lowestByDesign).sort((a,b)=>b.length-a.length),[lowestByDesign]);
   const assignOf=r=>{
     const name=String(r[MFS_COL.NAME]??"").toLowerCase();
@@ -4421,6 +4409,27 @@ function MfsShipout(){
     const d=designNames.find(dn=>name.includes(dn.toLowerCase()));
     return d?lowestByDesign[d]:null;
   };
+
+  // 그룹핑 — 업로드 파일의 메모(mfs_shipout.업체)는 "MFS 현재고 0 / 소진 0일..." 같은 안내문이라
+  // 그룹 기준으로 못 쓴다. 대신 부족분 0 = "센터 재고 있음", 부족분>0 = 배치업체(매칭 실패는 "미배치").
+  // 순서: 센터 재고 있음 → 업체(부족분 많은 순) → 미배치.
+  const groups=useMemo(()=>{
+    const m=new Map();
+    filtered.forEach(r=>{
+      const short=shortCalc(r,stockMap,latestMap);
+      const asg=short>0?assignOf(r):null;
+      const key=short<=0?"센터 재고 있음":(asg?.supplier||"미배치");
+      const kind=short<=0?"covered":(asg?"supplier":"unassigned");
+      if(!m.has(key))m.set(key,{supplier:key,kind,items:[],qty:0,short:0});
+      const g=m.get(key);
+      g.items.push(r);
+      g.qty+=toNum(r[MFS_COL.MFS_QTY]);
+      g.short+=short;
+    });
+    const rank=g=>g.kind==="covered"?0:(g.kind==="supplier"?1:2);
+    return[...m.values()].sort((a,b)=>rank(a)-rank(b)||b.short-a.short||a.supplier.localeCompare(b.supplier));
+  },[filtered,stockMap,latestMap,designNames,lowestByDesign]);
+  const totalQty=useMemo(()=>groups.reduce((s,g)=>s+g.qty,0),[groups]);
   // 업체별 부족분 소계 — 디자인 매칭이 안 된 건은 "미배치"로 모아 합계가 총 부족분과 맞게 둔다.
   const shortBySupplier=useMemo(()=>{
     const m=new Map();
@@ -4555,7 +4564,7 @@ function MfsShipout(){
       {!loading&&!error&&rows.length>0&&(<>
         {/* 요약 */}
         <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:16}}>
-          <div style={statBox}><div style={statLabel}>업체</div><div style={statValue}>{groups.length.toLocaleString()}<span style={{fontSize:14,fontWeight:600,color:"#64748B",marginLeft:3}}>곳</span></div></div>
+          <div style={statBox}><div style={statLabel}>배치업체</div><div style={statValue}>{groups.filter(g=>g.kind==="supplier").length.toLocaleString()}<span style={{fontSize:14,fontWeight:600,color:"#64748B",marginLeft:3}}>곳</span></div></div>
           <div style={statBox}><div style={statLabel}>품목</div><div style={statValue}>{filtered.length.toLocaleString()}<span style={{fontSize:14,fontWeight:600,color:"#64748B",marginLeft:3}}>건</span></div></div>
           <div style={statBox}><div style={statLabel}>MFS수량 합계</div><div style={statValue}>{totalQty.toLocaleString()}<span style={{fontSize:14,fontWeight:600,color:"#64748B",marginLeft:3}}>장</span></div></div>
           <div style={statBox}><div style={statLabel}>총 부족분 (외주 의뢰 필요)</div><div style={{...statValue,color:totalShort>0?"#DC2626":"#0F172A"}}>{totalShort.toLocaleString()}<span style={{fontSize:14,fontWeight:600,color:"#64748B",marginLeft:3}}>장</span></div></div>
@@ -4591,8 +4600,12 @@ function MfsShipout(){
         {groups.map(g=>(
           <div key={g.supplier} style={{border:"1px solid #E2E8F0",borderRadius:12,padding:16,marginBottom:14}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:12,flexWrap:"wrap"}}>
-              <div style={{fontSize:16,fontWeight:700,color:"#1E293B"}}>🏭 {g.supplier}</div>
-              <div style={{fontSize:13,color:"#64748B"}}>등록 {g.items.length.toLocaleString()}건 · MFS수량 <strong style={{color:"#0F172A"}}>{g.qty.toLocaleString()}</strong>장</div>
+              <div style={{fontSize:16,fontWeight:700,color:"#1E293B"}}>{g.kind==="covered"?"📦":(g.kind==="supplier"?"🏭":"❓")} {g.supplier}</div>
+              <div style={{fontSize:13,color:"#64748B"}}>
+                등록 {g.items.length.toLocaleString()}건 · {g.kind==="covered"
+                  ?<>MFS수량 <strong style={{color:"#0F172A"}}>{g.qty.toLocaleString()}</strong>장</>
+                  :<>부족분 <strong style={{color:"#DC2626"}}>{g.short.toLocaleString()}</strong>장</>}
+              </div>
             </div>
             <div style={{overflowX:"auto"}}>
               <table style={{width:"100%",borderCollapse:"collapse"}}>
