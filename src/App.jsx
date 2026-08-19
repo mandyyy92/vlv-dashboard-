@@ -4167,6 +4167,8 @@ function MfsShipout(){
   const[onlyShort,setOnlyShort]=useState(false); // 부족분 있는 것만 보기
   const[clearing,setClearing]=useState(false);   // 리스트 비우는 중
   const[lowestByDesign,setLowestByDesign]=useState({}); // { design_name: {supplier_id,supplier,unit_cost} } — 디자인별 최저단가 업체
+  const[centerInDate,setCenterInDate]=useState("");  // 발주서에 찍을 센터 입고일(미입력 시 빈칸)
+  const[mfsShipDate,setMfsShipDate]=useState("");    // 발주서에 찍을 MFS 발송일(미입력 시 빈칸)
   const fileRef=useRef(null);
   const reload=()=>setNonce(n=>n+1);
 
@@ -4437,69 +4439,73 @@ function MfsShipout(){
   const roundOf=r=>{const v=latestOf(r)?.round;return v===null||v===undefined||v===""?"":String(v);}; // 외주차수
   const reqOf=r=>{const v=latestOf(r)?.reqQty;return v===null||v===undefined||v===""?null:toNum(v);}; // 의뢰수량
 
-  // 발주서 엑셀 다운로드 — 통합 시트 1개, 업체별로 모아 소계 행 + 마지막 총합계. 이미지·병합 없음.
+  // 발주서 엑셀 다운로드 — 시트 구성:
+  //  1) "센터재고 커버": 부족분 0 (센터재고+기존의뢰로 충당 → 외주 불필요)
+  //  2) 배치업체별 시트: 부족분>0 을 최저단가 업체로 나눔. ★업체에 그대로 전달하는 문서라 단가는 넣지 않는다.
+  //  3) "미배치": 부족분>0 인데 디자인 매칭이 안 된 건 (놓치지 않게 따로)
+  // 이미지·병합 없이 표만. 스타일 팔레트는 기존 발주서 엑셀과 동일.
   const downloadExcel=async()=>{
     if(filtered.length===0){alert("다운로드할 데이터가 없습니다.");return;}
     try{
       const ExcelJS=await loadExcelJS();
       const wb=new ExcelJS.Workbook();
-      const ws=wb.addWorksheet("통합");
-      const header=["상품코드","상품명","옵션","MFS수량","업체","외주차수","의뢰수량","정상재고","부족분","입고예정일"];
-      const COLS=header.length;
-      [16,30,20,10,20,10,10,10,10,18].forEach((w,i)=>{ws.getColumn(i+1).width=w;});
-      header.forEach((h,i)=>{ws.getRow(1).getCell(i+1).value=h;});
-
-      let ri=2;
-      const subRows=[]; // 업체 소계 행 번호(스타일용)
-      groups.forEach(g=>{
-        g.items.forEach(it=>{
-          const row=ws.getRow(ri);
-          row.getCell(1).value=it[MFS_COL.CODE]||"";
-          row.getCell(2).value=it[MFS_COL.NAME]||"";
-          row.getCell(3).value=it[MFS_COL.OPT]||"";
-          row.getCell(4).value=toNum(it[MFS_COL.MFS_QTY]);
-          row.getCell(5).value=it[MFS_COL.SUP]||"";
-          row.getCell(6).value=roundOf(it)||"";
-          const rq=reqOf(it); row.getCell(7).value=rq===null?"":rq;
-          row.getCell(8).value=stockOf(it);
-          row.getCell(9).value=shortOf(it);
-          row.getCell(10).value=dueOf(it)||"";
-          ri++;
-        });
-        const sub=ws.getRow(ri);           // 업체가 바뀌는 지점 = 소계 행
-        sub.getCell(1).value=`${g.supplier} 소계`;
-        sub.getCell(4).value=g.qty;
-        sub.getCell(5).value=`${g.items.length}건`;
-        subRows.push(ri);
-        ri++;
-      });
-      const totalRow=ri;
-      ws.getRow(totalRow).getCell(1).value="총 합계";
-      ws.getRow(totalRow).getCell(4).value=totalQty;
-      ws.getRow(totalRow).getCell(5).value=`${filtered.length}건`;
-
-      // 테두리·정렬(기존 발주서 엑셀과 동일 팔레트)
       const thin={style:"thin",color:{argb:"FFCBD5E1"}};
-      for(let r=1;r<=totalRow;r++){
-        ws.getRow(r).height=20;
-        for(let c=1;c<=COLS;c++){
-          const cell=ws.getRow(r).getCell(c);
-          cell.border={top:thin,left:thin,bottom:thin,right:thin};
-          cell.alignment={vertical:"middle",horizontal:c===2?"left":"center",wrapText:false};
+      // 시트 1개 작성. sumCol 을 주면 그 열의 합계행을 맨 아래 붙인다.
+      const addSheet=(name,header,widths,data,sumCol)=>{
+        const safe=String(name).replace(/[[\]:*?\/\\]/g,"_").slice(0,31)||"시트"; // 엑셀 시트명 제한
+        const ws=wb.addWorksheet(safe);
+        widths.forEach((w,i)=>{ws.getColumn(i+1).width=w;});
+        header.forEach((h,i)=>{ws.getRow(1).getCell(i+1).value=h;});
+        data.forEach((vals,ri)=>{const row=ws.getRow(ri+2);vals.forEach((v,ci)=>{row.getCell(ci+1).value=v;});});
+        const lastData=data.length+1;
+        let sumRow=0;
+        if(sumCol){
+          sumRow=lastData+1;
+          ws.getRow(sumRow).getCell(1).value="합 계";
+          ws.getRow(sumRow).getCell(sumCol).value=data.reduce((s,v)=>s+(Number(v[sumCol-1])||0),0);
         }
-      }
-      for(let c=1;c<=COLS;c++){
-        const cell=ws.getRow(1).getCell(c);
-        cell.font={bold:true,color:{argb:"FF1E293B"}};
-        cell.fill={type:"pattern",pattern:"solid",fgColor:{argb:"FFF1F5F9"}};
-      }
-      [...subRows,totalRow].forEach(r=>{
-        for(let c=1;c<=COLS;c++){
-          const cell=ws.getRow(r).getCell(c);
+        const end=sumRow||lastData;
+        for(let r=1;r<=end;r++){
+          ws.getRow(r).height=20;
+          for(let c=1;c<=header.length;c++){
+            const cell=ws.getRow(r).getCell(c);
+            cell.border={top:thin,left:thin,bottom:thin,right:thin};
+            cell.alignment={vertical:"middle",horizontal:c===2?"left":"center",wrapText:false};
+          }
+        }
+        for(let c=1;c<=header.length;c++){
+          const cell=ws.getRow(1).getCell(c);
+          cell.font={bold:true,color:{argb:"FF1E293B"}};
+          cell.fill={type:"pattern",pattern:"solid",fgColor:{argb:"FFF1F5F9"}};
+        }
+        if(sumRow)for(let c=1;c<=header.length;c++){
+          const cell=ws.getRow(sumRow).getCell(c);
           cell.font={bold:true,color:{argb:"FF1E293B"}};
           cell.fill={type:"pattern",pattern:"solid",fgColor:{argb:"FFF8FAFC"}};
         }
+      };
+
+      // 1) 센터재고 커버 — 부족분 0
+      const covered=filtered.filter(r=>shortOf(r)<=0);
+      addSheet("센터재고 커버",
+        ["상품코드","상품명","옵션","MFS수량","정상재고","최근의뢰"],[16,30,20,10,10,10],
+        covered.map(r=>[r[MFS_COL.CODE]||"",r[MFS_COL.NAME]||"",r[MFS_COL.OPT]||"",toNum(r[MFS_COL.MFS_QTY]),stockOf(r),reqOf(r)===null?"":reqOf(r)]));
+
+      // 2)(3) 부족분>0 을 배치업체별로. 매칭 실패분은 "미배치" 시트에 모은다.
+      const bySup=new Map();
+      filtered.forEach(r=>{
+        const q=shortOf(r);
+        if(q<=0)return;
+        const k=assignOf(r)?.supplier||"미배치";
+        if(!bySup.has(k))bySup.set(k,[]);
+        bySup.get(k).push([r[MFS_COL.CODE]||"",r[MFS_COL.NAME]||"",r[MFS_COL.OPT]||"",q,centerInDate,mfsShipDate]);
       });
+      const supKeys=[...bySup.keys()].filter(k=>k!=="미배치");
+      if(bySup.has("미배치"))supKeys.push("미배치"); // 미배치는 항상 마지막 시트
+      supKeys.forEach(k=>addSheet(k,
+        ["상품코드","상품명","옵션","의뢰수량","센터입고일","MFS발송일"],[16,30,20,10,14,14],
+        bySup.get(k),4));
+      console.log("[MFS다운로드] 센터재고 커버",covered.length,"건 · 업체시트",supKeys.join(", ")||"(없음)");
 
       // 파일명 날짜는 로컬(KST) 기준 — toISOString(UTC)은 자정 전후로 하루가 밀림.
       const d=new Date();
@@ -4507,7 +4513,7 @@ function MfsShipout(){
       const buf=await wb.xlsx.writeBuffer();
       const blob=new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
       const url=URL.createObjectURL(blob);
-      const a=document.createElement("a");a.href=url;a.download=`MFS출고_${ymd}.xlsx`;document.body.appendChild(a);a.click();a.remove();
+      const a=document.createElement("a");a.href=url;a.download=`MFS발주서_${ymd}.xlsx`;document.body.appendChild(a);a.click();a.remove();
       setTimeout(()=>URL.revokeObjectURL(url),1000);
     }catch(e){
       console.error("[MFS다운로드] 실패:",e);
@@ -4518,6 +4524,8 @@ function MfsShipout(){
   const th={padding:"11px 12px",textAlign:"left",fontSize:12,fontWeight:700,color:"#64748B",whiteSpace:"nowrap",borderBottom:"2px solid #E2E8F0",letterSpacing:0.3};
   const td={padding:"11px 12px",fontSize:14,color:"#1E293B",borderBottom:"1px solid #F1F5F9",verticalAlign:"middle",whiteSpace:"nowrap"};
   const statBox={flex:"1 1 140px",background:"#F8FAFC",border:"1px solid #E2E8F0",borderRadius:10,padding:"14px 16px"};
+  const dateLabel={display:"flex",alignItems:"center",gap:6,fontSize:13,fontWeight:600,color:"#64748B",whiteSpace:"nowrap"};
+  const dateInput={padding:"6px 10px",borderRadius:6,border:"1px solid #CBD5E1",fontSize:13,color:"#1E293B",outline:"none"};
   const statLabel={fontSize:12,fontWeight:700,color:"#64748B",marginBottom:6};
   const statValue={fontSize:22,fontWeight:800,color:"#0F172A",letterSpacing:-0.5};
 
@@ -4525,11 +4533,17 @@ function MfsShipout(){
     <SectionCard title="🚚 MFS 출고" subtitle="발주서 엑셀 업로드(전체 교체) · 업체별 통합표" actions={
       <>
         <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];e.target.value="";handleUpload(f);}}/>
-        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",justifyContent:"flex-end"}}>
           <SmallBtn onClick={handleClear}>{clearing?"⏳ 삭제 중...":"🔄 새로고침"}</SmallBtn>
           {uploading
             ?<span style={{padding:"6px 14px",borderRadius:6,border:"1px solid #CBD5E1",background:"#F8FAFC",color:"#94A3B8",fontSize:14,fontWeight:600,cursor:"not-allowed"}}>⏳ 업로드 중...</span>
             :<SmallBtn primary onClick={()=>fileRef.current?.click()}>📤 발주서 업로드</SmallBtn>}
+          <label style={dateLabel}>센터 입고일
+            <input type="date" value={centerInDate} onChange={e=>setCenterInDate(e.target.value)} style={dateInput}/>
+          </label>
+          <label style={dateLabel}>MFS 발송일
+            <input type="date" value={mfsShipDate} onChange={e=>setMfsShipDate(e.target.value)} style={dateInput}/>
+          </label>
           <SmallBtn onClick={downloadExcel}>📥 발주서 다운로드</SmallBtn>
         </div>
       </>
