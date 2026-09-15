@@ -96,10 +96,14 @@ const RE_MOBILE_DOT = /^(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})\.?\s+((?:오전|오�
 const RE_MOBILE_EN = /^([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})\s+at\s+(\d{1,2}:\d{2}\s*(?:AM|PM))\s*,\s*([^:]+?)\s*:\s*(.*)$/i;
 
 export function parseKakaoChat(text, { vendorId, fallbackDate = new Date() } = {}) {
+  if (vendorId === undefined || vendorId === null) {
+    throw new Error('parseKakaoChat: vendorId는 필수입니다.');
+  }
+
   const lines = String(text).replace(/\r\n/g, '\n').split('\n');
 
   const messages = [];
-  const stats = { total: 0, text: 0, attachment: 0, system: 0, skipped: 0 };
+  const stats = { total: 0, text: 0, attachment: 0, system: 0, skipped: 0, saved: 0 };
   let currentDate = null;
   let format = 'unknown';
   let last = null;
@@ -127,11 +131,8 @@ export function parseKakaoChat(text, { vendorId, fallbackDate = new Date() } = {
       sender: sender.trim(),
       body_raw: body.trim(),
       has_attachment: kind === 'attachment',
-      msg_hash: cyrb53(`${vendorId}|${sentAt.toISOString()}|${sender.trim()}|${body.trim()}`),
+      lang: null,
     };
-
-    if (kind === 'attachment') stats.attachment++;
-    else stats.text++;
 
     messages.push(msg);
     last = msg;
@@ -198,7 +199,6 @@ export function parseKakaoChat(text, { vendorId, fallbackDate = new Date() } = {
 
     if (last) {
       last.body_raw += '\n' + trimmed;
-      last.msg_hash = cyrb53(`${vendorId}|${last.sent_at}|${last.sender}|${last.body_raw}`);
     } else {
       stats.skipped++;
     }
@@ -224,14 +224,23 @@ export function parseKakaoChat(text, { vendorId, fallbackDate = new Date() } = {
     }
   }
 
-  const seen = new Set();
-  const unique = messages.filter((m) => {
-    if (seen.has(m.msg_hash)) return false;
-    seen.add(m.msg_hash);
-    return true;
-  });
+  const sorted = messages.sort(
+    (a, b) => a.sent_at.localeCompare(b.sent_at) || a.sender.localeCompare(b.sender)
+  );
 
-  const sorted = unique.sort((a, b) => a.sent_at.localeCompare(b.sent_at));
+  // (발신시각·발신자·본문)이 완전히 같은 메시지에는 일련번호를 붙여 해시를 분리한다.
+  // 같은 export 파일을 다시 올리면 동일한 해시가 나오므로 중복 방지는 그대로 동작한다.
+  const seqCount = new Map();
+  for (const m of sorted) {
+    const key = `${vendorId}|${m.sent_at}|${m.sender}|${m.body_raw}`;
+    const seq = seqCount.get(key) ?? 0;
+    seqCount.set(key, seq + 1);
+    m.msg_hash = cyrb53(`${key}|${seq}`);
+  }
+
+  stats.text = sorted.filter((m) => !m.has_attachment).length;
+  stats.attachment = sorted.filter((m) => m.has_attachment).length;
+  stats.saved = sorted.length;
 
   return {
     messages: sorted,
