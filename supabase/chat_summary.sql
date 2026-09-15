@@ -65,6 +65,7 @@ create table if not exists public.chat_messages (
   body_raw    text not null,
   body_ko     text,                                 -- ko 대화는 null (번역 불필요)
   lang        text check (lang in ('ko','en','zh')),
+  has_attachment boolean not null default false,    -- 사진/동영상/파일 등 첨부 안내 메시지 ('첨부' 탭용)
   msg_hash    text not null unique,                 -- 중복 업로드 방지 키
   created_at  timestamptz not null default now()
 );
