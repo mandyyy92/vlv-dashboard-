@@ -202,21 +202,31 @@ const S = {
 };
 
 
-// 업체 등록 폼 선택지. category 는 chat_vendors 의 check 제약과 같아야 한다
+// 업체 구분(category) 기본 선택지. chat_vendors 의 check 제약과 같아야 한다
 // ('기타' 는 supabase/chat_summary.sql 의 ALTER 문을 실행해야 허용된다).
 const VENDOR_CATEGORIES = ['생산업체', '원단', '나염', '부자재', '기타'];
+// 구분 정렬 규칙: 아래 4개가 먼저, 그 외 직접 등록된 구분은 가나다순, '기타' 는 항상 마지막.
+const CATEGORY_HEAD = ['생산업체', '원단', '나염', '부자재'];
+const CATEGORY_LAST = '기타';
 // 안전장치: DB 에 예전 값('봉제')이 남아 있어도 '생산업체' 그룹으로 보이게 한다.
 const CATEGORY_ALIASES = { 봉제: '생산업체' };
 const normCategory = (c) => CATEGORY_ALIASES[c] || c;
+// select 의 '직접 입력' 항목 값. 표식일 뿐 이 값이 category 로 저장되지는 않는다.
+const CUSTOM_CAT = '__custom__';
+// 구분 목록을 중복 제거하고 위 규칙대로 정렬한다.
+const sortCategories = (list) => {
+  const uniq = [...new Set(list.filter(Boolean))];
+  const head = CATEGORY_HEAD.filter((c) => uniq.includes(c));
+  const rest = uniq
+    .filter((c) => !head.includes(c) && c !== CATEGORY_LAST)
+    .sort((a, b) => a.localeCompare(b, 'ko'));
+  return [...head, ...rest, ...(uniq.includes(CATEGORY_LAST) ? [CATEGORY_LAST] : [])];
+};
 const VENDOR_LANGS = [
   { v: 'ko', label: '한국어(ko)' },
   { v: 'en', label: '영어(en)' },
   { v: 'zh', label: '중국어(zh)' },
 ];
-// 기존 데이터가 목록에 없는 구분을 쓰고 있으면 그 값도 선택지로 살려둔다(조용한 변경 방지)
-const catOptions = (cur) =>
-  cur && !VENDOR_CATEGORIES.includes(cur) ? [...VENDOR_CATEGORIES, cur] : VENDOR_CATEGORIES;
-
 const fmtKst = (iso) => {
   const d = new Date(new Date(iso).getTime() + 9 * 3600 * 1000);
   return d.toISOString().slice(0, 16).replace('T', ' ');
@@ -523,27 +533,33 @@ export default function VendorChatSummary() {
   const [menuId, setMenuId] = useState(null); // ⋯ 메뉴가 열린 업체 id
   const [hoverId, setHoverId] = useState(null);
   const nameRef = useRef(null);
+  const catRef = useRef(null);   // '+ 직접 입력' 을 골랐을 때 나타나는 구분 입력칸
 
   const vendor = useMemo(
     () => vendors.find((v) => v.id === vendorId) || null,
     [vendors, vendorId]
   );
 
-  // 구분별 그룹. 그룹 순서는 VENDOR_CATEGORIES 고정, 그룹 안은 업체명 가나다순.
-  // VENDOR_CATEGORIES 에 없는 구분은 '기타' 로 모은다. 빈 그룹은 버린다.
+  // 등록 폼 select 선택지. 기본 구분 + DB 에 실제로 쓰이는 구분을 합쳐 중복 제거한다.
+  // 한 번 직접 입력한 구분은 다음 등록 때 바로 고를 수 있다.
+  const catList = useMemo(
+    () => sortCategories([...VENDOR_CATEGORIES, ...vendors.map((v) => normCategory(v.category))]),
+    [vendors]
+  );
+
+  // 구분별 그룹. 그룹 순서는 sortCategories 규칙, 그룹 안은 업체명 가나다순.
+  // DB 에 없는 구분의 그룹은 렌더하지 않는다.
   const vendorGroups = useMemo(() => {
-    const buckets = new Map(VENDOR_CATEGORIES.map((c) => [c, []]));
+    const buckets = new Map();
     for (const v of vendors) {
-      const cat = normCategory(v.category);
-      const c = buckets.has(cat) ? cat : '기타';
+      const c = normCategory(v.category) || CATEGORY_LAST;
+      if (!buckets.has(c)) buckets.set(c, []);
       buckets.get(c).push(v);
     }
-    return VENDOR_CATEGORIES
-      .map((c) => ({
-        category: c,
-        items: buckets.get(c).slice().sort((a, b) => String(a.name).localeCompare(String(b.name), 'ko')),
-      }))
-      .filter((g) => g.items.length);
+    return sortCategories([...buckets.keys()]).map((c) => ({
+      category: c,
+      items: buckets.get(c).slice().sort((a, b) => String(a.name).localeCompare(String(b.name), 'ko')),
+    }));
   }, [vendors]);
 
   /* ---------------- 업체 목록 ---------------- */
@@ -579,7 +595,7 @@ export default function VendorChatSummary() {
   const openNew = () => {
     setVErr('');
     setMenuId(null);
-    setVForm({ mode: 'new', id: null, name: '', category: '생산업체', lang: 'ko', manager: '' });
+    setVForm({ mode: 'new', id: null, name: '', category: '생산업체', customCat: '', lang: 'ko', manager: '' });
   };
 
   const openEdit = (v) => {
@@ -590,6 +606,7 @@ export default function VendorChatSummary() {
       id: v.id,
       name: v.name || '',
       category: normCategory(v.category) || '생산업체',
+      customCat: '',
       lang: v.lang || 'ko',
       manager: v.manager || '',
     });
@@ -601,12 +618,15 @@ export default function VendorChatSummary() {
     if (!vForm || vSaving) return;
     const name = (vForm.name || '').trim();
     if (!name) { setVErr('업체명을 입력하세요.'); nameRef.current?.focus(); return; }
+    // '+ 직접 입력' 을 골랐으면 아래 입력칸 값이 실제 category 가 된다.
+    const category = vForm.category === CUSTOM_CAT ? (vForm.customCat || '').trim() : vForm.category;
+    if (!category) { setVErr('구분을 입력하세요.'); catRef.current?.focus(); return; }
 
     setVSaving(true);
     setVErr('');
     const payload = {
       name,
-      category: vForm.category,
+      category,
       lang: vForm.lang,
       manager: (vForm.manager || '').trim() || null,
     };
@@ -633,7 +653,7 @@ export default function VendorChatSummary() {
         setVErr('이미 등록된 업체명입니다');
       } else if (/category_check|check constraint/i.test(msg)) {
         // chat_vendors 의 check 제약에 없는 구분(예: '기타')
-        setVErr(`'${vForm.category}' 구분은 DB 제약에 없습니다. supabase/chat_summary.sql 의 ALTER 문을 실행하세요.`);
+        setVErr(`'${category}' 구분은 DB 제약에 없습니다. supabase/chat_summary.sql 의 ALTER 문을 실행하세요.`);
       } else {
         setVErr('저장 실패');
         setLog(`업체 저장 실패: ${e.message}`);
@@ -676,8 +696,20 @@ export default function VendorChatSummary() {
         onChange={(e) => setVForm({ ...vForm, category: e.target.value })}
         style={S.vInput}
       >
-        {catOptions(vForm.category).map((c) => <option key={c} value={c}>{c}</option>)}
+        {catList.map((c) => <option key={c} value={c}>{c}</option>)}
+        <option value={CUSTOM_CAT}>+ 직접 입력</option>
       </select>
+      {vForm.category === CUSTOM_CAT && (
+        <input
+          ref={catRef}
+          autoFocus
+          value={vForm.customCat || ''}
+          onChange={(e) => setVForm({ ...vForm, customCat: e.target.value })}
+          onKeyDown={(e) => { if (e.key === 'Enter') saveVendor(); if (e.key === 'Escape') closeVForm(); }}
+          placeholder="구분 직접 입력 *"
+          style={S.vInput}
+        />
+      )}
       <select
         value={vForm.lang}
         onChange={(e) => setVForm({ ...vForm, lang: e.target.value })}
