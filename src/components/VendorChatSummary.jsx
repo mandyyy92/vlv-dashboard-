@@ -25,9 +25,10 @@ const S = {
     background: '#fff', height: '100%', overflow: 'hidden',
     display: 'flex', flexDirection: 'column',
   },
-  sideHead: {
-    padding: '12px 14px', fontSize: 12, fontWeight: 700, color: '#6b7280',
-    borderBottom: '1px solid #f3f4f6', flexShrink: 0,
+  // 구분(category) 그룹 헤더. 좌우 패딩은 업체 항목(11px 14px)과 같게 맞춘다.
+  sideGroup: {
+    padding: '0 14px 4px', marginTop: 12,
+    fontSize: 11, fontWeight: 700, color: '#9ca3af', letterSpacing: 0.3,
   },
   // 목록만 스크롤한다. minHeight:0 이 없으면 flex 아이템이 줄지 않아 패널을 넘친다.
   sideList: { flex: 1, minHeight: 0, overflowY: 'auto' },
@@ -454,6 +455,22 @@ export default function VendorChatSummary() {
     () => vendors.find((v) => v.id === vendorId) || null,
     [vendors, vendorId]
   );
+
+  // 구분별 그룹. 그룹 순서는 VENDOR_CATEGORIES 고정, 그룹 안은 업체명 가나다순.
+  // VENDOR_CATEGORIES 에 없는 구분은 '기타' 로 모은다. 빈 그룹은 버린다.
+  const vendorGroups = useMemo(() => {
+    const buckets = new Map(VENDOR_CATEGORIES.map((c) => [c, []]));
+    for (const v of vendors) {
+      const c = buckets.has(v.category) ? v.category : '기타';
+      buckets.get(c).push(v);
+    }
+    return VENDOR_CATEGORIES
+      .map((c) => ({
+        category: c,
+        items: buckets.get(c).slice().sort((a, b) => String(a.name).localeCompare(String(b.name), 'ko')),
+      }))
+      .filter((g) => g.items.length);
+  }, [vendors]);
 
   /* ---------------- 업체 목록 ---------------- */
   // selectId 를 주면 그 업체를 선택한다(신규 등록 직후). 없으면 기존 선택을 유지.
@@ -886,44 +903,48 @@ export default function VendorChatSummary() {
     <div style={S.wrap}>
       {/* 좌측 업체 리스트 */}
       <div style={S.side}>
-        <div style={S.sideHead}>생산 업체</div>
         <div style={S.sideList}>
-          {vendors.map((v) => (
-            vForm?.mode === 'edit' && vForm.id === v.id ? (
-              <div key={v.id}>{renderVForm()}</div>
-            ) : (
-              <div
-                key={v.id}
-                style={S.vendorRow}
-                onMouseEnter={() => setHoverId(v.id)}
-                onMouseLeave={() => setHoverId(null)}
-              >
-                <button
-                  style={S.vendorBtn(v.id === vendorId)}
-                  onClick={() => { setVendorId(v.id); setParsed(null); setRaw(''); }}
-                >
-                  {v.name}
-                  <span style={S.tag}>
-                    {v.category}{v.lang !== 'ko' ? ` · ${v.lang.toUpperCase()}` : ''}
-                  </span>
-                </button>
-                {(hoverId === v.id || menuId === v.id) && (
-                  <button
-                    style={S.dots}
-                    title="업체 관리"
-                    onClick={(e) => { e.stopPropagation(); setMenuId(menuId === v.id ? null : v.id); }}
+          {vendorGroups.map((g) => (
+            <div key={g.category}>
+              <div style={S.sideGroup}>{g.category}</div>
+              {g.items.map((v) => (
+                vForm?.mode === 'edit' && vForm.id === v.id ? (
+                  <div key={v.id}>{renderVForm()}</div>
+                ) : (
+                  <div
+                    key={v.id}
+                    style={S.vendorRow}
+                    onMouseEnter={() => setHoverId(v.id)}
+                    onMouseLeave={() => setHoverId(null)}
                   >
-                    ⋯
-                  </button>
-                )}
-                {menuId === v.id && (
-                  <div style={S.menuRow} onClick={(e) => e.stopPropagation()}>
-                    <button style={S.menuItem} onClick={() => openEdit(v)}>수정</button>
-                    <button style={S.menuItem} onClick={() => deactivateVendor(v)}>비활성화</button>
+                    <button
+                      style={S.vendorBtn(v.id === vendorId)}
+                      onClick={() => { setVendorId(v.id); setParsed(null); setRaw(''); }}
+                    >
+                      {v.name}
+                      {v.lang && v.lang !== 'ko' && (
+                        <span style={S.tag}>· {String(v.lang).toUpperCase()}</span>
+                      )}
+                    </button>
+                    {(hoverId === v.id || menuId === v.id) && (
+                      <button
+                        style={S.dots}
+                        title="업체 관리"
+                        onClick={(e) => { e.stopPropagation(); setMenuId(menuId === v.id ? null : v.id); }}
+                      >
+                        ⋯
+                      </button>
+                    )}
+                    {menuId === v.id && (
+                      <div style={S.menuRow} onClick={(e) => e.stopPropagation()}>
+                        <button style={S.menuItem} onClick={() => openEdit(v)}>수정</button>
+                        <button style={S.menuItem} onClick={() => deactivateVendor(v)}>비활성화</button>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            )
+                )
+              ))}
+            </div>
           ))}
           {!vendors.length && <div style={{ ...S.empty, padding: 20 }}>업체 없음</div>}
         </div>
