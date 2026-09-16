@@ -97,16 +97,13 @@ const S = {
   },
   riskTitle: { fontSize: 12, fontWeight: 700, color: '#c2410c', marginBottom: 5 },
   fail: {
+    display: 'flex', alignItems: 'center', gap: 8,
     fontSize: 12, padding: '5px 9px', borderRadius: 6, marginBottom: 6,
     background: '#fef2f2', color: '#b91c1c',
   },
-  note: {
-    fontSize: 12, padding: '5px 9px', borderRadius: 6, marginBottom: 6,
-    background: '#f3f4f6', color: '#6b7280',
-  },
-  noteOn: {
-    fontSize: 12, padding: '5px 9px', borderRadius: 6, marginBottom: 6,
-    background: '#eef2ff', color: '#3730a3',
+  failX: {
+    marginLeft: 'auto', padding: '0 2px', border: 'none', background: 'transparent',
+    color: '#b91c1c', fontSize: 13, lineHeight: 1, cursor: 'pointer', flexShrink: 0,
   },
 
   /* --- 업체 등록/수정 --- */
@@ -228,6 +225,7 @@ function monthKeyOf(row) {
 }
 
 const monthLabel = (key) => `${key.slice(0, 4)}년 ${Number(key.slice(5, 7))}월`;
+const progressLine = (i, total, label) => `${i}/${total} 처리 중 · ${label}`;
 
 function cardTitle(row) {
   const f = String(row?.period_from || '').slice(0, 10);
@@ -415,7 +413,10 @@ export default function VendorChatSummary() {
   const [summaries, setSummaries] = useState([]);
   const [loadingSum, setLoadingSum] = useState(false);
   const [gen, setGen] = useState(null);   // 진행 중일 때만 { i, total, label }
-  const [logs, setLogs] = useState([]);   // 진행 로그 [{ key, kind, text }]
+  const [hold, setHold] = useState('');     // 실행이 끝난 뒤 3초 더 남는 진행 줄
+  const [doneMsg, setDoneMsg] = useState(''); // "완료 — …" 결과 줄 (5초 후 사라짐)
+  const [fails, setFails] = useState([]);   // 실패한 월만 남는 경고 [{ key, text }]
+  const tRef = useRef([]);                  // 위 두 줄을 지우는 타이머
   const [openKeys, setOpenKeys] = useState({}); // 월키 → 사용자가 직접 펼친/접은 값
   const [sumErr, setSumErr] = useState('');
 
@@ -738,6 +739,9 @@ export default function VendorChatSummary() {
     if (data) setSummaries(data);
   };
 
+  // 진행/결과 줄 타이머는 언마운트 때 정리한다
+  useEffect(() => () => tRef.current.forEach(clearTimeout), []);
+
   useEffect(() => {
     if (tab === 'summary' && !gen) { setOpenKeys({}); loadSummaries(); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -751,9 +755,14 @@ export default function VendorChatSummary() {
     if (!chunks.length) { setSumErr('기간을 확인하세요.'); return; }
 
     setSumErr('');
-    setLogs([]);
-    const out = [];
-    const push = (key, kind, text) => { out.push({ key, kind, text }); setLogs([...out]); };
+    setFails([]);
+    tRef.current.forEach(clearTimeout);
+    tRef.current = [];
+    setHold('');
+    setDoneMsg('');
+    let updated = 0;  // 실제로 다시 요약된 월 수
+    let okCount = 0;  // 응답이 정상이었던 월 수 (변경 없음 포함)
+    const bad = [];
 
     for (let i = 0; i < chunks.length; i++) {
       const c = chunks[i];
@@ -799,18 +808,19 @@ export default function VendorChatSummary() {
           setSummaries((prev) => [...prev.filter((s) => monthKeyOf(s) !== c.key), row].sort(byPeriod));
         }
 
-        push(
-          c.key,
-          skipped ? 'same' : 'updated',
-          skipped ? `${c.label} — 변경 없음` : `${c.label} — 요약 갱신 (${j.message_count ?? 0}건)`
-        );
+        // 성공한 월도, 변경 없는(skipped) 월도 개별 로그는 남기지 않는다
+        okCount += 1;
+        if (!skipped) updated += 1;
       } catch (e) {
-        // 그 달만 실패로 표시하고 다음 달로 계속
-        push(c.key, 'fail', `${c.label} 요약 실패 — ${e.message}`);
+        // 실패한 월만 경고로 남긴다 (자동으로 사라지지 않고 X 로 닫는다)
+        bad.push({ key: c.key, text: `${c.label} 실패 — ${e.message}` });
+        setFails([...bad]);
       }
     }
 
+    const lastLine = progressLine(chunks.length, chunks.length, chunks[chunks.length - 1].label);
     setGen(null);
+    setHold(lastLine);
 
     // DB 를 정본으로 다시 읽되, 아직 DB 에 없는 월은 화면에 남겨둔다
     const fresh = await fetchSummaries();
@@ -821,6 +831,18 @@ export default function VendorChatSummary() {
         ...prev.filter((s) => String(s.id).startsWith('local-') && !keys.has(monthKeyOf(s))),
       ].sort(byPeriod));
     }
+
+    // 진행 줄은 3초 뒤 사라지고, 그 자리에 결과 줄이 5초 동안 표시된다.
+    // 성공한 월이 하나도 없고 실패만 있으면 결과 줄 없이 경고만 남긴다.
+    const result = updated > 0
+      ? `완료 — ${updated}개월 갱신`
+      : (okCount > 0 || !bad.length ? '완료 — 변경 없음' : '');
+    tRef.current.push(setTimeout(() => {
+      setHold('');
+      if (!result) return;
+      setDoneMsg(result);
+      tRef.current.push(setTimeout(() => setDoneMsg(''), 5000));
+    }, 3000));
   };
   /* ---------------- 카드 펼침 ---------------- */
   // summaries 는 period_from 오름차순이므로 마지막이 최신 월이다.
@@ -925,17 +947,27 @@ export default function VendorChatSummary() {
                   disabled={!!gen || !vendorId}
                   onClick={generate}
                 >
-                  {gen ? `${gen.i}/${gen.total} 처리 중 (${gen.label})` : '요약 업데이트'}
+                  요약 업데이트
                 </button>
-                <span style={{ fontSize: 12, color: '#9ca3af' }}>
-                  새로 추가된 대화만 요약합니다
+                {/* 버튼 옆 한 줄: 진행 → (3초) → 결과 → (5초) → 기본 안내 */}
+                <span style={{ fontSize: 12, color: gen || hold ? '#4f46e5' : doneMsg ? '#6b7280' : '#9ca3af' }}>
+                  {gen
+                    ? progressLine(gen.i, gen.total, gen.label)
+                    : hold || doneMsg || '새로 추가된 대화만 요약합니다'}
                 </span>
               </div>
 
               {sumErr && <div style={S.fail}>{sumErr}</div>}
-              {logs.map((l) => (
-                <div key={l.key} style={l.kind === 'fail' ? S.fail : l.kind === 'updated' ? S.noteOn : S.note}>
-                  {l.text}
+              {fails.map((f) => (
+                <div key={f.key} style={S.fail}>
+                  <span>{f.text}</span>
+                  <button
+                    style={S.failX}
+                    title="닫기"
+                    onClick={() => setFails((prev) => prev.filter((x) => x.key !== f.key))}
+                  >
+                    ✕
+                  </button>
                 </div>
               ))}
 
