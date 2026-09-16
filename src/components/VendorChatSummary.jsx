@@ -725,7 +725,8 @@ export default function VendorChatSummary() {
   }, [tab, vendorId, from, to]);
 
   /* ---------------- 요약 ---------------- */
-  const byPeriod = (a, b) => String(a.period_from).localeCompare(String(b.period_from));
+  // 화면 정렬은 최신순(내림차순). DB 조회도 period_from.desc 로 같은 기준을 쓴다.
+  const byPeriodDesc = (a, b) => String(b.period_from).localeCompare(String(a.period_from));
 
   // 기간과 '겹치는' 요약을 가져온다(경계가 하루 어긋나도 놓치지 않게).
   const fetchSummaries = async () => {
@@ -739,7 +740,7 @@ export default function VendorChatSummary() {
         'status=eq.done',
         `period_to=gte.${from}`,
         `period_from=lte.${to}`,
-        'order=period_from.asc',
+        'order=period_from.desc',
       ].join('&');
       return (await sbFetch(`chat_summaries?${q}`)) || [];
     } catch (e) {
@@ -821,7 +822,7 @@ export default function VendorChatSummary() {
             summary_json: body,
             status: 'done',
           };
-          setSummaries((prev) => [...prev.filter((s) => monthKeyOf(s) !== c.key), row].sort(byPeriod));
+          setSummaries((prev) => [...prev.filter((s) => monthKeyOf(s) !== c.key), row].sort(byPeriodDesc));
         }
 
         // 성공한 월도, 변경 없는(skipped) 월도 개별 로그는 남기지 않는다
@@ -845,7 +846,7 @@ export default function VendorChatSummary() {
       setSummaries((prev) => [
         ...fresh,
         ...prev.filter((s) => String(s.id).startsWith('local-') && !keys.has(monthKeyOf(s))),
-      ].sort(byPeriod));
+      ].sort(byPeriodDesc));
     }
 
     // 진행 줄은 3초 뒤 사라지고, 그 자리에 결과 줄이 5초 동안 표시된다.
@@ -861,10 +862,10 @@ export default function VendorChatSummary() {
     }, 3000));
   };
   /* ---------------- 카드 펼침 ---------------- */
-  // summaries 는 period_from 오름차순이므로 마지막이 최신 월이다.
+  // summaries 는 period_from 내림차순이므로 첫 번째가 최신 월이다.
   // openKeys 에 값이 있으면 사용자가 직접 누른 것, 없으면 최신 월만 펼친다.
   const cardKey = (row) => monthKeyOf(row) || String(row?.id || '');
-  const latestKey = summaries.length ? cardKey(summaries[summaries.length - 1]) : null;
+  const latestKey = summaries.length ? cardKey(summaries[0]) : null;
   const isCardOpen = (row) => {
     const k = cardKey(row);
     return k in openKeys ? openKeys[k] : k === latestKey;
