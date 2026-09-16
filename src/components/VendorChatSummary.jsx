@@ -124,9 +124,16 @@ const S = {
     background: '#eef2ff', color: '#3730a3', flexShrink: 0,
   },
   fail: {
-    display: 'flex', alignItems: 'center', gap: 8,
+    display: 'flex', alignItems: 'flex-start', gap: 8,
     fontSize: 12, padding: '5px 9px', borderRadius: 6, marginBottom: 6,
     background: '#fef2f2', color: '#b91c1c',
+  },
+  failSummary: { fontSize: 11, opacity: 0.75, cursor: 'pointer', marginTop: 3 },
+  failRaw: {
+    marginTop: 4, padding: '6px 8px', borderRadius: 4, background: '#fff',
+    color: '#6b7280', fontSize: 11, lineHeight: 1.5,
+    whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+    maxHeight: 160, overflowY: 'auto',
   },
   failX: {
     marginLeft: 'auto', padding: '0 2px', border: 'none', background: 'transparent',
@@ -255,6 +262,63 @@ function monthKeyOf(row) {
 
 const monthLabel = (key) => `${key.slice(0, 4)}년 ${Number(key.slice(5, 7))}월`;
 const progressLine = (i, total, label) => `${i}/${total} 처리 중 · ${label}`;
+
+/* ---------------- 실패 메시지 다듬기 ---------------- */
+
+// Edge Function 은 Anthropic 오류를 JSON 문자열째로 중첩해서 돌려준다.
+// 중첩을 최대 5단까지 풀어 "message" 값을 모으고, 가장 마지막(가장 깊은) 것을 쓴다.
+function extractMessages(raw) {
+  const out = [];
+  const seen = new Set();
+  const push = (v) => {
+    const t = String(v).trim();
+    if (t && !seen.has(t)) { seen.add(t); out.push(t); }
+  };
+  const walk = (v, d) => {
+    if (d > 5 || v == null) return;
+    if (typeof v === 'string') {
+      // "Anthropic API 오류: {...}" 처럼 접두어 뒤에 JSON 이 붙어 오기도 한다
+      const i = v.indexOf('{');
+      if (i !== -1) {
+        try { walk(JSON.parse(v.slice(i)), d + 1); } catch { /* JSON 이 아니면 무시 */ }
+      }
+      return;
+    }
+    if (Array.isArray(v)) { for (const x of v) walk(x, d + 1); return; }
+    if (typeof v === 'object') {
+      for (const [k, val] of Object.entries(v)) {
+        if (k === 'message' && typeof val === 'string') push(val);
+        walk(val, d + 1);
+      }
+    }
+  };
+  walk(String(raw), 0);
+
+  if (!out.length) {
+    // 파싱이 안 되면 이스케이프를 한 번 풀고 정규식으로 긁는다
+    const flat = String(raw).replace(/\\"/g, '"');
+    const re = /"message"\s*:\s*"((?:[^"\\]|\\.)*)"/g;
+    let m;
+    while ((m = re.exec(flat)) !== null) push(m[1].replace(/\\(.)/g, '$1'));
+  }
+  return out;
+}
+
+// 자주 나오는 원인은 한글 안내로 바꿔준다. 원문 전체를 대상으로 찾는다.
+const ERROR_HINTS = [
+  [/credit balance is too low/i, 'Anthropic API 크레딧이 부족합니다. console.anthropic.com에서 충전해 주세요.'],
+  [/rate[_ ]?limit/i, 'API 호출 한도 초과. 잠시 후 다시 시도해 주세요.'],
+  [/overloaded/i, 'API 서버가 혼잡합니다. 잠시 후 다시 시도해 주세요.'],
+  [/authentication|invalid x-api-key/i, 'API 키가 올바르지 않습니다. Supabase Secrets를 확인해 주세요.'],
+];
+
+function friendlyError(raw) {
+  const text = String(raw || '');
+  for (const [re, msg] of ERROR_HINTS) if (re.test(text)) return msg;
+  const msgs = extractMessages(text);
+  if (msgs.length) return msgs[msgs.length - 1];
+  return text.slice(0, 200) || '알 수 없는 오류';
+}
 
 function cardTitle(row) {
   const f = String(row?.period_from || '').slice(0, 10);
@@ -862,7 +926,12 @@ export default function VendorChatSummary() {
         if (!skipped) updated += 1;
       } catch (e) {
         // 실패한 월만 경고로 남긴다 (자동으로 사라지지 않고 X 로 닫는다)
-        bad.push({ key: c.key, text: `${c.label} 실패 — ${e.message}` });
+        bad.push({
+          key: c.key,
+          label: c.label,
+          msg: friendlyError(e.message),
+          raw: String(e.message || ''),
+        });
         setFails([...bad]);
       }
     }
@@ -1018,7 +1087,15 @@ export default function VendorChatSummary() {
               {sumErr && <div style={S.fail}>{sumErr}</div>}
               {fails.map((f) => (
                 <div key={f.key} style={S.fail}>
-                  <span>{f.text}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <span>{f.label} 실패 — {f.msg}</span>
+                    {f.raw && f.raw !== f.msg && (
+                      <details>
+                        <summary style={S.failSummary}>자세히</summary>
+                        <div style={S.failRaw}>{f.raw}</div>
+                      </details>
+                    )}
+                  </div>
                   <button
                     style={S.failX}
                     title="닫기"
