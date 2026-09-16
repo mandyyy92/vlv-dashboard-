@@ -84,13 +84,8 @@ const S = {
     border: '1px solid #e5e7eb', borderLeft: `4px solid ${c}`,
   }),
   secHead: (c) => ({
-    display: 'flex', alignItems: 'center', gap: 8,
     padding: '10px 12px', borderBottom: '1px solid #f3f4f6',
     fontSize: 13, fontWeight: 700, color: c,
-  }),
-  secCount: (c) => ({
-    fontSize: 11, fontWeight: 700, padding: '1px 7px', borderRadius: 10,
-    background: `${c}1a`, color: c,
   }),
   secDot: (c) => ({
     width: 4, height: 4, borderRadius: '50%', background: c,
@@ -397,10 +392,7 @@ function SummaryCard({ row, open, onToggle }) {
 
       {open && secs.map((s) => (
         <div key={s.title} style={S.secBox(s.color)}>
-          <div style={S.secHead(s.color)}>
-            <span>{s.title}</span>
-            <span style={S.secCount(s.color)}>{s.items.length}</span>
-          </div>
+          <div style={S.secHead(s.color)}>{s.title}</div>
           {s.table
             ? <ItemTable items={s.items} color={s.color} />
             : <ItemLines items={s.items} color={s.color} />}
