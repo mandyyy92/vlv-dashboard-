@@ -1,6 +1,6 @@
 // src/components/VendorChatSummary.jsx
 // 업체 소통 요약 — 메뉴 컴포넌트 (v1: 업체 리스트 / 대화 불러오기 / 원문 타임라인)
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { parseKakaoChat } from '../utils/kakaoParser';
 import { SUPABASE_URL, sbHeaders } from '../lib/supabaseClient';
 
@@ -97,7 +97,52 @@ const S = {
     fontSize: 12, padding: '5px 9px', borderRadius: 6, marginBottom: 6,
     background: '#fef2f2', color: '#b91c1c',
   },
+
+  /* --- 업체 등록/수정 --- */
+  vendorRow: { position: 'relative' },
+  dots: {
+    position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)',
+    padding: '2px 6px', border: 'none', borderRadius: 4, background: 'transparent',
+    color: '#9ca3af', fontSize: 15, lineHeight: 1, cursor: 'pointer',
+  },
+  menuRow: {
+    display: 'flex', gap: 6, padding: '6px 10px',
+    background: '#f9fafb', borderBottom: '1px solid #f3f4f6',
+  },
+  menuItem: {
+    flex: 1, padding: '5px 0', border: '1px solid #d1d5db', borderRadius: 5,
+    background: '#fff', color: '#374151', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+  },
+  addBtn: {
+    width: '100%', boxSizing: 'border-box', padding: '10px 14px', textAlign: 'left',
+    border: '1px dashed #d1d5db', background: '#fff', color: '#9ca3af',
+    fontSize: 13, fontWeight: 600, cursor: 'pointer',
+  },
+  vForm: {
+    display: 'flex', flexDirection: 'column', gap: 6, padding: 12,
+    background: '#f9fafb', borderTop: '1px solid #f3f4f6', borderBottom: '1px solid #f3f4f6',
+  },
+  // S.input 과 같은 토큰. 사이드바 폭(220)에 맞춰 폭만 채운다.
+  vInput: {
+    width: '100%', boxSizing: 'border-box', padding: '6px 9px',
+    border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13, background: '#fff',
+  },
+  vErr: { fontSize: 12, color: '#b91c1c', lineHeight: 1.5 },
+  vHint: { fontSize: 11, color: '#9ca3af', lineHeight: 1.5 },
 };
+
+
+// 업체 등록 폼 선택지. category 는 chat_vendors 의 check 제약과 같아야 한다
+// ('기타' 는 supabase/chat_summary.sql 의 ALTER 문을 실행해야 허용된다).
+const VENDOR_CATEGORIES = ['봉제', '원단', '나염', '부자재', '기타'];
+const VENDOR_LANGS = [
+  { v: 'ko', label: '한국어(ko)' },
+  { v: 'en', label: '영어(en)' },
+  { v: 'zh', label: '중국어(zh)' },
+];
+// 기존 데이터가 목록에 없는 구분을 쓰고 있으면 그 값도 선택지로 살려둔다(조용한 변경 방지)
+const catOptions = (cur) =>
+  cur && !VENDOR_CATEGORIES.includes(cur) ? [...VENDOR_CATEGORIES, cur] : VENDOR_CATEGORIES;
 
 const fmtKst = (iso) => {
   const d = new Date(new Date(iso).getTime() + 9 * 3600 * 1000);
@@ -263,23 +308,187 @@ export default function VendorChatSummary() {
   const [regen, setRegen] = useState(false);
   const [sumErr, setSumErr] = useState('');
 
+  // 업체 등록/수정
+  const [vForm, setVForm] = useState(null);   // null | { mode:'new'|'edit', id, name, category, lang, manager }
+  const [vSaving, setVSaving] = useState(false);
+  const [vErr, setVErr] = useState('');
+  const [menuId, setMenuId] = useState(null); // ⋯ 메뉴가 열린 업체 id
+  const [hoverId, setHoverId] = useState(null);
+  const nameRef = useRef(null);
+
   const vendor = useMemo(
     () => vendors.find((v) => v.id === vendorId) || null,
     [vendors, vendorId]
   );
 
   /* ---------------- 업체 목록 ---------------- */
+  // selectId 를 주면 그 업체를 선택한다(신규 등록 직후). 없으면 기존 선택을 유지.
+  const loadVendors = async (selectId) => {
+    try {
+      const data = await sbFetch('chat_vendors?select=*&is_active=eq.true&order=name.asc');
+      const list = data || [];
+      setVendors(list);
+      setVendorId((cur) => {
+        if (selectId && list.some((v) => v.id === selectId)) return selectId;
+        if (cur && list.some((v) => v.id === cur)) return cur;
+        return list.length ? list[0].id : null;
+      });
+      return list;
+    } catch (e) {
+      setLog(`업체 목록 오류: ${e.message}`);
+      return null;
+    }
+  };
+
+  useEffect(() => { loadVendors(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ⋯ 메뉴는 바깥을 클릭하면 닫는다 (⋯ 버튼 자체는 stopPropagation 으로 제외)
   useEffect(() => {
-    (async () => {
-      try {
-        const data = await sbFetch('chat_vendors?select=*&is_active=eq.true&order=name.asc');
-        setVendors(data || []);
-        if (data?.length) setVendorId(data[0].id);
-      } catch (e) {
-        setLog(`업체 목록 오류: ${e.message}`);
+    if (!menuId) return undefined;
+    const close = () => setMenuId(null);
+    window.addEventListener('click', close);
+    return () => window.removeEventListener('click', close);
+  }, [menuId]);
+
+  /* ---------------- 업체 등록/수정 ---------------- */
+  const openNew = () => {
+    setVErr('');
+    setMenuId(null);
+    setVForm({ mode: 'new', id: null, name: '', category: '봉제', lang: 'ko', manager: '' });
+  };
+
+  const openEdit = (v) => {
+    setVErr('');
+    setMenuId(null);
+    setVForm({
+      mode: 'edit',
+      id: v.id,
+      name: v.name || '',
+      category: v.category || '봉제',
+      lang: v.lang || 'ko',
+      manager: v.manager || '',
+    });
+  };
+
+  const closeVForm = () => { setVForm(null); setVErr(''); };
+
+  const saveVendor = async () => {
+    if (!vForm || vSaving) return;
+    const name = (vForm.name || '').trim();
+    if (!name) { setVErr('업체명을 입력하세요.'); nameRef.current?.focus(); return; }
+
+    setVSaving(true);
+    setVErr('');
+    const payload = {
+      name,
+      category: vForm.category,
+      lang: vForm.lang,
+      manager: (vForm.manager || '').trim() || null,
+    };
+    try {
+      let selectId = vForm.id;
+      if (vForm.mode === 'new') {
+        const [row] = (await sbFetch('chat_vendors', {
+          method: 'POST',
+          body: JSON.stringify({ ...payload, is_active: true }),
+        })) || [];
+        selectId = row?.id || null;
+      } else {
+        await sbFetch(`chat_vendors?id=eq.${encodeURIComponent(vForm.id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify(payload),
+        });
       }
-    })();
-  }, []);
+      setLog(`업체 ${vForm.mode === 'new' ? '등록' : '수정'} 완료 — ${name}`);
+      setVForm(null);
+      await loadVendors(selectId);
+    } catch (e) {
+      const msg = String(e.message || '');
+      if (msg.startsWith('409') || /duplicate key|already exists/i.test(msg)) {
+        setVErr('이미 등록된 업체명입니다');
+      } else if (/category_check|check constraint/i.test(msg)) {
+        // chat_vendors 의 check 제약에 없는 구분(예: '기타')
+        setVErr(`'${vForm.category}' 구분은 DB 제약에 없습니다. supabase/chat_summary.sql 의 ALTER 문을 실행하세요.`);
+      } else {
+        setVErr('저장 실패');
+        setLog(`업체 저장 실패: ${e.message}`);
+      }
+    } finally {
+      setVSaving(false);
+    }
+  };
+
+  // 삭제가 아니라 is_active=false. 대화 기록은 그대로 남는다.
+  const deactivateVendor = async (v) => {
+    setMenuId(null);
+    try {
+      await sbFetch(`chat_vendors?id=eq.${encodeURIComponent(v.id)}`, {
+        method: 'PATCH',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({ is_active: false }),
+      });
+      if (vForm?.mode === 'edit' && vForm.id === v.id) closeVForm();
+      setLog(`${v.name} 비활성화 — 목록에서만 숨겨집니다.`);
+      await loadVendors();
+    } catch (e) {
+      setLog(`비활성화 실패: ${e.message}`);
+    }
+  };
+
+  // 신규 등록(목록 하단)과 수정(해당 항목 자리) 모두 같은 폼을 쓴다
+  const renderVForm = () => (
+    <div style={S.vForm}>
+      <input
+        ref={nameRef}
+        value={vForm.name}
+        onChange={(e) => setVForm({ ...vForm, name: e.target.value })}
+        onKeyDown={(e) => { if (e.key === 'Enter') saveVendor(); if (e.key === 'Escape') closeVForm(); }}
+        placeholder="업체명 *"
+        style={S.vInput}
+      />
+      <select
+        value={vForm.category}
+        onChange={(e) => setVForm({ ...vForm, category: e.target.value })}
+        style={S.vInput}
+      >
+        {catOptions(vForm.category).map((c) => <option key={c} value={c}>{c}</option>)}
+      </select>
+      <select
+        value={vForm.lang}
+        onChange={(e) => setVForm({ ...vForm, lang: e.target.value })}
+        style={S.vInput}
+      >
+        {VENDOR_LANGS.map((l) => <option key={l.v} value={l.v}>{l.label}</option>)}
+      </select>
+      <input
+        value={vForm.manager}
+        onChange={(e) => setVForm({ ...vForm, manager: e.target.value })}
+        onKeyDown={(e) => { if (e.key === 'Enter') saveVendor(); if (e.key === 'Escape') closeVForm(); }}
+        placeholder="담당자 (선택)"
+        style={S.vInput}
+      />
+      {vErr && <div style={S.vErr}>{vErr}</div>}
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button
+          style={{ ...S.btn('primary'), flex: 1, padding: '6px 0', opacity: vSaving ? 0.5 : 1 }}
+          disabled={vSaving}
+          onClick={saveVendor}
+        >
+          {vSaving ? '저장 중...' : '저장'}
+        </button>
+        <button
+          style={{ ...S.btn('ghost'), flex: 1, padding: '6px 0' }}
+          disabled={vSaving}
+          onClick={closeVForm}
+        >
+          취소
+        </button>
+      </div>
+      {vForm.mode === 'edit' && (
+        <div style={S.vHint}>비활성화해도 대화 기록은 지워지지 않고 목록에서만 숨겨집니다.</div>
+      )}
+    </div>
+  );
 
   /* ---------------- 파싱 ---------------- */
   const runParse = (text) => {
@@ -498,18 +707,47 @@ export default function VendorChatSummary() {
       <div style={S.side}>
         <div style={S.sideHead}>생산 업체</div>
         {vendors.map((v) => (
-          <button
-            key={v.id}
-            style={S.vendorBtn(v.id === vendorId)}
-            onClick={() => { setVendorId(v.id); setParsed(null); setRaw(''); }}
-          >
-            {v.name}
-            <span style={S.tag}>
-              {v.category}{v.lang !== 'ko' ? ` · ${v.lang.toUpperCase()}` : ''}
-            </span>
-          </button>
+          vForm?.mode === 'edit' && vForm.id === v.id ? (
+            <div key={v.id}>{renderVForm()}</div>
+          ) : (
+            <div
+              key={v.id}
+              style={S.vendorRow}
+              onMouseEnter={() => setHoverId(v.id)}
+              onMouseLeave={() => setHoverId(null)}
+            >
+              <button
+                style={S.vendorBtn(v.id === vendorId)}
+                onClick={() => { setVendorId(v.id); setParsed(null); setRaw(''); }}
+              >
+                {v.name}
+                <span style={S.tag}>
+                  {v.category}{v.lang !== 'ko' ? ` · ${v.lang.toUpperCase()}` : ''}
+                </span>
+              </button>
+              {(hoverId === v.id || menuId === v.id) && (
+                <button
+                  style={S.dots}
+                  title="업체 관리"
+                  onClick={(e) => { e.stopPropagation(); setMenuId(menuId === v.id ? null : v.id); }}
+                >
+                  ⋯
+                </button>
+              )}
+              {menuId === v.id && (
+                <div style={S.menuRow} onClick={(e) => e.stopPropagation()}>
+                  <button style={S.menuItem} onClick={() => openEdit(v)}>수정</button>
+                  <button style={S.menuItem} onClick={() => deactivateVendor(v)}>비활성화</button>
+                </div>
+              )}
+            </div>
+          )
         ))}
         {!vendors.length && <div style={{ ...S.empty, padding: 20 }}>업체 없음</div>}
+
+        {vForm?.mode === 'new'
+          ? renderVForm()
+          : <button style={S.addBtn} onClick={openNew}>+ 업체 등록</button>}
       </div>
 
       {/* 우측 본문 */}

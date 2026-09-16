@@ -19,7 +19,7 @@ create extension if not exists pgcrypto;
 create table if not exists public.chat_vendors (
   id          uuid primary key default gen_random_uuid(),
   name        text not null unique,                 -- 업체명 (인도, 코니, 에스앤제이 …)
-  category    text not null check (category in ('봉제','원단','나염','부자재')),
+  category    text not null check (category in ('봉제','원단','나염','부자재','기타')),
   lang        text not null default 'ko' check (lang in ('ko','en','zh')),
   manager     text,                                 -- 우리 쪽 담당자
   is_active   boolean not null default true,
@@ -183,3 +183,13 @@ insert into public.chat_vendors (name, category, lang, aliases) values
   ('원단업체',   '원단', 'ko', array['원단']),
   ('나염 외주',  '나염', 'ko', array['나염','프린팅','printing'])
 on conflict (name) do nothing;
+
+-- ─────────────────────────────────────────────────────────────
+-- category 에 '기타' 추가 (UI 업체 등록 폼의 '구분' 선택지와 맞춤)
+-- 이미 만들어진 DB 는 위의 create table if not exists 가 건너뛰어지므로
+-- 제약을 다시 걸어야 '기타' INSERT 가 통과한다. 재실행 안전.
+-- ─────────────────────────────────────────────────────────────
+alter table public.chat_vendors drop constraint if exists chat_vendors_category_check;
+alter table public.chat_vendors
+  add constraint chat_vendors_category_check
+  check (category in ('봉제','원단','나염','부자재','기타'));
