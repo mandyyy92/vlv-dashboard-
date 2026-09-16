@@ -342,8 +342,9 @@ const SUM_SECTIONS = [
   { title: '품질/클레임', short: '품질', keys: ['quality', '품질_클레임', '품질'], color: '#dc2626' },
   { title: '수량/단가', short: '단가', keys: ['price_qty', '수량_단가'], color: '#7c3aed' },
   { title: '회신 필요', short: '회신', keys: ['our_todo', '우리_회신필요'], color: '#2563eb' },
-  // 리스크도 같은 섹션 박스로 렌더한다
-  { title: '리스크', short: '리스크', keys: RISK_KEYS, color: '#ea580c' },
+  // 이슈(summary_json 필드명은 risks)도 같은 섹션 박스로 렌더한다.
+  // 화면 라벨만 '이슈'이고 RISK_KEYS 는 그대로라 DB 재요약이 필요 없다.
+  { title: '이슈', short: '이슈', keys: RISK_KEYS, color: '#ea580c' },
 ];
 
 // format_version 2 = { style_no, title, detail, date }.
