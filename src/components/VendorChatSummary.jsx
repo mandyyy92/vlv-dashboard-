@@ -175,8 +175,12 @@ const S = {
   tableWrap: { overflowX: 'auto' },
   table: { width: '100%', borderCollapse: 'collapse' },
   td: { padding: '10px 12px', verticalAlign: 'top' },
-  colNo: { width: 140, minWidth: 140 },
-  colDate: { width: 110, minWidth: 110, textAlign: 'right' },
+  // 품번·내용·날짜를 왼쪽에 붙이고 남는 폭은 colFill 이 전부 흡수한다.
+  // width:1% + 마지막 열 width:100% 는 '내용만큼만 차지' 시키는 표 관용구.
+  colNo: { width: 140, minWidth: 140, whiteSpace: 'nowrap', paddingRight: 16 },
+  colBody: { width: '1%', minWidth: 320, whiteSpace: 'normal', paddingRight: 16 },
+  colDate: { width: '1%', whiteSpace: 'nowrap', textAlign: 'left' },
+  colFill: { width: '100%' },
 };
 
 
@@ -337,13 +341,15 @@ function ItemTable({ items, color }) {
               <td style={{ ...S.td, ...S.colNo, borderBottom: line(i) }}>
                 {it.styleNo && <span style={S.badge}>{it.styleNo}</span>}
               </td>
-              <td style={{ ...S.td, borderBottom: line(i) }}>
+              <td style={{ ...S.td, ...S.colBody, borderBottom: line(i) }}>
                 <div style={S.itemTitle}>{it.title}</div>
                 {it.detail && <div style={S.itemDetail}>{it.detail}</div>}
               </td>
               <td style={{ ...S.td, ...S.colDate, borderBottom: line(i) }}>
                 {it.date && <span style={S.dateChip(color)}>{it.date}</span>}
               </td>
+              {/* 남는 가로 폭을 흡수하는 빈 열 */}
+              <td style={{ ...S.td, ...S.colFill, borderBottom: line(i) }} />
             </tr>
           ))}
         </tbody>
