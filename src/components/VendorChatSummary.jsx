@@ -97,6 +97,14 @@ const S = {
     fontSize: 12, padding: '5px 9px', borderRadius: 6, marginBottom: 6,
     background: '#fef2f2', color: '#b91c1c',
   },
+  note: {
+    fontSize: 12, padding: '5px 9px', borderRadius: 6, marginBottom: 6,
+    background: '#f3f4f6', color: '#6b7280',
+  },
+  noteOn: {
+    fontSize: 12, padding: '5px 9px', borderRadius: 6, marginBottom: 6,
+    background: '#eef2ff', color: '#3730a3',
+  },
 
   /* --- 업체 등록/수정 --- */
   vendorRow: { position: 'relative' },
@@ -304,8 +312,7 @@ export default function VendorChatSummary() {
   const [summaries, setSummaries] = useState([]);
   const [loadingSum, setLoadingSum] = useState(false);
   const [gen, setGen] = useState(null);   // 진행 중일 때만 { i, total, label }
-  const [fails, setFails] = useState({}); // 월키 → 실패 메시지
-  const [regen, setRegen] = useState(false);
+  const [logs, setLogs] = useState([]);   // 진행 로그 [{ key, kind, text }]
   const [sumErr, setSumErr] = useState('');
 
   // 업체 등록/수정
@@ -633,22 +640,20 @@ export default function VendorChatSummary() {
   }, [tab, vendorId, from, to]);
 
   // 월 단위로 쪼개서 한 번에 하나씩(병렬 금지) Edge Function 을 호출한다.
+  // 어느 월을 다시 요약할지는 Edge Function 이 판단한다(skipped 플래그로 알려준다).
   const generate = async () => {
     if (!vendorId || gen) return;
     const chunks = monthChunks(from, to);
     if (!chunks.length) { setSumErr('기간을 확인하세요.'); return; }
 
     setSumErr('');
-    setFails({});
-    const done = new Set(summaries.map(monthKeyOf).filter(Boolean));
-    const bad = {};
+    setLogs([]);
+    const out = [];
+    const push = (key, kind, text) => { out.push({ key, kind, text }); setLogs([...out]); };
 
     for (let i = 0; i < chunks.length; i++) {
       const c = chunks[i];
       setGen({ i: i + 1, total: chunks.length, label: c.label });
-
-      // 이미 요약이 있는 월은 기본적으로 건너뛴다
-      if (!regen && done.has(c.key)) continue;
 
       try {
         const r = await fetch(`${SUPABASE_URL}/functions/v1/hyper-api`, {
@@ -669,22 +674,35 @@ export default function VendorChatSummary() {
         const j = text ? JSON.parse(text) : null;
         if (!j?.ok) throw new Error(j?.error || '응답 형식 오류');
 
-        // 한 달 끝날 때마다 바로 화면에 붙인다
-        const row = {
-          id: j.summary_id || `local-${c.key}`,
-          vendor_id: vendorId,
-          period_from: c.from,
-          period_to: c.to,
-          message_count: j.message_count ?? 0,
-          summary_json: j.summary || {},
-          status: 'done',
-        };
-        setSummaries((prev) => [...prev.filter((s) => monthKeyOf(s) !== c.key), row].sort(byPeriod));
-        done.add(c.key);
+        // skipped=true → Claude 호출 없이 기존 요약을 그대로 돌려준 것
+        const skipped = j.skipped === true;
+        const body = j.summary && typeof j.summary === 'object' ? j.summary : null;
+        const hasBody = body && Object.keys(body).length > 0;
+
+        // 본문이 왔으면 한 달 끝날 때마다 바로 화면에 붙인다.
+        // skipped 인데 본문을 안 돌려주는 경우엔 화면의 기존 카드를 지우지 않고 둔다
+        // (루프가 끝나면 DB 를 정본으로 다시 읽는다).
+        if (hasBody) {
+          const row = {
+            id: j.summary_id || `local-${c.key}`,
+            vendor_id: vendorId,
+            period_from: c.from,
+            period_to: c.to,
+            message_count: j.message_count ?? 0,
+            summary_json: body,
+            status: 'done',
+          };
+          setSummaries((prev) => [...prev.filter((s) => monthKeyOf(s) !== c.key), row].sort(byPeriod));
+        }
+
+        push(
+          c.key,
+          skipped ? 'same' : 'updated',
+          skipped ? `${c.label} — 변경 없음` : `${c.label} — 요약 갱신 (${j.message_count ?? 0}건)`
+        );
       } catch (e) {
         // 그 달만 실패로 표시하고 다음 달로 계속
-        bad[c.key] = e.message;
-        setFails({ ...bad });
+        push(c.key, 'fail', `${c.label} 요약 실패 — ${e.message}`);
       }
     }
 
@@ -785,23 +803,18 @@ export default function VendorChatSummary() {
                   disabled={!!gen || !vendorId}
                   onClick={generate}
                 >
-                  {gen ? `${gen.i}/${gen.total} 처리 중 (${gen.label})` : '요약 생성'}
+                  {gen ? `${gen.i}/${gen.total} 처리 중 (${gen.label})` : '요약 업데이트'}
                 </button>
-                <label style={{
-                  display: 'flex', alignItems: 'center', gap: 5,
-                  fontSize: 12, color: '#6b7280', cursor: 'pointer',
-                }}>
-                  <input type="checkbox" checked={regen} onChange={(e) => setRegen(e.target.checked)} />
-                  다시 생성 (이미 요약된 월도 재요약)
-                </label>
                 <span style={{ fontSize: 12, color: '#9ca3af' }}>
-                  {monthChunks(from, to).length}개월 · 한 달씩 순차 처리
+                  새로 추가된 대화만 요약합니다
                 </span>
               </div>
 
               {sumErr && <div style={S.fail}>{sumErr}</div>}
-              {Object.entries(fails).map(([k, msg]) => (
-                <div key={k} style={S.fail}>{monthLabel(k)} 요약 실패 — {msg}</div>
+              {logs.map((l) => (
+                <div key={l.key} style={l.kind === 'fail' ? S.fail : l.kind === 'updated' ? S.noteOn : S.note}>
+                  {l.text}
+                </div>
               ))}
 
               {loadingSum && !gen && !summaries.length && <div style={S.empty}>불러오는 중...</div>}
@@ -811,7 +824,7 @@ export default function VendorChatSummary() {
               {!loadingSum && !gen && !summaries.length && (
                 <div style={S.empty}>
                   저장된 요약이 없습니다.<br />
-                  "요약 생성"을 누르면 기간을 월 단위로 나눠 한 달씩 차례로 요약합니다.
+                  "요약 업데이트"를 누르면 기간을 월 단위로 나눠 한 달씩 차례로 요약합니다.
                 </div>
               )}
             </>
