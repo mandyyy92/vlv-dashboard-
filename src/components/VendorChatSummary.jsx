@@ -26,9 +26,16 @@ const S = {
     display: 'flex', flexDirection: 'column',
   },
   // 구분(category) 그룹 헤더. 좌우 패딩은 업체 항목(11px 14px)과 같게 맞춘다.
+  // 구분 그룹 블록. 그룹 경계(#e5e7eb)를 항목 경계(#f3f4f6)보다 진하게 둬서
+  // 계층이 드러나게 한다. 첫 그룹은 위에 선을 넣지 않는다.
+  sideGroupBox: (first) => ({
+    marginTop: first ? 0 : 8,
+    borderTop: first ? 'none' : '1px solid #e5e7eb',
+  }),
+  // 좌우 패딩은 업체 항목(11px 14px)과 같게 맞춘다.
   sideGroup: {
-    padding: '0 14px 4px', marginTop: 12,
-    fontSize: 11, fontWeight: 700, color: '#9ca3af', letterSpacing: 0.3,
+    padding: '7px 14px', background: '#f9fafb',
+    fontSize: 11, fontWeight: 600, color: '#6b7280', letterSpacing: 0.3,
   },
   // 목록만 스크롤한다. minHeight:0 이 없으면 flex 아이템이 줄지 않아 패널을 넘친다.
   sideList: { flex: 1, minHeight: 0, overflowY: 'auto' },
@@ -37,9 +44,10 @@ const S = {
     flexShrink: 0, maxHeight: '60%', overflowY: 'auto',
     borderTop: '1px solid #e5e7eb', background: '#fff',
   },
-  vendorBtn: (on) => ({
+  // last = 그룹의 마지막 항목. 그룹 하단 경계와 겹치지 않게 구분선을 뺀다.
+  vendorBtn: (on, last) => ({
     width: '100%', textAlign: 'left', padding: '11px 14px', border: 'none',
-    borderBottom: '1px solid #f9fafb', cursor: 'pointer',
+    borderBottom: last ? 'none' : '1px solid #f3f4f6', cursor: 'pointer',
     background: on ? '#eef2ff' : '#fff',
     color: on ? '#3730a3' : '#111827',
     fontWeight: on ? 700 : 500, fontSize: 14,
@@ -908,10 +916,10 @@ export default function VendorChatSummary() {
       {/* 좌측 업체 리스트 */}
       <div style={S.side}>
         <div style={S.sideList}>
-          {vendorGroups.map((g) => (
-            <div key={g.category}>
+          {vendorGroups.map((g, gi) => (
+            <div key={g.category} style={S.sideGroupBox(gi === 0)}>
               <div style={S.sideGroup}>{g.category}</div>
-              {g.items.map((v) => (
+              {g.items.map((v, vi) => (
                 vForm?.mode === 'edit' && vForm.id === v.id ? (
                   <div key={v.id}>{renderVForm()}</div>
                 ) : (
@@ -922,7 +930,7 @@ export default function VendorChatSummary() {
                     onMouseLeave={() => setHoverId(null)}
                   >
                     <button
-                      style={S.vendorBtn(v.id === vendorId)}
+                      style={S.vendorBtn(v.id === vendorId, vi === g.items.length - 1)}
                       onClick={() => { setVendorId(v.id); setParsed(null); setRaw(''); }}
                     >
                       {v.name}
