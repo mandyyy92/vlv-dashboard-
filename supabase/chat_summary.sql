@@ -19,7 +19,8 @@ create extension if not exists pgcrypto;
 create table if not exists public.chat_vendors (
   id          uuid primary key default gen_random_uuid(),
   name        text not null unique,                 -- 업체명 (인도, 코니, 에스앤제이 …)
-  category    text not null check (category in ('봉제','원단','나염','부자재','기타')),
+  -- '봉제' 는 예전 값. 기존 행이 제약을 위반하지 않도록 허용 목록에 남겨둔다.
+  category    text not null check (category in ('생산업체','원단','나염','부자재','기타','봉제')),
   lang        text not null default 'ko' check (lang in ('ko','en','zh')),
   manager     text,                                 -- 우리 쪽 담당자
   is_active   boolean not null default true,
@@ -177,19 +178,23 @@ create trigger update_chat_action_items_updated_at
 -- 실제 카톡 방 제목/발신자명에 맞춰 aliases 는 나중에 UI 에서 수정.
 -- ─────────────────────────────────────────────────────────────
 insert into public.chat_vendors (name, category, lang, aliases) values
-  ('인도',       '봉제', 'en', array['india','INDIA','indian']),
-  ('코니',       '봉제', 'ko', array['코니','conny']),
-  ('에스앤제이', '봉제', 'ko', array['에스앤제이','S&J','SNJ']),
-  ('원단업체',   '원단', 'ko', array['원단']),
-  ('나염 외주',  '나염', 'ko', array['나염','프린팅','printing'])
+  ('인도',       '생산업체', 'en', array['india','INDIA','indian']),
+  ('코니',       '생산업체', 'ko', array['코니','conny']),
+  ('에스앤제이', '생산업체', 'ko', array['에스앤제이','S&J','SNJ']),
+  ('원단업체',   '원단',     'ko', array['원단']),
+  ('나염 외주',  '나염',     'ko', array['나염','프린팅','printing'])
 on conflict (name) do nothing;
 
 -- ─────────────────────────────────────────────────────────────
--- category 에 '기타' 추가 (UI 업체 등록 폼의 '구분' 선택지와 맞춤)
+-- category 허용값을 UI 업체 등록 폼의 '구분' 선택지와 맞춘다.
 -- 이미 만들어진 DB 는 위의 create table if not exists 가 건너뛰어지므로
--- 제약을 다시 걸어야 '기타' INSERT 가 통과한다. 재실행 안전.
+-- 제약을 다시 걸어야 '기타'·'생산업체' INSERT 가 통과한다. 재실행 안전.
+-- '봉제' 는 예전 값이라 아래 update 로 옮기지만, 허용 목록에도 남겨둔다.
 -- ─────────────────────────────────────────────────────────────
 alter table public.chat_vendors drop constraint if exists chat_vendors_category_check;
 alter table public.chat_vendors
   add constraint chat_vendors_category_check
-  check (category in ('봉제','원단','나염','부자재','기타'));
+  check (category in ('생산업체','원단','나염','부자재','기타','봉제'));
+
+-- 기존 '봉제' 업체를 '생산업체' 로 이관 (재실행 안전)
+update public.chat_vendors set category = '생산업체' where category = '봉제';

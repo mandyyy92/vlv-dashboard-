@@ -190,7 +190,10 @@ const S = {
 
 // 업체 등록 폼 선택지. category 는 chat_vendors 의 check 제약과 같아야 한다
 // ('기타' 는 supabase/chat_summary.sql 의 ALTER 문을 실행해야 허용된다).
-const VENDOR_CATEGORIES = ['봉제', '원단', '나염', '부자재', '기타'];
+const VENDOR_CATEGORIES = ['생산업체', '원단', '나염', '부자재', '기타'];
+// 안전장치: DB 에 예전 값('봉제')이 남아 있어도 '생산업체' 그룹으로 보이게 한다.
+const CATEGORY_ALIASES = { 봉제: '생산업체' };
+const normCategory = (c) => CATEGORY_ALIASES[c] || c;
 const VENDOR_LANGS = [
   { v: 'ko', label: '한국어(ko)' },
   { v: 'en', label: '영어(en)' },
@@ -461,7 +464,8 @@ export default function VendorChatSummary() {
   const vendorGroups = useMemo(() => {
     const buckets = new Map(VENDOR_CATEGORIES.map((c) => [c, []]));
     for (const v of vendors) {
-      const c = buckets.has(v.category) ? v.category : '기타';
+      const cat = normCategory(v.category);
+      const c = buckets.has(cat) ? cat : '기타';
       buckets.get(c).push(v);
     }
     return VENDOR_CATEGORIES
@@ -505,7 +509,7 @@ export default function VendorChatSummary() {
   const openNew = () => {
     setVErr('');
     setMenuId(null);
-    setVForm({ mode: 'new', id: null, name: '', category: '봉제', lang: 'ko', manager: '' });
+    setVForm({ mode: 'new', id: null, name: '', category: '생산업체', lang: 'ko', manager: '' });
   };
 
   const openEdit = (v) => {
@@ -515,7 +519,7 @@ export default function VendorChatSummary() {
       mode: 'edit',
       id: v.id,
       name: v.name || '',
-      category: v.category || '봉제',
+      category: normCategory(v.category) || '생산업체',
       lang: v.lang || 'ko',
       manager: v.manager || '',
     });
