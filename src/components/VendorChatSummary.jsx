@@ -96,6 +96,10 @@ const S = {
     fontSize: 11, fontWeight: 700, padding: '1px 6px', borderRadius: 4,
     background: '#fef3c7', color: '#92400e', flexShrink: 0, marginLeft: 6,
   },
+  sampleBadge: {
+    fontSize: 11, fontWeight: 700, padding: '1px 6px', borderRadius: 4,
+    background: '#cffafe', color: '#155e75', flexShrink: 0, marginLeft: 6,
+  },
   riskBox: {
     marginTop: 12, padding: '10px 12px', background: '#fff7ed',
     border: '1px solid #fed7aa', borderRadius: 8,
@@ -219,6 +223,8 @@ function cardTitle(row) {
 const SUM_SECTIONS = [
   { title: '핵심요약', keys: ['summary', '핵심요약'] },
   { title: '납기', keys: ['delivery', '납기'] },
+  // 샘플은 납기와 같은 형태([{ style_no, content, date }])지만 날짜 뱃지 색만 다르게 쓴다
+  { title: '샘플', keys: ['sample', '샘플'], dateBadge: S.sampleBadge },
   { title: '품질/클레임', keys: ['quality', '품질_클레임', '품질'] },
   { title: '수량/단가', keys: ['price_qty', '수량_단가'] },
   { title: '회신 필요', keys: ['our_todo', '우리_회신필요'] },
@@ -253,7 +259,11 @@ function SummaryCard({ row }) {
   const json = row?.summary_json || {};
   // 빈 섹션은 아예 렌더하지 않는다
   const secs = SUM_SECTIONS
-    .map((s) => ({ title: s.title, items: pickSection(json, s.keys) }))
+    .map((s) => ({
+      title: s.title,
+      dateBadge: s.dateBadge || S.dueBadge,
+      items: pickSection(json, s.keys),
+    }))
     .filter((s) => s.items.length);
   const risks = pickSection(json, RISK_KEYS);
 
@@ -261,7 +271,9 @@ function SummaryCard({ row }) {
     <div style={S.card}>
       <div style={S.cardHead}>
         <strong style={{ fontSize: 14 }}>{cardTitle(row)}</strong>
-        <span style={{ fontSize: 12, color: '#6b7280' }}>(메시지 {row?.message_count ?? 0}건)</span>
+        <span style={{ fontSize: 12, color: '#6b7280' }}>
+          {row?.message_count == null ? '(건수 미기록)' : `(메시지 ${row.message_count}건)`}
+        </span>
         <div style={{ flex: 1 }} />
         {row?.model && <span style={S.tag}>{row.model}</span>}
       </div>
@@ -274,7 +286,7 @@ function SummaryCard({ row }) {
               <span style={S.dot}>•</span>
               {it.styleNo && <span style={S.badge}>{it.styleNo}</span>}
               <span style={{ whiteSpace: 'pre-wrap' }}>{it.content}</span>
-              {it.date && <span style={S.dueBadge}>{it.date}</span>}
+              {it.date && <span style={s.dateBadge}>{it.date}</span>}
             </div>
           ))}
         </div>
