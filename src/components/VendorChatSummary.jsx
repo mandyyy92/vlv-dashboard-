@@ -241,7 +241,7 @@ function SummaryCard({ row }) {
 export default function VendorChatSummary() {
   const [vendors, setVendors] = useState([]);
   const [vendorId, setVendorId] = useState(null);
-  const [tab, setTab] = useState('import');
+  const [tab, setTab] = useState('summary');
 
   // 기간 필터 — 기본값 2026년 전체
   const [from, setFrom] = useState('2026-01-01');
@@ -532,12 +532,53 @@ export default function VendorChatSummary() {
         </div>
 
         <div style={S.tabs}>
+          <button style={S.tab(tab === 'summary')} onClick={() => setTab('summary')}>요약</button>
           <button style={S.tab(tab === 'import')} onClick={() => setTab('import')}>대화 불러오기</button>
           <button style={S.tab(tab === 'timeline')} onClick={() => setTab('timeline')}>원문 타임라인</button>
-          <button style={S.tab(tab === 'summary')} onClick={() => setTab('summary')}>요약</button>
         </div>
 
         <div style={S.body}>
+          {/* --- 요약 --- */}
+          {tab === 'summary' && (
+            <>
+              <div style={{ ...S.bar, padding: '0 0 12px' }}>
+                <button
+                  style={{ ...S.btn('primary'), opacity: gen || !vendorId ? 0.5 : 1 }}
+                  disabled={!!gen || !vendorId}
+                  onClick={generate}
+                >
+                  {gen ? `${gen.i}/${gen.total} 처리 중 (${gen.label})` : '요약 생성'}
+                </button>
+                <label style={{
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  fontSize: 12, color: '#6b7280', cursor: 'pointer',
+                }}>
+                  <input type="checkbox" checked={regen} onChange={(e) => setRegen(e.target.checked)} />
+                  다시 생성 (이미 요약된 월도 재요약)
+                </label>
+                <span style={{ fontSize: 12, color: '#9ca3af' }}>
+                  {monthChunks(from, to).length}개월 · 한 달씩 순차 처리
+                </span>
+              </div>
+
+              {sumErr && <div style={S.fail}>{sumErr}</div>}
+              {Object.entries(fails).map(([k, msg]) => (
+                <div key={k} style={S.fail}>{monthLabel(k)} 요약 실패 — {msg}</div>
+              ))}
+
+              {loadingSum && !gen && !summaries.length && <div style={S.empty}>불러오는 중...</div>}
+
+              {summaries.map((row) => <SummaryCard key={row.id} row={row} />)}
+
+              {!loadingSum && !gen && !summaries.length && (
+                <div style={S.empty}>
+                  저장된 요약이 없습니다.<br />
+                  "요약 생성"을 누르면 기간을 월 단위로 나눠 한 달씩 차례로 요약합니다.
+                </div>
+              )}
+            </>
+          )}
+
           {/* --- 불러오기 --- */}
           {tab === 'import' && (
             <>
@@ -633,47 +674,6 @@ export default function VendorChatSummary() {
                   )}
                 </div>
               ))}
-            </>
-          )}
-
-          {/* --- 요약 --- */}
-          {tab === 'summary' && (
-            <>
-              <div style={{ ...S.bar, padding: '0 0 12px' }}>
-                <button
-                  style={{ ...S.btn('primary'), opacity: gen || !vendorId ? 0.5 : 1 }}
-                  disabled={!!gen || !vendorId}
-                  onClick={generate}
-                >
-                  {gen ? `${gen.i}/${gen.total} 처리 중 (${gen.label})` : '요약 생성'}
-                </button>
-                <label style={{
-                  display: 'flex', alignItems: 'center', gap: 5,
-                  fontSize: 12, color: '#6b7280', cursor: 'pointer',
-                }}>
-                  <input type="checkbox" checked={regen} onChange={(e) => setRegen(e.target.checked)} />
-                  다시 생성 (이미 요약된 월도 재요약)
-                </label>
-                <span style={{ fontSize: 12, color: '#9ca3af' }}>
-                  {monthChunks(from, to).length}개월 · 한 달씩 순차 처리
-                </span>
-              </div>
-
-              {sumErr && <div style={S.fail}>{sumErr}</div>}
-              {Object.entries(fails).map(([k, msg]) => (
-                <div key={k} style={S.fail}>{monthLabel(k)} 요약 실패 — {msg}</div>
-              ))}
-
-              {loadingSum && !gen && !summaries.length && <div style={S.empty}>불러오는 중...</div>}
-
-              {summaries.map((row) => <SummaryCard key={row.id} row={row} />)}
-
-              {!loadingSum && !gen && !summaries.length && (
-                <div style={S.empty}>
-                  저장된 요약이 없습니다.<br />
-                  "요약 생성"을 누르면 기간을 월 단위로 나눠 한 달씩 차례로 요약합니다.
-                </div>
-              )}
             </>
           )}
         </div>
