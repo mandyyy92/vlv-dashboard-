@@ -52,7 +52,15 @@ const S = {
     display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
     padding: '10px 14px', borderBottom: '1px solid #f3f4f6',
   },
-  tabs: { display: 'flex', gap: 4, padding: '8px 14px 0', borderBottom: '1px solid #e5e7eb' },
+  tabs: {
+    display: 'flex', alignItems: 'center', gap: 4,
+    padding: '8px 14px 0', borderBottom: '1px solid #e5e7eb',
+  },
+  // 탭 줄 우측 안내문. 폭이 모자라면 줄어들다 말줄임 처리되고 버튼은 항상 남는다.
+  tabHint: (c) => ({
+    fontSize: 12, color: c, marginRight: 6, minWidth: 0,
+    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+  }),
   tab: (on) => ({
     padding: '8px 14px', border: 'none', cursor: 'pointer', fontSize: 14,
     background: 'transparent', fontWeight: on ? 700 : 500,
@@ -950,28 +958,33 @@ export default function VendorChatSummary() {
           <button style={S.tab(tab === 'summary')} onClick={() => setTab('summary')}>요약</button>
           <button style={S.tab(tab === 'import')} onClick={() => setTab('import')}>대화 불러오기</button>
           <button style={S.tab(tab === 'timeline')} onClick={() => setTab('timeline')}>원문 타임라인</button>
+          <div style={{ flex: 1 }} />
+          {tab === 'summary' && (
+            <>
+              {/* 진행 → (3초) → 결과 → (5초) → 기본 안내 */}
+              <span style={S.tabHint(gen || hold ? '#4f46e5' : doneMsg ? '#6b7280' : '#9ca3af')}>
+                {gen
+                  ? progressLine(gen.i, gen.total, gen.label)
+                  : hold || doneMsg || '새로 추가된 대화만 요약합니다'}
+              </span>
+              <button
+                style={{
+                  ...S.btn('primary'), flexShrink: 0, marginBottom: 2,
+                  opacity: gen || !vendorId ? 0.5 : 1,
+                }}
+                disabled={!!gen || !vendorId}
+                onClick={generate}
+              >
+                요약 업데이트
+              </button>
+            </>
+          )}
         </div>
 
         <div style={S.body}>
           {/* --- 요약 --- */}
           {tab === 'summary' && (
             <>
-              <div style={{ ...S.bar, padding: '0 0 12px' }}>
-                <button
-                  style={{ ...S.btn('primary'), opacity: gen || !vendorId ? 0.5 : 1 }}
-                  disabled={!!gen || !vendorId}
-                  onClick={generate}
-                >
-                  요약 업데이트
-                </button>
-                {/* 버튼 옆 한 줄: 진행 → (3초) → 결과 → (5초) → 기본 안내 */}
-                <span style={{ fontSize: 12, color: gen || hold ? '#4f46e5' : doneMsg ? '#6b7280' : '#9ca3af' }}>
-                  {gen
-                    ? progressLine(gen.i, gen.total, gen.label)
-                    : hold || doneMsg || '새로 추가된 대화만 요약합니다'}
-                </span>
-              </div>
-
               {sumErr && <div style={S.fail}>{sumErr}</div>}
               {fails.map((f) => (
                 <div key={f.key} style={S.fail}>
