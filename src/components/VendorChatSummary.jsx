@@ -68,12 +68,175 @@ const S = {
   msgRow: { padding: '8px 0', borderBottom: '1px solid #f3f4f6', fontSize: 13, lineHeight: 1.55 },
   meta: { fontSize: 11, color: '#9ca3af', marginBottom: 2 },
   empty: { padding: 40, textAlign: 'center', color: '#9ca3af', fontSize: 14 },
+
+  /* --- 요약 탭 --- */
+  cardHead: {
+    display: 'flex', alignItems: 'baseline', gap: 8,
+    paddingBottom: 8, borderBottom: '1px solid #e5e7eb',
+  },
+  secTitle: { fontSize: 12, fontWeight: 700, color: '#6b7280', margin: '12px 0 5px' },
+  li: {
+    display: 'flex', gap: 6, alignItems: 'baseline',
+    padding: '3px 0', fontSize: 13, lineHeight: 1.55, color: '#374151',
+  },
+  dot: { color: '#c4c8d0', flexShrink: 0 },
+  badge: {
+    fontSize: 11, fontWeight: 700, padding: '1px 6px', borderRadius: 4,
+    background: '#eef2ff', color: '#3730a3', flexShrink: 0,
+  },
+  dueBadge: {
+    fontSize: 11, fontWeight: 700, padding: '1px 6px', borderRadius: 4,
+    background: '#fef3c7', color: '#92400e', flexShrink: 0, marginLeft: 6,
+  },
+  riskBox: {
+    marginTop: 12, padding: '10px 12px', background: '#fff7ed',
+    border: '1px solid #fed7aa', borderRadius: 8,
+  },
+  riskTitle: { fontSize: 12, fontWeight: 700, color: '#c2410c', marginBottom: 5 },
+  fail: {
+    fontSize: 12, padding: '5px 9px', borderRadius: 6, marginBottom: 6,
+    background: '#fef2f2', color: '#b91c1c',
+  },
 };
 
 const fmtKst = (iso) => {
   const d = new Date(new Date(iso).getTime() + 9 * 3600 * 1000);
   return d.toISOString().slice(0, 16).replace('T', ' ');
 };
+
+/* ---------------- 요약 유틸 ---------------- */
+
+// 기간을 '월 단위'로 쪼갠다. 첫 달/마지막 달은 from~to 로 잘라낸다.
+function monthChunks(fromStr, toStr) {
+  const out = [];
+  if (!fromStr || !toStr || fromStr > toStr) return out;
+  let y = Number(fromStr.slice(0, 4));
+  let m = Number(fromStr.slice(5, 7));
+  const ty = Number(toStr.slice(0, 4));
+  const tm = Number(toStr.slice(5, 7));
+  if (!y || !m || !ty || !tm) return out;
+  while (y < ty || (y === ty && m <= tm)) {
+    const mm = String(m).padStart(2, '0');
+    const first = `${y}-${mm}-01`;
+    const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate(); // 다음 달 0일 = 이 달 마지막 날
+    const last = `${y}-${mm}-${String(lastDay).padStart(2, '0')}`;
+    out.push({
+      key: `${y}-${mm}`,
+      label: `${y}년 ${m}월`,
+      from: first < fromStr ? fromStr : first,
+      to: last > toStr ? toStr : last,
+    });
+    m += 1;
+    if (m > 12) { m = 1; y += 1; }
+  }
+  return out;
+}
+
+// 저장된 요약 1행이 '몇 월'인지. period_from/to 의 중간값으로 판단하므로
+// Edge Function 이 경계를 하루 어긋나게 저장해도 같은 월로 묶인다.
+function monthKeyOf(row) {
+  const a = Date.parse(`${String(row?.period_from || '').slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(a)) return null;
+  const b = Date.parse(`${String(row?.period_to || '').slice(0, 10)}T00:00:00Z`);
+  const mid = new Date(Number.isNaN(b) ? a : (a + b) / 2);
+  return `${mid.getUTCFullYear()}-${String(mid.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+const monthLabel = (key) => `${key.slice(0, 4)}년 ${Number(key.slice(5, 7))}월`;
+
+function cardTitle(row) {
+  const f = String(row?.period_from || '').slice(0, 10);
+  const t = String(row?.period_to || '').slice(0, 10);
+  const key = monthKeyOf(row);
+  const span = (Date.parse(`${t}T00:00:00Z`) - Date.parse(`${f}T00:00:00Z`)) / 86400000;
+  if (!key || !(span >= 0) || span > 45) return `${f} ~ ${t}`; // 월 단위가 아니면 기간 그대로
+  return monthLabel(key);
+}
+
+// Edge Function 은 영문 키를, supabase/chat_summary.sql 주석은 한글 키를 쓴다. 둘 다 받는다.
+const SUM_SECTIONS = [
+  { title: '핵심요약', keys: ['summary', '핵심요약'] },
+  { title: '납기', keys: ['delivery', '납기'] },
+  { title: '품질/클레임', keys: ['quality', '품질_클레임', '품질'] },
+  { title: '수량/단가', keys: ['price_qty', '수량_단가'] },
+  { title: '회신 필요', keys: ['our_todo', '우리_회신필요'] },
+];
+const RISK_KEYS = ['risks', '리스크'];
+
+// 항목이 문자열로 와도 객체로 와도 { content, styleNo, date } 로 맞춘다. 내용 없으면 버린다.
+function normItem(v) {
+  if (v == null) return null;
+  if (typeof v === 'string' || typeof v === 'number') {
+    const c = String(v).trim();
+    return c ? { content: c, styleNo: '', date: '' } : null;
+  }
+  if (typeof v !== 'object') return null;
+  const content = String(v.content ?? v['내용'] ?? v.text ?? '').trim();
+  if (!content) return null;
+  return {
+    content,
+    styleNo: String(v.style_no ?? v['품번'] ?? '').trim(),
+    date: String(v.date ?? v.due ?? v.due_date ?? v['변경일'] ?? v['기한'] ?? '').trim(),
+  };
+}
+
+function pickSection(json, keys) {
+  for (const k of keys) {
+    if (Array.isArray(json?.[k])) return json[k].map(normItem).filter(Boolean);
+  }
+  return [];
+}
+
+function SummaryCard({ row }) {
+  const json = row?.summary_json || {};
+  // 빈 섹션은 아예 렌더하지 않는다
+  const secs = SUM_SECTIONS
+    .map((s) => ({ title: s.title, items: pickSection(json, s.keys) }))
+    .filter((s) => s.items.length);
+  const risks = pickSection(json, RISK_KEYS);
+
+  return (
+    <div style={S.card}>
+      <div style={S.cardHead}>
+        <strong style={{ fontSize: 14 }}>{cardTitle(row)}</strong>
+        <span style={{ fontSize: 12, color: '#6b7280' }}>(메시지 {row?.message_count ?? 0}건)</span>
+        <div style={{ flex: 1 }} />
+        {row?.model && <span style={S.tag}>{row.model}</span>}
+      </div>
+
+      {secs.map((s) => (
+        <div key={s.title}>
+          <div style={S.secTitle}>{s.title}</div>
+          {s.items.map((it, i) => (
+            <div key={i} style={S.li}>
+              <span style={S.dot}>•</span>
+              {it.styleNo && <span style={S.badge}>{it.styleNo}</span>}
+              <span style={{ whiteSpace: 'pre-wrap' }}>{it.content}</span>
+              {it.date && <span style={S.dueBadge}>{it.date}</span>}
+            </div>
+          ))}
+        </div>
+      ))}
+
+      {!!risks.length && (
+        <div style={S.riskBox}>
+          <div style={S.riskTitle}>⚠ 리스크</div>
+          {risks.map((it, i) => (
+            <div key={i} style={{ ...S.li, color: '#9a3412' }}>
+              <span style={{ ...S.dot, color: '#fdba74' }}>•</span>
+              {it.styleNo && <span style={S.badge}>{it.styleNo}</span>}
+              <span style={{ whiteSpace: 'pre-wrap' }}>{it.content}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!secs.length && !risks.length && (
+        <div style={{ ...S.empty, padding: 16 }}>요약 내용이 비어 있습니다.</div>
+      )}
+    </div>
+  );
+}
 
 export default function VendorChatSummary() {
   const [vendors, setVendors] = useState([]);
@@ -91,6 +254,14 @@ export default function VendorChatSummary() {
 
   const [timeline, setTimeline] = useState([]);
   const [loadingTl, setLoadingTl] = useState(false);
+
+  // 요약 탭
+  const [summaries, setSummaries] = useState([]);
+  const [loadingSum, setLoadingSum] = useState(false);
+  const [gen, setGen] = useState(null);   // 진행 중일 때만 { i, total, label }
+  const [fails, setFails] = useState({}); // 월키 → 실패 메시지
+  const [regen, setRegen] = useState(false);
+  const [sumErr, setSumErr] = useState('');
 
   const vendor = useMemo(
     () => vendors.find((v) => v.id === vendorId) || null,
@@ -216,6 +387,110 @@ export default function VendorChatSummary() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, vendorId, from, to]);
 
+  /* ---------------- 요약 ---------------- */
+  const byPeriod = (a, b) => String(a.period_from).localeCompare(String(b.period_from));
+
+  // 기간과 '겹치는' 요약을 가져온다(경계가 하루 어긋나도 놓치지 않게).
+  const fetchSummaries = async () => {
+    if (!vendorId) return [];
+    setLoadingSum(true);
+    setSumErr('');
+    try {
+      const q = [
+        'select=*',
+        `vendor_id=eq.${encodeURIComponent(vendorId)}`,
+        'status=eq.done',
+        `period_to=gte.${from}`,
+        `period_from=lte.${to}`,
+        'order=period_from.asc',
+      ].join('&');
+      return (await sbFetch(`chat_summaries?${q}`)) || [];
+    } catch (e) {
+      setSumErr(`요약 조회 오류: ${e.message}`);
+      return null;
+    } finally {
+      setLoadingSum(false);
+    }
+  };
+
+  const loadSummaries = async () => {
+    const data = await fetchSummaries();
+    if (data) setSummaries(data);
+  };
+
+  useEffect(() => {
+    if (tab === 'summary' && !gen) loadSummaries();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, vendorId, from, to]);
+
+  // 월 단위로 쪼개서 한 번에 하나씩(병렬 금지) Edge Function 을 호출한다.
+  const generate = async () => {
+    if (!vendorId || gen) return;
+    const chunks = monthChunks(from, to);
+    if (!chunks.length) { setSumErr('기간을 확인하세요.'); return; }
+
+    setSumErr('');
+    setFails({});
+    const done = new Set(summaries.map(monthKeyOf).filter(Boolean));
+    const bad = {};
+
+    for (let i = 0; i < chunks.length; i++) {
+      const c = chunks[i];
+      setGen({ i: i + 1, total: chunks.length, label: c.label });
+
+      // 이미 요약이 있는 월은 기본적으로 건너뛴다
+      if (!regen && done.has(c.key)) continue;
+
+      try {
+        const r = await fetch(`${SUPABASE_URL}/functions/v1/hyper-api`, {
+          method: 'POST',
+          headers: sbHeaders,
+          body: JSON.stringify({
+            vendor_id: vendorId,
+            period_from: new Date(`${c.from}T00:00:00+09:00`).toISOString(),
+            period_to: new Date(`${c.to}T23:59:59+09:00`).toISOString(),
+          }),
+        });
+
+        // 404 = 그 달에 메시지가 없다. 조용히 건너뛴다.
+        if (r.status === 404) continue;
+
+        const text = await r.text();
+        if (!r.ok) throw new Error(`${r.status} ${(text || r.statusText).slice(0, 200)}`);
+        const j = text ? JSON.parse(text) : null;
+        if (!j?.ok) throw new Error(j?.error || '응답 형식 오류');
+
+        // 한 달 끝날 때마다 바로 화면에 붙인다
+        const row = {
+          id: j.summary_id || `local-${c.key}`,
+          vendor_id: vendorId,
+          period_from: c.from,
+          period_to: c.to,
+          message_count: j.message_count ?? 0,
+          summary_json: j.summary || {},
+          status: 'done',
+        };
+        setSummaries((prev) => [...prev.filter((s) => monthKeyOf(s) !== c.key), row].sort(byPeriod));
+        done.add(c.key);
+      } catch (e) {
+        // 그 달만 실패로 표시하고 다음 달로 계속
+        bad[c.key] = e.message;
+        setFails({ ...bad });
+      }
+    }
+
+    setGen(null);
+
+    // DB 를 정본으로 다시 읽되, 아직 DB 에 없는 월은 화면에 남겨둔다
+    const fresh = await fetchSummaries();
+    if (fresh) {
+      const keys = new Set(fresh.map(monthKeyOf).filter(Boolean));
+      setSummaries((prev) => [
+        ...fresh,
+        ...prev.filter((s) => String(s.id).startsWith('local-') && !keys.has(monthKeyOf(s))),
+      ].sort(byPeriod));
+    }
+  };
   /* ---------------- 렌더 ---------------- */
   return (
     <div style={S.wrap}>
@@ -363,10 +638,43 @@ export default function VendorChatSummary() {
 
           {/* --- 요약 --- */}
           {tab === 'summary' && (
-            <div style={S.empty}>
-              요약 기능은 다음 단계에서 붙입니다.<br />
-              먼저 "대화 불러오기"로 2026년 대화를 저장해 주세요.
-            </div>
+            <>
+              <div style={{ ...S.bar, padding: '0 0 12px' }}>
+                <button
+                  style={{ ...S.btn('primary'), opacity: gen || !vendorId ? 0.5 : 1 }}
+                  disabled={!!gen || !vendorId}
+                  onClick={generate}
+                >
+                  {gen ? `${gen.i}/${gen.total} 처리 중 (${gen.label})` : '요약 생성'}
+                </button>
+                <label style={{
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  fontSize: 12, color: '#6b7280', cursor: 'pointer',
+                }}>
+                  <input type="checkbox" checked={regen} onChange={(e) => setRegen(e.target.checked)} />
+                  다시 생성 (이미 요약된 월도 재요약)
+                </label>
+                <span style={{ fontSize: 12, color: '#9ca3af' }}>
+                  {monthChunks(from, to).length}개월 · 한 달씩 순차 처리
+                </span>
+              </div>
+
+              {sumErr && <div style={S.fail}>{sumErr}</div>}
+              {Object.entries(fails).map(([k, msg]) => (
+                <div key={k} style={S.fail}>{monthLabel(k)} 요약 실패 — {msg}</div>
+              ))}
+
+              {loadingSum && !gen && !summaries.length && <div style={S.empty}>불러오는 중...</div>}
+
+              {summaries.map((row) => <SummaryCard key={row.id} row={row} />)}
+
+              {!loadingSum && !gen && !summaries.length && (
+                <div style={S.empty}>
+                  저장된 요약이 없습니다.<br />
+                  "요약 생성"을 누르면 기간을 월 단위로 나눠 한 달씩 차례로 요약합니다.
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
