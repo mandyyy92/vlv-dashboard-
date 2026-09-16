@@ -175,7 +175,6 @@ const S = {
     borderBottom: '1px solid #e5e7eb',
   },
   caret: { color: '#9ca3af', fontSize: 11, flexShrink: 0 },
-  headCount: { fontSize: 12, color: '#6b7280', fontWeight: 400 },
   headSecs: { fontSize: 11, color: '#9ca3af', fontWeight: 400 },
   itemRow: { display: 'flex', gap: 8, padding: '6px 0' },
   itemHead: { display: 'flex', gap: 6, alignItems: 'baseline', flexWrap: 'wrap' },
@@ -382,14 +381,12 @@ function SummaryCard({ row, open, onToggle }) {
     .filter((s) => s.items.length);
 
   const counts = secs.map((s) => `${s.short} ${s.items.length}`).join(' · ');
-  const count = row?.message_count;
 
   return (
     <div style={{ ...S.card, background: '#f8f9fb' }}>
       <button style={S.cardToggle} onClick={onToggle}>
         <span style={S.caret}>{open ? '▾' : '▸'}</span>
         <strong style={{ fontSize: 14 }}>{cardTitle(row)}</strong>
-        {count != null && <span style={S.headCount}>{count}건</span>}
         <div style={{ flex: 1 }} />
         {counts && <span style={S.headSecs}>{counts}</span>}
         {row?.model && <span style={S.tag}>{row.model}</span>}
