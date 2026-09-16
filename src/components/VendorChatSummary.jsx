@@ -78,24 +78,39 @@ const S = {
   empty: { padding: 40, textAlign: 'center', color: '#9ca3af', fontSize: 14 },
 
   /* --- 요약 탭 --- */
-  secTitle: { fontSize: 12, fontWeight: 700, color: '#6b7280', margin: '12px 0 5px' },
+  // 섹션 색은 SUM_SECTIONS 의 color 를 받아 쓴다. '<색>1a' 는 같은 색 10% 투명도.
+  secBox: (c) => ({
+    background: '#fff', borderRadius: 8, marginBottom: 14, overflow: 'hidden',
+    border: '1px solid #e5e7eb', borderLeft: `4px solid ${c}`,
+  }),
+  secHead: (c) => ({
+    display: 'flex', alignItems: 'center', gap: 8,
+    padding: '10px 12px', borderBottom: '1px solid #f3f4f6',
+    fontSize: 13, fontWeight: 700, color: c,
+  }),
+  secCount: (c) => ({
+    fontSize: 11, fontWeight: 700, padding: '1px 7px', borderRadius: 10,
+    background: `${c}1a`, color: c,
+  }),
+  secDot: (c) => ({
+    width: 4, height: 4, borderRadius: '50%', background: c,
+    flexShrink: 0, marginTop: 7,
+  }),
+  dateChip: (c) => ({
+    fontSize: 11, fontWeight: 700, padding: '1px 6px', borderRadius: 4,
+    background: `${c}1a`, color: c, whiteSpace: 'nowrap',
+  }),
+  secBody: { padding: '6px 12px' },
+  headLineRow: { display: 'flex', gap: 8, padding: '3px 0' },
+  headLineDot: {
+    width: 5, height: 5, borderRadius: '50%', background: '#4b5563',
+    flexShrink: 0, marginTop: 7,
+  },
+  headLine: { fontSize: 14, fontWeight: 600, color: '#374151', lineHeight: 1.5 },
   badge: {
     fontSize: 11, fontWeight: 700, padding: '1px 6px', borderRadius: 4,
     background: '#eef2ff', color: '#3730a3', flexShrink: 0,
   },
-  dueBadge: {
-    fontSize: 11, fontWeight: 700, padding: '1px 6px', borderRadius: 4,
-    background: '#fef3c7', color: '#92400e', flexShrink: 0, marginLeft: 6,
-  },
-  sampleBadge: {
-    fontSize: 11, fontWeight: 700, padding: '1px 6px', borderRadius: 4,
-    background: '#cffafe', color: '#155e75', flexShrink: 0, marginLeft: 6,
-  },
-  riskBox: {
-    marginTop: 12, padding: '10px 12px', background: '#fff7ed',
-    border: '1px solid #fed7aa', borderRadius: 8,
-  },
-  riskTitle: { fontSize: 12, fontWeight: 700, color: '#c2410c', marginBottom: 5 },
   fail: {
     display: 'flex', alignItems: 'center', gap: 8,
     fontSize: 12, padding: '5px 9px', borderRadius: 6, marginBottom: 6,
@@ -150,7 +165,7 @@ const S = {
   caret: { color: '#9ca3af', fontSize: 11, flexShrink: 0 },
   headCount: { fontSize: 12, color: '#6b7280', fontWeight: 400 },
   headSecs: { fontSize: 11, color: '#9ca3af', fontWeight: 400 },
-  itemRow: { padding: '4px 0' },
+  itemRow: { display: 'flex', gap: 8, padding: '6px 0' },
   itemHead: { display: 'flex', gap: 6, alignItems: 'baseline', flexWrap: 'wrap' },
   itemTitle: { fontSize: 13, fontWeight: 600, color: '#374151', lineHeight: 1.5 },
   itemDetail: {
@@ -159,11 +174,7 @@ const S = {
   },
   tableWrap: { overflowX: 'auto' },
   table: { width: '100%', borderCollapse: 'collapse' },
-  th: {
-    padding: '4px 8px', textAlign: 'left', fontSize: 11, fontWeight: 700,
-    color: '#9ca3af', whiteSpace: 'nowrap', borderBottom: '1px solid #e5e7eb',
-  },
-  td: { padding: '7px 8px', verticalAlign: 'top', borderBottom: '1px solid #f3f4f6' },
+  td: { padding: '10px 12px', verticalAlign: 'top' },
   colNo: { width: 140, minWidth: 140 },
   colDate: { width: 110, minWidth: 110, textAlign: 'right' },
 };
@@ -240,14 +251,17 @@ function cardTitle(row) {
 const SUMMARY_KEYS = ['summary', '핵심요약'];
 const RISK_KEYS = ['risks', '리스크'];
 
-// 펼쳤을 때 나오는 섹션들. table:true 면 3열 표(품번|내용|날짜)로 렌더한다.
+// 펼쳤을 때 나오는 섹션들. table:true 면 2열 표(품번|내용|날짜)로 렌더한다.
 // short 는 카드 헤더 우측의 건수 요약("납기 8 · 샘플 3")에 쓰는 짧은 이름.
+// color 는 섹션 박스의 좌측 바·제목·건수 뱃지·날짜 뱃지에 함께 쓴다.
 const SUM_SECTIONS = [
-  { title: '납기', short: '납기', keys: ['delivery', '납기'], table: true, dateBadge: S.dueBadge },
-  { title: '샘플', short: '샘플', keys: ['sample', '샘플'], table: true, dateBadge: S.sampleBadge },
-  { title: '품질/클레임', short: '품질', keys: ['quality', '품질_클레임', '품질'] },
-  { title: '수량/단가', short: '단가', keys: ['price_qty', '수량_단가'] },
-  { title: '회신 필요', short: '회신', keys: ['our_todo', '우리_회신필요'], dateBadge: S.dueBadge },
+  { title: '납기', short: '납기', keys: ['delivery', '납기'], color: '#f59e0b', table: true },
+  { title: '샘플', short: '샘플', keys: ['sample', '샘플'], color: '#0891b2', table: true },
+  { title: '품질/클레임', short: '품질', keys: ['quality', '품질_클레임', '품질'], color: '#dc2626' },
+  { title: '수량/단가', short: '단가', keys: ['price_qty', '수량_단가'], color: '#7c3aed' },
+  { title: '회신 필요', short: '회신', keys: ['our_todo', '우리_회신필요'], color: '#2563eb' },
+  // 리스크도 같은 섹션 박스로 렌더한다
+  { title: '리스크', short: '리스크', keys: RISK_KEYS, color: '#ea580c' },
 ];
 
 // format_version 2 = { style_no, title, detail, date }.
@@ -283,42 +297,52 @@ const byDate = (a, b) => {
   return a.date.localeCompare(b.date);
 };
 
-function ItemLines({ items, dateBadge }) {
-  return items.map((it, i) => (
-    <div key={i} style={S.itemRow}>
+// 제목 + 상세 2단. 표에서도 같은 모양을 쓴다.
+function ItemBody({ it, color }) {
+  return (
+    <div style={{ flex: 1, minWidth: 0 }}>
       <div style={S.itemHead}>
         {it.styleNo && <span style={S.badge}>{it.styleNo}</span>}
         <span style={S.itemTitle}>{it.title}</span>
-        {it.date && dateBadge && <span style={dateBadge}>{it.date}</span>}
+        {it.date && <span style={S.dateChip(color)}>{it.date}</span>}
       </div>
       {it.detail && <div style={S.itemDetail}>{it.detail}</div>}
     </div>
-  ));
+  );
 }
 
-function ItemTable({ items, dateBadge }) {
+function ItemLines({ items, color }) {
+  return (
+    <div style={S.secBody}>
+      {items.map((it, i) => (
+        <div key={i} style={S.itemRow}>
+          <span style={S.secDot(color)} />
+          <ItemBody it={it} color={color} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// 납기/샘플: 품번 | 내용 | 날짜 3열. 섹션 헤더가 있으므로 표 헤더 행은 두지 않는다.
+function ItemTable({ items, color }) {
+  const rows = [...items].sort(byDate);
+  const line = (i) => (i === rows.length - 1 ? 'none' : '1px solid #f3f4f6');
   return (
     <div style={S.tableWrap}>
       <table style={S.table}>
-        <thead>
-          <tr>
-            <th style={{ ...S.th, ...S.colNo }}>품번</th>
-            <th style={S.th}>내용</th>
-            <th style={{ ...S.th, ...S.colDate }}>날짜</th>
-          </tr>
-        </thead>
         <tbody>
-          {[...items].sort(byDate).map((it, i) => (
+          {rows.map((it, i) => (
             <tr key={i}>
-              <td style={{ ...S.td, ...S.colNo }}>
+              <td style={{ ...S.td, ...S.colNo, borderBottom: line(i) }}>
                 {it.styleNo && <span style={S.badge}>{it.styleNo}</span>}
               </td>
-              <td style={S.td}>
+              <td style={{ ...S.td, borderBottom: line(i) }}>
                 <div style={S.itemTitle}>{it.title}</div>
                 {it.detail && <div style={S.itemDetail}>{it.detail}</div>}
               </td>
-              <td style={{ ...S.td, ...S.colDate }}>
-                {it.date && <span style={{ ...dateBadge, marginLeft: 0 }}>{it.date}</span>}
+              <td style={{ ...S.td, ...S.colDate, borderBottom: line(i) }}>
+                {it.date && <span style={S.dateChip(color)}>{it.date}</span>}
               </td>
             </tr>
           ))}
@@ -335,16 +359,12 @@ function SummaryCard({ row, open, onToggle }) {
   const secs = SUM_SECTIONS
     .map((s) => ({ ...s, items: pickSection(json, s.keys) }))
     .filter((s) => s.items.length);
-  const risks = pickSection(json, RISK_KEYS);
 
-  const counts = [
-    ...secs.map((s) => `${s.short} ${s.items.length}`),
-    ...(risks.length ? [`리스크 ${risks.length}`] : []),
-  ].join(' · ');
+  const counts = secs.map((s) => `${s.short} ${s.items.length}`).join(' · ');
   const count = row?.message_count;
 
   return (
-    <div style={S.card}>
+    <div style={{ ...S.card, background: '#f8f9fb' }}>
       <button style={S.cardToggle} onClick={onToggle}>
         <span style={S.caret}>{open ? '▾' : '▸'}</span>
         <strong style={{ fontSize: 14 }}>{cardTitle(row)}</strong>
@@ -354,38 +374,34 @@ function SummaryCard({ row, open, onToggle }) {
         {row?.model && <span style={S.tag}>{row.model}</span>}
       </button>
 
-      {/* 핵심요약은 접힌 상태에서도 3줄까지 보인다 */}
+      {/* 핵심요약은 섹션 박스 밖. 접힌 상태에서도 3줄까지 보인다 */}
       {!!head.length && (
-        <div style={{ marginTop: 8 }}>
-          <ItemLines items={open ? head : head.slice(0, 3)} />
-        </div>
-      )}
-
-      {open && secs.map((s) => (
-        <div key={s.title}>
-          <div style={S.secTitle}>{s.title}</div>
-          {s.table
-            ? <ItemTable items={s.items} dateBadge={s.dateBadge} />
-            : <ItemLines items={s.items} dateBadge={s.dateBadge} />}
-        </div>
-      ))}
-
-      {open && !!risks.length && (
-        <div style={S.riskBox}>
-          <div style={S.riskTitle}>⚠ 리스크</div>
-          {risks.map((it, i) => (
-            <div key={i} style={S.itemRow}>
-              <div style={S.itemHead}>
-                {it.styleNo && <span style={S.badge}>{it.styleNo}</span>}
-                <span style={{ ...S.itemTitle, color: '#9a3412' }}>{it.title}</span>
+        <div style={{ margin: '10px 0 14px' }}>
+          {(open ? head : head.slice(0, 3)).map((it, i) => (
+            <div key={i} style={S.headLineRow}>
+              <span style={S.headLineDot} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={S.headLine}>{it.title}</div>
+                {it.detail && <div style={S.itemDetail}>{it.detail}</div>}
               </div>
-              {it.detail && <div style={{ ...S.itemDetail, color: '#c2410c' }}>{it.detail}</div>}
             </div>
           ))}
         </div>
       )}
 
-      {open && !head.length && !secs.length && !risks.length && (
+      {open && secs.map((s) => (
+        <div key={s.title} style={S.secBox(s.color)}>
+          <div style={S.secHead(s.color)}>
+            <span>{s.title}</span>
+            <span style={S.secCount(s.color)}>{s.items.length}</span>
+          </div>
+          {s.table
+            ? <ItemTable items={s.items} color={s.color} />
+            : <ItemLines items={s.items} color={s.color} />}
+        </div>
+      ))}
+
+      {open && !head.length && !secs.length && (
         <div style={{ ...S.empty, padding: 16 }}>요약 내용이 비어 있습니다.</div>
       )}
     </div>
