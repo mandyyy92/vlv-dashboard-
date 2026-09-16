@@ -78,16 +78,7 @@ const S = {
   empty: { padding: 40, textAlign: 'center', color: '#9ca3af', fontSize: 14 },
 
   /* --- 요약 탭 --- */
-  cardHead: {
-    display: 'flex', alignItems: 'baseline', gap: 8,
-    paddingBottom: 8, borderBottom: '1px solid #e5e7eb',
-  },
   secTitle: { fontSize: 12, fontWeight: 700, color: '#6b7280', margin: '12px 0 5px' },
-  li: {
-    display: 'flex', gap: 6, alignItems: 'baseline',
-    padding: '3px 0', fontSize: 13, lineHeight: 1.55, color: '#374151',
-  },
-  dot: { color: '#c4c8d0', flexShrink: 0 },
   badge: {
     fontSize: 11, fontWeight: 700, padding: '1px 6px', borderRadius: 4,
     background: '#eef2ff', color: '#3730a3', flexShrink: 0,
@@ -150,6 +141,34 @@ const S = {
   },
   vErr: { fontSize: 12, color: '#b91c1c', lineHeight: 1.5 },
   vHint: { fontSize: 11, color: '#9ca3af', lineHeight: 1.5 },
+
+  /* --- 요약 카드: 제목/상세 2단, 납기·샘플 표 --- */
+  // 카드 헤더 전체가 펼침/접힘 버튼이다
+  cardToggle: {
+    display: 'flex', alignItems: 'baseline', gap: 8, width: '100%',
+    padding: 0, paddingBottom: 8, border: 'none', background: 'transparent',
+    font: 'inherit', textAlign: 'left', cursor: 'pointer',
+    borderBottom: '1px solid #e5e7eb',
+  },
+  caret: { color: '#9ca3af', fontSize: 11, flexShrink: 0 },
+  headCount: { fontSize: 12, color: '#6b7280', fontWeight: 400 },
+  headSecs: { fontSize: 11, color: '#9ca3af', fontWeight: 400 },
+  itemRow: { padding: '4px 0' },
+  itemHead: { display: 'flex', gap: 6, alignItems: 'baseline', flexWrap: 'wrap' },
+  itemTitle: { fontSize: 13, fontWeight: 600, color: '#374151', lineHeight: 1.5 },
+  itemDetail: {
+    fontSize: 12, color: '#6b7280', lineHeight: 1.5,
+    marginTop: 2, whiteSpace: 'pre-wrap',
+  },
+  tableWrap: { overflowX: 'auto' },
+  table: { width: '100%', borderCollapse: 'collapse' },
+  th: {
+    padding: '4px 8px', textAlign: 'left', fontSize: 11, fontWeight: 700,
+    color: '#9ca3af', whiteSpace: 'nowrap', borderBottom: '1px solid #e5e7eb',
+  },
+  td: { padding: '7px 8px', verticalAlign: 'top', borderBottom: '1px solid #f3f4f6' },
+  colNo: { width: 140, minWidth: 140 },
+  colDate: { width: 110, minWidth: 110, textAlign: 'right' },
 };
 
 
@@ -220,30 +239,35 @@ function cardTitle(row) {
 }
 
 // Edge Function 은 영문 키를, supabase/chat_summary.sql 주석은 한글 키를 쓴다. 둘 다 받는다.
-const SUM_SECTIONS = [
-  { title: '핵심요약', keys: ['summary', '핵심요약'] },
-  { title: '납기', keys: ['delivery', '납기'] },
-  // 샘플은 납기와 같은 형태([{ style_no, content, date }])지만 날짜 뱃지 색만 다르게 쓴다
-  { title: '샘플', keys: ['sample', '샘플'], dateBadge: S.sampleBadge },
-  { title: '품질/클레임', keys: ['quality', '품질_클레임', '품질'] },
-  { title: '수량/단가', keys: ['price_qty', '수량_단가'] },
-  { title: '회신 필요', keys: ['our_todo', '우리_회신필요'] },
-];
+const SUMMARY_KEYS = ['summary', '핵심요약'];
 const RISK_KEYS = ['risks', '리스크'];
 
-// 항목이 문자열로 와도 객체로 와도 { content, styleNo, date } 로 맞춘다. 내용 없으면 버린다.
+// 펼쳤을 때 나오는 섹션들. table:true 면 3열 표(품번|내용|날짜)로 렌더한다.
+// short 는 카드 헤더 우측의 건수 요약("납기 8 · 샘플 3")에 쓰는 짧은 이름.
+const SUM_SECTIONS = [
+  { title: '납기', short: '납기', keys: ['delivery', '납기'], table: true, dateBadge: S.dueBadge },
+  { title: '샘플', short: '샘플', keys: ['sample', '샘플'], table: true, dateBadge: S.sampleBadge },
+  { title: '품질/클레임', short: '품질', keys: ['quality', '품질_클레임', '품질'] },
+  { title: '수량/단가', short: '단가', keys: ['price_qty', '수량_단가'] },
+  { title: '회신 필요', short: '회신', keys: ['our_todo', '우리_회신필요'], dateBadge: S.dueBadge },
+];
+
+// format_version 2 = { style_no, title, detail, date }.
+// v1 로 저장된 기존 행에는 content 한 덩어리만 있으므로 그것도 title 로 받는다.
 function normItem(v) {
   if (v == null) return null;
   if (typeof v === 'string' || typeof v === 'number') {
-    const c = String(v).trim();
-    return c ? { content: c, styleNo: '', date: '' } : null;
+    const t = String(v).trim();
+    return t ? { styleNo: '', title: t, detail: '', date: '' } : null;
   }
   if (typeof v !== 'object') return null;
-  const content = String(v.content ?? v['내용'] ?? v.text ?? '').trim();
-  if (!content) return null;
+  const title = String(v.title ?? v.content ?? v['내용'] ?? v.text ?? '').trim();
+  const detail = String(v.detail ?? v['상세'] ?? '').trim();
+  if (!title && !detail) return null;
   return {
-    content,
     styleNo: String(v.style_no ?? v['품번'] ?? '').trim(),
+    title: title || detail,       // 제목 없이 상세만 오면 그것을 제목으로 올린다
+    detail: title ? detail : '',
     date: String(v.date ?? v.due ?? v.due_date ?? v['변경일'] ?? v['기한'] ?? '').trim(),
   };
 }
@@ -255,57 +279,115 @@ function pickSection(json, keys) {
   return [];
 }
 
-function SummaryCard({ row }) {
+// 날짜 오름차순. 날짜 없는 항목은 맨 뒤로.
+const byDate = (a, b) => {
+  if (!a.date !== !b.date) return a.date ? -1 : 1;
+  return a.date.localeCompare(b.date);
+};
+
+function ItemLines({ items, dateBadge }) {
+  return items.map((it, i) => (
+    <div key={i} style={S.itemRow}>
+      <div style={S.itemHead}>
+        {it.styleNo && <span style={S.badge}>{it.styleNo}</span>}
+        <span style={S.itemTitle}>{it.title}</span>
+        {it.date && dateBadge && <span style={dateBadge}>{it.date}</span>}
+      </div>
+      {it.detail && <div style={S.itemDetail}>{it.detail}</div>}
+    </div>
+  ));
+}
+
+function ItemTable({ items, dateBadge }) {
+  return (
+    <div style={S.tableWrap}>
+      <table style={S.table}>
+        <thead>
+          <tr>
+            <th style={{ ...S.th, ...S.colNo }}>품번</th>
+            <th style={S.th}>내용</th>
+            <th style={{ ...S.th, ...S.colDate }}>날짜</th>
+          </tr>
+        </thead>
+        <tbody>
+          {[...items].sort(byDate).map((it, i) => (
+            <tr key={i}>
+              <td style={{ ...S.td, ...S.colNo }}>
+                {it.styleNo && <span style={S.badge}>{it.styleNo}</span>}
+              </td>
+              <td style={S.td}>
+                <div style={S.itemTitle}>{it.title}</div>
+                {it.detail && <div style={S.itemDetail}>{it.detail}</div>}
+              </td>
+              <td style={{ ...S.td, ...S.colDate }}>
+                {it.date && <span style={{ ...dateBadge, marginLeft: 0 }}>{it.date}</span>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function SummaryCard({ row, open, onToggle }) {
   const json = row?.summary_json || {};
+  const head = pickSection(json, SUMMARY_KEYS);
   // 빈 섹션은 아예 렌더하지 않는다
   const secs = SUM_SECTIONS
-    .map((s) => ({
-      title: s.title,
-      dateBadge: s.dateBadge || S.dueBadge,
-      items: pickSection(json, s.keys),
-    }))
+    .map((s) => ({ ...s, items: pickSection(json, s.keys) }))
     .filter((s) => s.items.length);
   const risks = pickSection(json, RISK_KEYS);
 
+  const counts = [
+    ...secs.map((s) => `${s.short} ${s.items.length}`),
+    ...(risks.length ? [`리스크 ${risks.length}`] : []),
+  ].join(' · ');
+  const count = row?.message_count;
+
   return (
     <div style={S.card}>
-      <div style={S.cardHead}>
+      <button style={S.cardToggle} onClick={onToggle}>
+        <span style={S.caret}>{open ? '▾' : '▸'}</span>
         <strong style={{ fontSize: 14 }}>{cardTitle(row)}</strong>
-        <span style={{ fontSize: 12, color: '#6b7280' }}>
-          {row?.message_count == null ? '(건수 미기록)' : `(메시지 ${row.message_count}건)`}
-        </span>
+        {count != null && <span style={S.headCount}>{count}건</span>}
         <div style={{ flex: 1 }} />
+        {counts && <span style={S.headSecs}>{counts}</span>}
         {row?.model && <span style={S.tag}>{row.model}</span>}
-      </div>
+      </button>
 
-      {secs.map((s) => (
+      {/* 핵심요약은 접힌 상태에서도 3줄까지 보인다 */}
+      {!!head.length && (
+        <div style={{ marginTop: 8 }}>
+          <ItemLines items={open ? head : head.slice(0, 3)} />
+        </div>
+      )}
+
+      {open && secs.map((s) => (
         <div key={s.title}>
           <div style={S.secTitle}>{s.title}</div>
-          {s.items.map((it, i) => (
-            <div key={i} style={S.li}>
-              <span style={S.dot}>•</span>
-              {it.styleNo && <span style={S.badge}>{it.styleNo}</span>}
-              <span style={{ whiteSpace: 'pre-wrap' }}>{it.content}</span>
-              {it.date && <span style={s.dateBadge}>{it.date}</span>}
-            </div>
-          ))}
+          {s.table
+            ? <ItemTable items={s.items} dateBadge={s.dateBadge} />
+            : <ItemLines items={s.items} dateBadge={s.dateBadge} />}
         </div>
       ))}
 
-      {!!risks.length && (
+      {open && !!risks.length && (
         <div style={S.riskBox}>
           <div style={S.riskTitle}>⚠ 리스크</div>
           {risks.map((it, i) => (
-            <div key={i} style={{ ...S.li, color: '#9a3412' }}>
-              <span style={{ ...S.dot, color: '#fdba74' }}>•</span>
-              {it.styleNo && <span style={S.badge}>{it.styleNo}</span>}
-              <span style={{ whiteSpace: 'pre-wrap' }}>{it.content}</span>
+            <div key={i} style={S.itemRow}>
+              <div style={S.itemHead}>
+                {it.styleNo && <span style={S.badge}>{it.styleNo}</span>}
+                <span style={{ ...S.itemTitle, color: '#9a3412' }}>{it.title}</span>
+              </div>
+              {it.detail && <div style={{ ...S.itemDetail, color: '#c2410c' }}>{it.detail}</div>}
             </div>
           ))}
         </div>
       )}
 
-      {!secs.length && !risks.length && (
+      {open && !head.length && !secs.length && !risks.length && (
         <div style={{ ...S.empty, padding: 16 }}>요약 내용이 비어 있습니다.</div>
       )}
     </div>
@@ -334,6 +416,7 @@ export default function VendorChatSummary() {
   const [loadingSum, setLoadingSum] = useState(false);
   const [gen, setGen] = useState(null);   // 진행 중일 때만 { i, total, label }
   const [logs, setLogs] = useState([]);   // 진행 로그 [{ key, kind, text }]
+  const [openKeys, setOpenKeys] = useState({}); // 월키 → 사용자가 직접 펼친/접은 값
   const [sumErr, setSumErr] = useState('');
 
   // 업체 등록/수정
@@ -656,7 +739,7 @@ export default function VendorChatSummary() {
   };
 
   useEffect(() => {
-    if (tab === 'summary' && !gen) loadSummaries();
+    if (tab === 'summary' && !gen) { setOpenKeys({}); loadSummaries(); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, vendorId, from, to]);
 
@@ -739,6 +822,20 @@ export default function VendorChatSummary() {
       ].sort(byPeriod));
     }
   };
+  /* ---------------- 카드 펼침 ---------------- */
+  // summaries 는 period_from 오름차순이므로 마지막이 최신 월이다.
+  // openKeys 에 값이 있으면 사용자가 직접 누른 것, 없으면 최신 월만 펼친다.
+  const cardKey = (row) => monthKeyOf(row) || String(row?.id || '');
+  const latestKey = summaries.length ? cardKey(summaries[summaries.length - 1]) : null;
+  const isCardOpen = (row) => {
+    const k = cardKey(row);
+    return k in openKeys ? openKeys[k] : k === latestKey;
+  };
+  const toggleCard = (row) => {
+    const k = cardKey(row);
+    setOpenKeys((prev) => ({ ...prev, [k]: !(k in prev ? prev[k] : k === latestKey) }));
+  };
+
   /* ---------------- 렌더 ---------------- */
   return (
     <div style={S.wrap}>
@@ -844,7 +941,14 @@ export default function VendorChatSummary() {
 
               {loadingSum && !gen && !summaries.length && <div style={S.empty}>불러오는 중...</div>}
 
-              {summaries.map((row) => <SummaryCard key={row.id} row={row} />)}
+              {summaries.map((row) => (
+                <SummaryCard
+                  key={row.id}
+                  row={row}
+                  open={isCardOpen(row)}
+                  onToggle={() => toggleCard(row)}
+                />
+              ))}
 
               {!loadingSum && !gen && !summaries.length && (
                 <div style={S.empty}>
