@@ -113,6 +113,22 @@ const S = {
     background: `${c}1a`, color: c, whiteSpace: 'nowrap',
   }),
   secBody: { padding: '6px 12px' },
+  // 섹션 헤더 옆 미처리 건수("2 / 5")
+  secCount: { marginLeft: 8, fontSize: 11, fontWeight: 600, color: '#9ca3af' },
+  // 회신 필요: 체크박스가 붙는 줄. 줄 전체가 label 이라 글자를 눌러도 토글된다.
+  todoRow: { display: 'flex', gap: 8, padding: '6px 0', cursor: 'pointer' },
+  todoCheck: { width: 14, height: 14, marginTop: 3, flexShrink: 0, cursor: 'pointer', accentColor: '#2563eb' },
+  // done 은 목록에서 지우지 않고 취소선 + 흐린 글자색으로만 구분한다
+  todoTitle: (done) => ({
+    fontSize: 13, fontWeight: 600, lineHeight: 1.5,
+    color: done ? '#9ca3af' : '#374151',
+    textDecoration: done ? 'line-through' : 'none',
+  }),
+  todoDetail: (done) => ({
+    fontSize: 12, lineHeight: 1.5, marginTop: 2, whiteSpace: 'pre-wrap',
+    color: done ? '#9ca3af' : '#6b7280',
+    textDecoration: done ? 'line-through' : 'none',
+  }),
   headLineRow: { display: 'flex', gap: 8, padding: '3px 0' },
   headLineDot: {
     width: 5, height: 5, borderRadius: '50%', background: '#4b5563',
@@ -351,7 +367,8 @@ const SUM_SECTIONS = [
   { title: '샘플', short: '샘플', keys: ['sample', '샘플'], color: '#0891b2', table: true },
   { title: '품질/클레임', short: '품질', keys: ['quality', '품질_클레임', '품질'], color: '#dc2626' },
   { title: '수량/단가', short: '단가', keys: ['price_qty', '수량_단가'], color: '#7c3aed' },
-  { title: '회신 필요', short: '회신', keys: ['our_todo', '우리_회신필요'], color: '#2563eb' },
+  // 회신 필요만 summary_json 이 아니라 chat_action_items 를 읽는다(체크 상태를 저장해야 해서).
+  { title: '회신 필요', short: '회신', keys: ['our_todo', '우리_회신필요'], color: '#2563eb', action: true },
   // 이슈(summary_json 필드명은 risks)도 같은 섹션 박스로 렌더한다.
   // 화면 라벨만 '이슈'이고 RISK_KEYS 는 그대로라 DB 재요약이 필요 없다.
   { title: '이슈', short: '이슈', keys: RISK_KEYS, color: '#ea580c' },
@@ -417,6 +434,47 @@ function ItemLines({ items, color }) {
   );
 }
 
+// chat_action_items.content 는 "제목 — 상세" 형태. 구분자가 없으면 전체가 제목이다.
+function splitAction(content) {
+  const t = String(content || '').trim();
+  const i = t.indexOf(' — ');
+  return i < 0
+    ? { title: t, detail: '' }
+    : { title: t.slice(0, i).trim(), detail: t.slice(i + 3).trim() };
+}
+
+// 회신 필요: 체크박스 줄. 조회 순서(기한 오름차순)를 유지한 채 done 만 아래로 내린다.
+function TodoLines({ items, color, onToggle }) {
+  const rows = [...items].sort((a, b) => (a.status === 'done') - (b.status === 'done'));
+  return (
+    <div style={S.secBody}>
+      {rows.map((a) => {
+        const done = a.status === 'done';
+        const { title, detail } = splitAction(a.content);
+        return (
+          <label key={a.id} style={S.todoRow}>
+            <input
+              type="checkbox"
+              checked={done}
+              onChange={() => onToggle(a)}
+              style={S.todoCheck}
+            />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={S.itemHead}>
+                <span style={S.todoTitle(done)}>{title}</span>
+                {a.due_date && (
+                  <span style={{ ...S.dateChip(color), marginLeft: 'auto' }}>{a.due_date}</span>
+                )}
+              </div>
+              {detail && <div style={S.todoDetail(done)}>{detail}</div>}
+            </div>
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
 // 납기/샘플: 품번 | 내용 | 날짜 3열. 섹션 헤더가 있으므로 표 헤더 행은 두지 않는다.
 function ItemTable({ items, color }) {
   const rows = [...items].sort(byDate);
@@ -447,15 +505,16 @@ function ItemTable({ items, color }) {
   );
 }
 
-function SummaryCard({ row, open, onToggle }) {
+function SummaryCard({ row, open, onToggle, actions = [], onToggleAction }) {
   const json = row?.summary_json || {};
   const head = pickSection(json, SUMMARY_KEYS);
-  // 빈 섹션은 아예 렌더하지 않는다
+  // 빈 섹션은 아예 렌더하지 않는다. '회신 필요'의 원본은 actions(= chat_action_items).
   const secs = SUM_SECTIONS
-    .map((s) => ({ ...s, items: pickSection(json, s.keys) }))
+    .map((s) => ({ ...s, items: s.action ? actions : pickSection(json, s.keys) }))
     .filter((s) => s.items.length);
 
   const counts = secs.map((s) => `${s.short} ${s.items.length}`).join(' · ');
+  const openCnt = actions.filter((a) => a.status !== 'done').length;
 
   return (
     <div style={{ ...S.card, background: '#f8f9fb' }}>
@@ -484,10 +543,15 @@ function SummaryCard({ row, open, onToggle }) {
 
       {open && secs.map((s) => (
         <div key={s.title} style={S.secBox(s.color)}>
-          <div style={S.secHead(s.color)}>{s.title}</div>
-          {s.table
-            ? <ItemTable items={s.items} color={s.color} />
-            : <ItemLines items={s.items} color={s.color} />}
+          <div style={S.secHead(s.color)}>
+            {s.title}
+            {s.action && <span style={S.secCount}>{openCnt} / {s.items.length}</span>}
+          </div>
+          {s.action
+            ? <TodoLines items={s.items} color={s.color} onToggle={onToggleAction} />
+            : s.table
+              ? <ItemTable items={s.items} color={s.color} />
+              : <ItemLines items={s.items} color={s.color} />}
         </div>
       ))}
 
@@ -517,6 +581,7 @@ export default function VendorChatSummary() {
 
   // 요약 탭
   const [summaries, setSummaries] = useState([]);
+  const [actions, setActions] = useState({});   // summary_id → 회신 액션아이템 배열
   const [loadingSum, setLoadingSum] = useState(false);
   const [gen, setGen] = useState(null);   // 진행 중일 때만 { i, total, label }
   const [hold, setHold] = useState('');     // 실행이 끝난 뒤 3초 더 남는 진행 줄
@@ -880,9 +945,57 @@ export default function VendorChatSummary() {
     }
   };
 
+  // '회신 필요' 섹션의 원본. summary_json.our_todo 와 달리 id·status 가 있어 체크 상태를 저장할 수 있다.
+  // 결과는 summary_id 로 묶어 월 카드에 매칭한다.
+  const fetchActions = async () => {
+    if (!vendorId) return {};
+    try {
+      const q = [
+        `vendor_id=eq.${encodeURIComponent(vendorId)}`,
+        `type=eq.${encodeURIComponent('회신')}`,
+        'select=id,summary_id,content,due_date,status',
+        'order=due_date.asc.nullslast,id.asc',
+      ].join('&');
+      const rows = (await sbFetch(`chat_action_items?${q}`)) || [];
+      const by = {};
+      for (const r of rows) {
+        const k = String(r.summary_id ?? '');
+        (by[k] ||= []).push(r);
+      }
+      return by;
+    } catch (e) {
+      setSumErr(`회신 항목 조회 오류: ${e.message}`);
+      return {};
+    }
+  };
+
   const loadSummaries = async () => {
-    const data = await fetchSummaries();
+    const [data, acts] = await Promise.all([fetchSummaries(), fetchActions()]);
     if (data) setSummaries(data);
+    setActions(acts);
+  };
+
+  // 체크박스 토글 → status PATCH. 화면을 먼저 바꾸고 실패하면 되돌린다.
+  const toggleAction = async (a) => {
+    const next = a.status === 'done' ? 'open' : 'done';
+    const setStatus = (st) => setActions((prev) => {
+      const k = String(a.summary_id ?? '');
+      const list = prev[k];
+      if (!list) return prev;
+      return { ...prev, [k]: list.map((x) => (x.id === a.id ? { ...x, status: st } : x)) };
+    });
+
+    setStatus(next);
+    try {
+      await sbFetch(`chat_action_items?id=eq.${encodeURIComponent(a.id)}`, {
+        method: 'PATCH',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({ status: next }),
+      });
+    } catch (e) {
+      setStatus(a.status);
+      setSumErr(`회신 상태 저장 실패: ${e.message}`);
+    }
   };
 
   // 진행/결과 줄 타이머는 언마운트 때 정리한다
@@ -981,6 +1094,7 @@ export default function VendorChatSummary() {
         ...fresh,
         ...prev.filter((s) => String(s.id).startsWith('local-') && !keys.has(monthKeyOf(s))),
       ].sort(byPeriodDesc));
+      setActions(await fetchActions());
     }
 
     // 진행 줄은 3초 뒤 사라지고, 그 자리에 결과 줄이 5초 동안 표시된다.
@@ -1147,6 +1261,8 @@ export default function VendorChatSummary() {
                   row={row}
                   open={isCardOpen(row)}
                   onToggle={() => toggleCard(row)}
+                  actions={actions[String(row.id)] || []}
+                  onToggleAction={toggleAction}
                 />
               ))}
 
