@@ -198,7 +198,6 @@ const S = {
     borderBottom: '1px solid #e5e7eb',
   },
   caret: { color: '#9ca3af', fontSize: 11, flexShrink: 0 },
-  headSecs: { fontSize: 11, color: '#9ca3af', fontWeight: 400 },
   itemRow: { display: 'flex', gap: 8, padding: '6px 0' },
   itemHead: { display: 'flex', gap: 6, alignItems: 'baseline', flexWrap: 'wrap' },
   itemTitle: { fontSize: 13, fontWeight: 600, color: '#374151', lineHeight: 1.5 },
@@ -360,18 +359,17 @@ const SUMMARY_KEYS = ['summary', '핵심요약'];
 const RISK_KEYS = ['risks', '리스크'];
 
 // 펼쳤을 때 나오는 섹션들. table:true 면 2열 표(품번|내용|날짜)로 렌더한다.
-// short 는 카드 헤더 우측의 건수 요약("납기 8 · 샘플 3")에 쓰는 짧은 이름.
 // color 는 섹션 박스의 좌측 바·제목·건수 뱃지·날짜 뱃지에 함께 쓴다.
 const SUM_SECTIONS = [
-  { title: '납기', short: '납기', keys: ['delivery', '납기'], color: '#f59e0b', table: true },
-  { title: '샘플', short: '샘플', keys: ['sample', '샘플'], color: '#0891b2', table: true },
-  { title: '품질/클레임', short: '품질', keys: ['quality', '품질_클레임', '품질'], color: '#dc2626' },
-  { title: '수량/단가', short: '단가', keys: ['price_qty', '수량_단가'], color: '#7c3aed' },
+  { title: '납기', keys: ['delivery', '납기'], color: '#f59e0b', table: true },
+  { title: '샘플', keys: ['sample', '샘플'], color: '#0891b2', table: true },
+  { title: '품질/클레임', keys: ['quality', '품질_클레임', '품질'], color: '#dc2626' },
+  { title: '수량/단가', keys: ['price_qty', '수량_단가'], color: '#7c3aed' },
   // 회신 필요만 summary_json 이 아니라 chat_action_items 를 읽는다(체크 상태를 저장해야 해서).
-  { title: '회신 필요', short: '회신', keys: ['our_todo', '우리_회신필요'], color: '#2563eb', action: true },
+  { title: '회신 필요', keys: ['our_todo', '우리_회신필요'], color: '#2563eb', action: true },
   // 이슈(summary_json 필드명은 risks)도 같은 섹션 박스로 렌더한다.
   // 화면 라벨만 '이슈'이고 RISK_KEYS 는 그대로라 DB 재요약이 필요 없다.
-  { title: '이슈', short: '이슈', keys: RISK_KEYS, color: '#ea580c' },
+  { title: '이슈', keys: RISK_KEYS, color: '#ea580c' },
 ];
 
 // format_version 2 = { style_no, title, detail, date }.
@@ -513,7 +511,6 @@ function SummaryCard({ row, open, onToggle, actions = [], onToggleAction }) {
     .map((s) => ({ ...s, items: s.action ? actions : pickSection(json, s.keys) }))
     .filter((s) => s.items.length);
 
-  const counts = secs.map((s) => `${s.short} ${s.items.length}`).join(' · ');
   const openCnt = actions.filter((a) => a.status !== 'done').length;
 
   return (
@@ -521,9 +518,6 @@ function SummaryCard({ row, open, onToggle, actions = [], onToggleAction }) {
       <button style={S.cardToggle} onClick={onToggle}>
         <span style={S.caret}>{open ? '▾' : '▸'}</span>
         <strong style={{ fontSize: 14 }}>{cardTitle(row)}</strong>
-        <div style={{ flex: 1 }} />
-        {counts && <span style={S.headSecs}>{counts}</span>}
-        {row?.model && <span style={S.tag}>{row.model}</span>}
       </button>
 
       {/* 핵심요약은 섹션 박스 밖. 접힌 상태에서도 3줄까지 보인다 */}
