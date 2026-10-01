@@ -24,43 +24,67 @@ const SUPPLIERS=["자체제작","국내-베키(동대문)","수입-(복건)GL","
 const SUPPLIER_COLORS={"자체제작":"#E8A87C","국내-베키(동대문)":"#85CDCA","수입-(복건)GL":"#D5A4CF","수입-(광동)BJ":"#8B5CF6","수입-(복건)SY":"#3B82F6"};
 const SCHEDULE_SUP_STYLES={"인도":{color:"#16A34A",bg:"#F0FDF4",icon:"🇮🇳"},"코니키즈":{color:"#2563EB",bg:"#EFF6FF",icon:"🏭"},"성은교역":{color:"#D97706",bg:"#FFFBEB",icon:"📦"},"오중":{color:"#0891B2",bg:"#ECFEFF",icon:"🏢"}};
 
-// ─── Notion 발주DB(super-worker) 병합 ───
-// 진행상태 → 기존 캘린더 상태 색에 매핑(확인중=amber, 확정=green 계열).
-const NOTION_STATUS_COLOR={
+// ─── 입고 캘린더: 구글시트 동기화 뷰(v_inbound_calendar / v_print_calendar) ───
+// 상태 색상 — 캘린더 범례·카드·상세 패널 뱃지 공통.
+const ORDER_STATUS_COLOR={
   "발주중":{bg:"#F1F5F9",color:"#64748B"},
-  "생산중":{bg:"#FEF3C7",color:"#D97706"},
-  "선적 완료":{bg:"#DCFCE7",color:"#16A34A"},
+  "생산중":{bg:"#FEF3C7",color:"#F59E0B"},
+  "선적 완료":{bg:"#D1FAE5",color:"#10B981"},
   "입고 일정 확인중":{bg:"#FEF3C7",color:"#F59E0B"},
-  "입고 확정":{bg:"#DCFCE7",color:"#10B981"},
-  "입고 완료":{bg:"#D1FAE5",color:"#059669"},
+  "입고 확정":{bg:"#DBEAFE",color:"#3B82F6"},
+  "부분입고":{bg:"#F3E8FF",color:"#A855F7"},
+  "입고 완료":{bg:"#DCFCE7",color:"#16A34A"},
 };
-// super-worker GET → 캘린더 이벤트 매핑. 실패/지연해도 기존 캘린더 정상(빈 배열 반환).
-async function fetchNotionSchedule(){
-  try{
-    const r=await fetch(`${SUPABASE_URL}/functions/v1/super-worker`,{
-      method:"GET",
-      headers:{"Authorization":`Bearer ${SUPABASE_KEY}`,"apikey":SUPABASE_KEY},
-    });
-    if(!r.ok){console.warn("[super-worker] 응답 실패",r.status);return[];}
-    const data=await r.json();
-    const list=Array.isArray(data)?data:(data?.events||data?.data||[]);
-    return (list||[]).map(n=>({
-      _notion:true,
-      id:`notion-${n.id}`,
-      date:n.date,
-      orderDate:n.orderDate,
-      item:n.title||"",
-      round:n.round,
-      qty:n.qty||0,
-      received:n.received||0,
-      supplier:n.vendor||"",
-      status:n.status||"",
-      category:n.category||"",
-      code:n.code||"",
-      image:n.image||null,
-      colorSize:n.colorSize??"",
-    })).filter(n=>n.date);
-  }catch(e){console.warn("[super-worker] 호출 실패",e);return[];}
+const ORDER_STATUS_OPTIONS=Object.keys(ORDER_STATUS_COLOR);
+const toYmd=(d)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+// 옵션명 표기 정규화: "[버건디-M]" → "버건디/M"
+const fmtOption=(v)=>String(v||"").trim().replace(/^\[|\]$/g,"").trim().replace(/-/g,"/");
+
+// 두 뷰를 공통 이벤트 형태로 통일 (생산건=factory/order_qty, 프린팅 외주=vendor/req_qty).
+const mapCalendarRow=(r,source)=>({
+  id:`${source}-${r.row_key}`,
+  groupKey:r.group_key||"",
+  source,
+  date:r.eta,
+  orderDate:r.order_date,
+  receivedDate:r.received_date,
+  item:r.product_name||"",
+  displayName:r.display_name||r.product_name||"",
+  round:r.order_round,
+  qty:Number(source==="print"?r.req_qty:r.order_qty)||0,
+  received:r.received_qty,
+  supplier:(source==="print"?r.vendor:r.factory)||"",
+  status:r.status||"",
+  statusManual:!!r.status_manual,
+  code:r.product_code||"",
+  option:r.option_name||"",
+  season:r.season||"",
+  note:r.note||"",
+});
+
+// eta 범위(gte/lte)로 두 뷰를 조회 → 단일 이벤트 배열. 실패해도 캘린더는 빈 배열로 정상 렌더.
+async function fetchCalendarEvents(fromDate,toDate){
+  const range=`&eta=gte.${fromDate}${toDate?`&eta=lte.${toDate}`:""}`;
+  const load=async(view,source)=>{
+    try{
+      const r=await fetch(`${SUPABASE_URL}/rest/v1/${view}?select=*${range}&order=eta.asc&limit=2000`,{headers:sbHeaders});
+      if(!r.ok){console.warn(`[${view}] 응답 실패`,r.status);return[];}
+      const rows=await r.json();
+      return(rows||[]).filter(x=>x&&x.eta).map(x=>mapCalendarRow(x,source));
+    }catch(e){console.warn(`[${view}] 호출 실패`,e);return[];}
+  };
+  const[orders,prints]=await Promise.all([load("v_inbound_calendar","order"),load("v_print_calendar","print")]);
+  return[...orders,...prints];
+}
+
+// 상태 수동 지정 → order_status upsert. 시트 동기화가 건드리지 않는 테이블이라 지정 상태는 유지된다.
+async function saveOrderStatus(groupKey,source,status){
+  const r=await fetch(`${SUPABASE_URL}/rest/v1/order_status?on_conflict=group_key`,{
+    method:"POST",
+    headers:{...sbHeaders,Prefer:"resolution=merge-duplicates,return=minimal"},
+    body:JSON.stringify({group_key:groupKey,source,status,updated_at:new Date().toISOString()}),
+  });
+  if(!r.ok)throw new Error(`저장 실패 (${r.status})`);
 }
 const getSupColor=(s)=>{
   if(SUPPLIER_COLORS[s])return SUPPLIER_COLORS[s];
@@ -720,7 +744,9 @@ function PackingListTab(){
 // ─── Tab 2: 입고 스케줄 (Supabase - 캘린더+업체별) ───
 function ScheduleTab(){
   const[schedules,setSchedules]=useState([]);
-  const[notionEvents,setNotionEvents]=useState([]); // Notion 발주DB(super-worker) 병합 이벤트
+  const[calEvents,setCalEvents]=useState([]);           // 보이는 달 ±1개월 — v_inbound_calendar + v_print_calendar
+  const[upcomingEvents,setUpcomingEvents]=useState([]); // 이번주 월요일 이후 전체 — 요약 카드·검색 드롭다운용
+  const[calLoading,setCalLoading]=useState(true);
   const[loading,setLoading]=useState(true);
   const[viewMode,setViewMode]=useState("calendar");
   const[chatInput,setChatInput]=useState("");
@@ -756,9 +782,10 @@ function ScheduleTab(){
   const[inlineEdit,setInlineEdit]=useState(null);
   const[inlineDraft,setInlineDraft]=useState("");
   const[statusFilter,setStatusFilter]=useState("all"); // all | confirming | confirmed
-  const[calSearch,setCalSearch]=useState(""); // v77: 캘린더 Notion 검색
-  const[selectedDay,setSelectedDay]=useState(null); // v77: 날짜 상세 패널(dayStr)
-  const[commentData,setCommentData]=useState({}); // { [eventId]: {loading, data, error, open} } 노션 댓글·첨부
+  const[calSearch,setCalSearch]=useState(""); // 캘린더 검색(제품명·상품코드·차수·업체)
+  const[selectedDay,setSelectedDay]=useState(null); // 날짜 상세 패널(dayStr)
+  const[statusMenu,setStatusMenu]=useState(null); // 상태 드롭다운이 열린 group_key
+  const[statusBusy,setStatusBusy]=useState(null); // order_status 저장 중인 group_key
   const[baseQuery,setBaseQuery]=useState(""); // 베이스 아이템 검색어(상품명 영문)
   const[baseResults,setBaseResults]=useState(null); // null=미검색, []=결과없음
   const[baseSearching,setBaseSearching]=useState(false);
@@ -813,62 +840,82 @@ function ScheduleTab(){
     const data=await sb.get("schedules");
     setSchedules(data||[]);
     setLoading(false);
-    // Notion 발주DB 병합 (실패/지연해도 기존 캘린더는 정상 렌더, Notion 이벤트만 빈 배열)
-    try{const notion=await fetchNotionSchedule();setNotionEvents(notion);}
-    catch(e){console.warn("[super-worker] 병합 실패",e);setNotionEvents([]);}
   })();},[]);
 
-  // ── 홈에서 이동해온 요약 카드용 계산 (이번주 입고건 · 입고대기 현황) ──
-  // "이번주 입고건": Notion 발주DB 기준, 이번주=월~금(이미 지난 요일 포함)
-  const thisWeekNotion=useMemo(()=>{
+  // 이번주(월~일) 범위 — 요약 카드 기준
+  const weekRange=useMemo(()=>{
     const now=new Date();
-    const dow=now.getDay(); // 0=Sun..6=Sat
-    const mondayOffset=dow===0?-6:1-dow;
-    const monday=new Date(now.getFullYear(),now.getMonth(),now.getDate()+mondayOffset);
-    const friday=new Date(monday.getFullYear(),monday.getMonth(),monday.getDate()+4);
-    const ymd=(d)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-    const lo=ymd(monday),hi=ymd(friday);
-    return notionEvents.filter(n=>n.date&&n.date>=lo&&n.date<=hi).sort((a,b)=>(a.date||"").localeCompare(b.date||""));
-  },[notionEvents]);
-  const thisWeekNotionQty=useMemo(()=>thisWeekNotion.reduce((sum,n)=>sum+(n.qty||0),0),[thisWeekNotion]);
-  // 캘린더와 동일한 (title+round) 그룹핑 → "품목 그룹" 단위. 생산건 / 프린팅 외주 분리.
-  const thisWeekNotionGroups=useMemo(()=>{
+    const dow=now.getDay(); // 0=일 … 6=토
+    const monday=new Date(now.getFullYear(),now.getMonth(),now.getDate()+(dow===0?-6:1-dow));
+    const sunday=new Date(monday.getFullYear(),monday.getMonth(),monday.getDate()+6);
+    return{monday:toYmd(monday),sunday:toYmd(sunday)};
+  },[]);
+  // 캘린더 조회 범위 — 보이는 달의 전후 1개월
+  const monthRange=useMemo(()=>({
+    from:toYmd(new Date(currentMonth.year,currentMonth.month-1,1)),
+    to:toYmd(new Date(currentMonth.year,currentMonth.month+2,0)),
+  }),[currentMonth]);
+
+  // 달을 빠르게 넘기면 응답이 역순으로 도착할 수 있어 마지막 요청만 반영한다.
+  const calReqRef=useRef(0);
+  const reloadCalendar=useCallback(async()=>{
+    const seq=++calReqRef.current;
+    setCalLoading(true);
+    try{
+      const rows=await fetchCalendarEvents(monthRange.from,monthRange.to);
+      if(seq===calReqRef.current)setCalEvents(rows);
+    }finally{if(seq===calReqRef.current)setCalLoading(false);}
+  },[monthRange.from,monthRange.to]);
+  const reloadUpcoming=useCallback(async()=>{
+    setUpcomingEvents(await fetchCalendarEvents(weekRange.monday,null));
+  },[weekRange.monday]);
+  useEffect(()=>{reloadCalendar();},[reloadCalendar]);
+  useEffect(()=>{reloadUpcoming();},[reloadUpcoming]);
+
+  // ── 홈에서 이동해온 요약 카드용 계산 (이번주 입고건 · 입고대기 현황) ──
+  // "이번주 입고건": eta 가 이번 주 월~일 사이인 건
+  const thisWeekEvents=useMemo(()=>
+    upcomingEvents.filter(e=>e.date&&e.date>=weekRange.monday&&e.date<=weekRange.sunday)
+      .sort((a,b)=>(a.date||"").localeCompare(b.date||"")),
+  [upcomingEvents,weekRange]);
+  const thisWeekQty=useMemo(()=>thisWeekEvents.reduce((sum,e)=>sum+(Number(e.qty)||0),0),[thisWeekEvents]);
+  // group_key 단위(= 캘린더 카드 1개) 그룹핑. 생산건(order) / 프린팅 외주(print) 분리.
+  const thisWeekGroups=useMemo(()=>{
     const m=new Map();
-    thisWeekNotion.forEach(ev=>{
-      const key=`${ev.item||""}__${ev.round||""}`;
+    thisWeekEvents.forEach(ev=>{
+      const key=ev.groupKey||`${ev.displayName||""}__${ev.round||""}`;
       if(!m.has(key))m.set(key,{key,rep:ev,qty:0});
       m.get(key).qty+=(Number(ev.qty)||0);
     });
     const groups=Array.from(m.values());
-    const isOutsource=g=>{const t=(g.rep.item||"").toLowerCase();return t.includes("프린팅")||t.includes("외주");};
-    const outsource=groups.filter(isOutsource);
-    const production=groups.filter(g=>!isOutsource(g));
+    const outsource=groups.filter(g=>g.rep.source==="print");
+    const production=groups.filter(g=>g.rep.source!=="print");
     const sumQty=arr=>arr.reduce((s,g)=>s+g.qty,0);
-    return {all:groups,production,outsource,productionQty:sumQty(production),outsourceQty:sumQty(outsource)};
-  },[thisWeekNotion]);
-  // "입고대기 현황": Notion 발주DB(notionEvents) 기준, 오늘(00:00) 이후 예정건. 대상 5개 상태만("입고 완료" 제외)
+    return{all:groups,production,outsource,productionQty:sumQty(production),outsourceQty:sumQty(outsource)};
+  },[thisWeekEvents]);
+  // "입고대기 현황": 오늘 이후 예정건. "입고 완료"를 제외한 6개 상태만 집계.
   const[waitFilter,setWaitFilter]=useState(null); // 상태 배지 클릭 필터 (null=전체)
-  const TARGET_ST=["발주중","생산중","선적 완료","입고 일정 확인중","입고 확정"];
-  // 같은 발주(상품명+차수)의 옵션이 여러 건이면 대표 1건만 남김 — 캘린더 groupEvents와 동일 키, 대표=가장 이른 날짜
+  const TARGET_ST=ORDER_STATUS_OPTIONS.filter(s=>s!=="입고 완료");
+  // 같은 발주(group_key)의 옵션이 여러 건이면 대표 1건만 남김 — 대표=가장 이른 날짜
   const waitList=useMemo(()=>{
-    const _today=new Date();_today.setHours(0,0,0,0);
-    const rows=(notionEvents||[])
-      .filter(e=>e.date&&TARGET_ST.includes(e.status)&&new Date(e.date)>=_today)
-      .sort((a,b)=>new Date(a.date)-new Date(b.date));
+    const _today=toYmd(new Date());
+    const rows=(upcomingEvents||[])
+      .filter(e=>e.date&&TARGET_ST.includes(e.status)&&e.date>=_today)
+      .sort((a,b)=>(a.date||"").localeCompare(b.date||""));
     const seen=new Set();
-    return rows.filter(e=>{const k=`${e.item||""}__${e.round||""}`;if(seen.has(k))return false;seen.add(k);return true;});
-  },[notionEvents]);
+    return rows.filter(e=>{const k=e.groupKey||`${e.displayName||""}__${e.round||""}`;if(seen.has(k))return false;seen.add(k);return true;});
+  },[upcomingEvents]);
   // 배지 카운트도 대표(그룹) 기준 — 리스트 개수와 배지 합계가 일치
   const cnt=useMemo(()=>{const c={};TARGET_ST.forEach(s=>c[s]=0);waitList.forEach(e=>{c[e.status]=(c[e.status]||0)+1;});return c;},[waitList]);
   const shownWait=useMemo(()=>waitFilter?waitList.filter(e=>e.status===waitFilter):waitList,[waitList,waitFilter]);
 
-  // v77: 상세 패널 ESC 닫기
+  // 상세 패널 ESC 닫기 (상태 드롭다운이 열려 있으면 드롭다운부터 닫음)
   useEffect(()=>{
     if(!selectedDay)return;
-    const h=(e)=>{if(e.key==="Escape")setSelectedDay(null);};
+    const h=(e)=>{if(e.key==="Escape"){if(statusMenu)setStatusMenu(null);else setSelectedDay(null);}};
     window.addEventListener("keydown",h);
     return()=>window.removeEventListener("keydown",h);
-  },[selectedDay]);
+  },[selectedDay,statusMenu]);
 
   // 한국도착일 입력 시 오즈센터 도착일 자동계산 (+3일)
   const handleKrDate=(v)=>{
@@ -1238,68 +1285,62 @@ function ScheduleTab(){
     }
   };
 
-  // v77: 캘린더 검색 필터 (제품명/상품코드/차수/업체 부분일치, 대소문자 무시)
+  // 캘린더 검색 필터 (제품명/상품코드/차수/업체 부분일치, 대소문자 무시)
   const matchesCalSearch=(n)=>{
     const q=calSearch.trim().toLowerCase();
     if(!q)return true;
-    return [n.item,n.code,n.round,n.supplier].some(v=>v!=null&&String(v).toLowerCase().includes(q));
+    return [n.displayName,n.code,n.round,n.supplier].some(v=>v!=null&&String(v).toLowerCase().includes(q));
   };
-  // v77: 캘린더는 Notion 발주DB 이벤트만 표시 (로컬 ship/kr/oz 제외). 업체별 탭은 이 함수를 사용하지 않음.
+  // 캘린더는 구글시트 동기화 뷰 이벤트만 표시 (로컬 ship/kr/oz 제외). 업체별 탭은 이 함수를 사용하지 않음.
   const getEventsForDay=(day)=>{
     const dayStr=`${monthStr}-${String(day).padStart(2,"0")}`;
-    return notionEvents.filter(n=>n.date===dayStr&&matchesCalSearch(n)).map(n=>({...n,eventType:"notion",label:"발주"}));
-  };
-  const evtColor=(type,sup)=>{
-    if(type==="ship")return{bg:"#DCFCE7",color:"#16A34A",icon:"🚢"};
-    if(type==="kr")return{bg:"#DBEAFE",color:"#2563EB",icon:"🇰🇷"};
-    return{bg:"#FDE8E8",color:"#DC2626",icon:"📦"};
+    return calEvents.filter(n=>n.date===dayStr&&matchesCalSearch(n));
   };
 
-  // 상품(제품명+차수) 단위 그룹핑 — 그룹 순서·내부 순서 모두 원본 배열 순서 유지. 대표=첫 행.
+  // group_key 단위 그룹핑 = 캘린더 카드 1개. 그룹 순서·내부 순서 모두 원본 배열 순서 유지. 대표=첫 행.
   const groupEvents=(list)=>{
     const m=new Map();
     list.forEach(ev=>{
-      const key=`${ev.item||""}__${ev.round||""}`;
+      const key=ev.groupKey||`${ev.displayName||""}__${ev.round||""}`;
       if(!m.has(key))m.set(key,{key,rep:ev,events:[]});
       m.get(key).events.push(ev);
     });
     return Array.from(m.values()).map(g=>({
       ...g,
-      name:`${translateItemName(g.rep.item)}${g.rep.round?`_${g.rep.round}`:""}`,
+      name:`${g.rep.displayName||g.rep.item||""}${g.rep.round?`_${g.rep.round}차`:""}`,
       totalQty:g.events.reduce((s,e)=>s+(Number(e.qty)||0),0),
       totalReceived:g.events.reduce((s,e)=>s+(Number(e.received)||0),0),
     }));
   };
 
-  // 노션 댓글·첨부 토글 (이미 불러왔으면 펼침/접힘만, 중복 GET 안 함)
-  const toggleComments=async(pageId)=>{
-    const cur=commentData[pageId];
-    if(cur&&cur.data){setCommentData(p=>({...p,[pageId]:{...cur,open:!cur.open}}));return;}
-    if(cur&&cur.loading)return;
-    setCommentData(p=>({...p,[pageId]:{loading:true,open:true}}));
+  // 상태 직접 변경 — 낙관적 업데이트 후 order_status upsert, 성공하면 뷰를 다시 조회해 화면 갱신.
+  const changeStatus=async(group,newStatus)=>{
+    const key=group.key;
+    setStatusMenu(null);
+    if(!key||group.rep?.status===newStatus)return;
+    const prevCal=calEvents,prevUp=upcomingEvents;
+    const patch=(arr)=>arr.map(e=>e.groupKey===key?{...e,status:newStatus,statusManual:true}:e);
+    setCalEvents(patch);setUpcomingEvents(patch);
+    setStatusBusy(key);
     try{
-      const r=await fetch(`${SUPABASE_URL}/functions/v1/super-worker?comments=${encodeURIComponent(pageId)}`,{
-        method:"GET",
-        headers:{"Authorization":`Bearer ${SUPABASE_KEY}`,"apikey":SUPABASE_KEY},
-      });
-      if(!r.ok){setCommentData(p=>({...p,[pageId]:{loading:false,open:true,error:`불러오기 실패(${r.status})`}}));return;}
-      const data=await r.json();
-      setCommentData(p=>({...p,[pageId]:{loading:false,open:true,data}}));
+      await saveOrderStatus(key,group.rep.source,newStatus);
+      await Promise.all([reloadCalendar(),reloadUpcoming()]);
     }catch(e){
-      console.warn("[super-worker] 댓글 호출 실패",e);
-      setCommentData(p=>({...p,[pageId]:{loading:false,open:true,error:"불러오기 실패"}}));
-    }
+      console.error("[order_status] 저장 실패",e);
+      setCalEvents(prevCal);setUpcomingEvents(prevUp); // 실패 시 되돌림
+      alert("상태 변경 실패: "+(e&&e.message?e.message:e));
+    }finally{setStatusBusy(null);}
   };
 
   // D-day 계산
   const dday=(dateStr)=>{if(!dateStr)return"";const d=Math.ceil((new Date(dateStr)-new Date())/(86400000));return d<0?`${Math.abs(d)}일 지남`:d===0?"오늘":`D-${d}`;};
   const ddayColor=(dateStr)=>{if(!dateStr)return"#94A3B8";const d=Math.ceil((new Date(dateStr)-new Date())/(86400000));return d<0?"#DC2626":d<=3?"#D97706":"#2563EB";};
 
-  // v78: 캘린더 검색 드롭다운 — notionEvents 전체(현재 달 무관)에서 검색, "입고 완료" 제외, (제품명+차수) 그룹, date 오름차순
+  // 캘린더 검색 드롭다운 — 이번주 이후 전체(현재 달 무관)에서 검색, "입고 완료" 제외, group_key 그룹, date 오름차순
   const calSearchResults=(()=>{
     if(!calSearch.trim())return null;
     const isDone=(s)=>String(s||"").replace(/\s/g,"")==="입고완료";
-    const matched=notionEvents.filter(n=>n.date&&matchesCalSearch(n)&&!isDone(n.status));
+    const matched=upcomingEvents.filter(n=>n.date&&matchesCalSearch(n)&&!isDone(n.status));
     return groupEvents(matched).sort((a,b)=>String(a.rep.date||"").localeCompare(String(b.rep.date||"")));
   })();
   const gotoSearchResult=(ev)=>{
@@ -1321,37 +1362,37 @@ function ScheduleTab(){
 
     {/* 홈에서 이동: 이번주 입고건 / 입고대기 현황 (좌우 2단 · 좁은 폭이면 1단, 같은 높이) */}
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(320px,1fr))",gap:16,marginBottom:16,alignItems:"stretch"}}>
-      {/* 왼쪽: 이번주 입고건 */}
+      {/* 왼쪽: 이번주 입고건 (eta 가 이번 주 월~일) */}
       <div style={{padding:"22px 24px",borderRadius:14,background:"linear-gradient(135deg,#EFF6FF 0%,#F5F3FF 100%)",border:"1px solid #BFDBFE",boxShadow:"0 2px 8px rgba(59,130,246,0.08)",height:"100%",boxSizing:"border-box"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div>
             <div style={{fontSize:13,fontWeight:600,color:"#6366F1",letterSpacing:0.5,textTransform:"uppercase",marginBottom:6}}>📦 이번주 입고건</div>
-            <div style={{fontSize:38,fontWeight:800,color:"#3B82F6",letterSpacing:-1.5}}>{thisWeekNotionGroups.all.length}<span style={{fontSize:16,fontWeight:500,color:"#93C5FD",marginLeft:4}}>건</span></div>
-            <div style={{fontSize:14,color:"#6B7280",marginTop:6}}>총 {thisWeekNotionQty.toLocaleString()}장 입고 예정</div>
+            <div style={{fontSize:38,fontWeight:800,color:"#3B82F6",letterSpacing:-1.5}}>{thisWeekGroups.all.length}<span style={{fontSize:16,fontWeight:500,color:"#93C5FD",marginLeft:4}}>건</span></div>
+            <div style={{fontSize:14,color:"#6B7280",marginTop:6}}>총 {thisWeekQty.toLocaleString()}장 입고 예정</div>
           </div>
           <div style={{width:48,height:48,borderRadius:12,background:"#3B82F620",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24}}>📅</div>
         </div>
-        {/* 생산건 / 프린팅 외주 분리 (품목 그룹 기준) */}
+        {/* 생산건(v_inbound_calendar) / 프린팅 외주(v_print_calendar) 분리 */}
         <div style={{marginTop:14,display:"flex",gap:10}}>
           <div style={{flex:1,padding:"10px 12px",borderRadius:8,background:"rgba(255,255,255,0.6)",border:"1px solid #BFDBFE"}}>
             <div style={{fontSize:12,fontWeight:700,color:"#2563EB"}}>🏭 생산건</div>
-            <div style={{fontSize:22,fontWeight:800,color:"#1E40AF",marginTop:2,letterSpacing:-0.5}}>{thisWeekNotionGroups.production.length}<span style={{fontSize:12,fontWeight:600,color:"#93C5FD",marginLeft:2}}>건</span></div>
-            <div style={{fontSize:12,color:"#6B7280",marginTop:1}}>{thisWeekNotionGroups.productionQty.toLocaleString()}장</div>
+            <div style={{fontSize:22,fontWeight:800,color:"#1E40AF",marginTop:2,letterSpacing:-0.5}}>{thisWeekGroups.production.length}<span style={{fontSize:12,fontWeight:600,color:"#93C5FD",marginLeft:2}}>건</span></div>
+            <div style={{fontSize:12,color:"#6B7280",marginTop:1}}>{thisWeekGroups.productionQty.toLocaleString()}장</div>
           </div>
           <div style={{flex:1,padding:"10px 12px",borderRadius:8,background:"rgba(255,255,255,0.6)",border:"1px solid #DDD6FE"}}>
             <div style={{fontSize:12,fontWeight:700,color:"#7C3AED"}}>🖨 프린팅 외주</div>
-            <div style={{fontSize:22,fontWeight:800,color:"#5B21B6",marginTop:2,letterSpacing:-0.5}}>{thisWeekNotionGroups.outsource.length}<span style={{fontSize:12,fontWeight:600,color:"#C4B5FD",marginLeft:2}}>건</span></div>
-            <div style={{fontSize:12,color:"#6B7280",marginTop:1}}>{thisWeekNotionGroups.outsourceQty.toLocaleString()}장</div>
+            <div style={{fontSize:22,fontWeight:800,color:"#5B21B6",marginTop:2,letterSpacing:-0.5}}>{thisWeekGroups.outsource.length}<span style={{fontSize:12,fontWeight:600,color:"#C4B5FD",marginLeft:2}}>건</span></div>
+            <div style={{fontSize:12,color:"#6B7280",marginTop:1}}>{thisWeekGroups.outsourceQty.toLocaleString()}장</div>
           </div>
         </div>
         <div style={{marginTop:12,display:"flex",gap:6,flexWrap:"wrap"}}>
-          {thisWeekNotionGroups.all.slice(0,3).map((g,i)=>(<div key={g.key||i} style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#DBEAFE",color:"#1E40AF",fontWeight:600}}>{(g.rep.item||"").slice(0,8)}… {g.qty.toLocaleString()}장</div>))}
-          {thisWeekNotionGroups.all.length>3&&<div style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#E0E7FF",color:"#4338CA",fontWeight:600}}>+{thisWeekNotionGroups.all.length-3}건</div>}
-          {thisWeekNotionGroups.all.length===0&&<div style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#F1F5F9",color:"#94A3B8",fontWeight:600}}>이번주 입고건 없음</div>}
+          {thisWeekGroups.all.slice(0,3).map((g,i)=>(<div key={g.key||i} style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#DBEAFE",color:"#1E40AF",fontWeight:600}}>{(g.rep.displayName||"").slice(0,8)}… {g.qty.toLocaleString()}장</div>))}
+          {thisWeekGroups.all.length>3&&<div style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#E0E7FF",color:"#4338CA",fontWeight:600}}>+{thisWeekGroups.all.length-3}건</div>}
+          {thisWeekGroups.all.length===0&&<div style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#F1F5F9",color:"#94A3B8",fontWeight:600}}>이번주 입고건 없음</div>}
         </div>
       </div>
 
-      {/* 오른쪽: 입고대기 현황 (Notion notionEvents 기준, 왼쪽 카드와 padding·높이 통일) */}
+      {/* 오른쪽: 입고대기 현황 (같은 뷰 기준, 왼쪽 카드와 padding·높이 통일) */}
       <div style={{padding:"22px 24px",borderRadius:14,background:"linear-gradient(135deg,#FEFCE8 0%,#FFFBEB 100%)",border:"1px solid #FDE68A",boxShadow:"0 2px 8px rgba(234,179,8,0.08)",height:"100%",boxSizing:"border-box",display:"flex",flexDirection:"column",minHeight:0}}>
         {/* 헤더 (이번주 입고건 카드 타이틀과 폰트 통일) */}
         <div style={{marginBottom:14}}>
@@ -1361,7 +1402,7 @@ function ScheduleTab(){
         {/* (a) 상태별 카운트 배지 (클릭 필터, 카운트는 대표 그룹 기준) */}
         <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
           {TARGET_ST.map(st=>{
-            const c=NOTION_STATUS_COLOR[st]||{bg:"#F1F5F9",color:"#64748B"};
+            const c=ORDER_STATUS_COLOR[st]||{bg:"#F1F5F9",color:"#64748B"};
             const sel=waitFilter===st;
             const op=waitFilter?(sel?1:0.35):(cnt[st]>0?1:0.4);
             return(<div key={st} onClick={()=>setWaitFilter(sel?null:st)}
@@ -1374,14 +1415,12 @@ function ScheduleTab(){
             <div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:14}}>{waitFilter?`'${waitFilter}' 상태 건이 없습니다`:"예정된 입고대기 건이 없습니다"}</div>
           ):(
             shownWait.map((e,i)=>{
-              const c=NOTION_STATUS_COLOR[e.status]||{bg:"#EDE9FE",color:"#6D28D9"};
-              const d=new Date(e.date);
-              const ymd=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+              const c=ORDER_STATUS_COLOR[e.status]||{bg:"#EDE9FE",color:"#6D28D9"};
               return(<div key={e.id||i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"9px 12px",borderRadius:8,marginBottom:6,background:"#F8FAFC",border:"1px solid #E2E8F0"}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0,flex:1}}>
                   <span style={{flexShrink:0,width:8,height:8,borderRadius:"50%",background:c.color}} />
                   <div style={{fontSize:13,color:"#334155",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0}}>
-                    <b style={{color:"#1E293B"}}>[{ymd}]</b> · {e.supplier||"-"} · {translateItemName(e.item)||"(품명)"}{e.code?` ${e.code}`:""}
+                    <b style={{color:"#1E293B"}}>[{e.date}]</b> · {e.supplier||"-"} · {e.displayName||"(품명)"}{e.round?`_${e.round}차`:""}
                   </div>
                 </div>
                 <span style={{flexShrink:0,fontSize:12,fontWeight:700,color:c.color,whiteSpace:"nowrap"}}>{e.status}</span>
@@ -1431,12 +1470,13 @@ function ScheduleTab(){
     {viewMode==="calendar"&&<SectionCard title={`${year}년 ${month+1}월`} actions={
       <div style={{display:"flex",alignItems:"center",gap:14}}>
         <div style={{display:"flex",alignItems:"center",gap:10,fontSize:12,fontWeight:600,color:"#475569",flexWrap:"wrap"}}>
-          {Object.entries(NOTION_STATUS_COLOR).map(([label,c])=>(
+          {Object.entries(ORDER_STATUS_COLOR).map(([label,c])=>(
             <span key={label} style={{display:"inline-flex",alignItems:"center",gap:4}}>
               <span style={{display:"inline-block",width:9,height:9,borderRadius:"50%",background:c.color}} />{label}
             </span>
           ))}
         </div>
+        {calLoading&&<span style={{fontSize:12,color:"#94A3B8",whiteSpace:"nowrap"}}>⏳ 불러오는 중…</span>}
         <div style={{display:"flex",gap:6}}>
           <SmallBtn onClick={()=>setCurrentMonth(p=>{let m=p.month-1,y=p.year;if(m<0){m=11;y--;}return{year:y,month:m};})}>◀ 이전</SmallBtn>
           <SmallBtn primary onClick={()=>{const d=new Date();setCurrentMonth({year:d.getFullYear(),month:d.getMonth()});}}>오늘</SmallBtn>
@@ -1453,18 +1493,16 @@ function ScheduleTab(){
             {calSearchResults.length===0&&<div style={{padding:"14px 12px",fontSize:13,color:"#94A3B8"}}>검색 결과가 없습니다 (입고 완료 제외)</div>}
             {calSearchResults.slice(0,20).map(g=>{
               const ev=g.rep;
-              const nc=NOTION_STATUS_COLOR[ev.status]||{bg:"#EDE9FE",color:"#6D28D9"};
+              const nc=ORDER_STATUS_COLOR[ev.status]||{bg:"#EDE9FE",color:"#6D28D9"};
               return(
                 <div key={g.key} onClick={()=>gotoSearchResult(ev)}
                   style={{display:"flex",gap:10,alignItems:"center",padding:"9px 12px",borderBottom:"1px solid #F1F5F9",cursor:"pointer"}}
                   onMouseEnter={e=>e.currentTarget.style.background="#F8FAFC"} onMouseLeave={e=>e.currentTarget.style.background="#FFF"}>
-                  {ev.image
-                    ?<img src={ev.image} alt="" loading="lazy" onError={e=>{e.currentTarget.style.display="none";}} style={{width:34,height:34,borderRadius:6,objectFit:"cover",flexShrink:0,background:"#FFF",border:"1px solid rgba(0,0,0,0.06)"}} />
-                    :<div style={{width:34,height:34,borderRadius:6,flexShrink:0,background:"#F1F5F9"}} />}
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{fontSize:13,fontWeight:700,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.name}</div>
                     <div style={{display:"flex",alignItems:"center",gap:6,marginTop:3,fontSize:11,color:"#64748B"}}>
                       <span>📅 {ev.date}</span>
+                      {ev.supplier&&<span>· {ev.supplier}</span>}
                       {g.totalQty>0&&<span>· 발주 {g.totalQty.toLocaleString()}장</span>}
                     </div>
                   </div>
@@ -1488,7 +1526,7 @@ function ScheduleTab(){
           const dow=(firstDayOfWeek+i)%7;
           const isDragOver=dragOverDay===dayStr;
           const cellBg=isDragOver?"#DBEAFE":isToday?"#EFF6FF":dragItem?"#FAFAFA":"#FFF";
-          // v77: Notion 전용 캘린더. 셀 클릭 → 상세 패널. 카드 최대 3개 + "+N개 더".
+          // 셀 클릭 → 날짜 상세 패널. 카드 최대 3개 + "+N개 더".
           return(<div key={day} style={{background:cellBg,minHeight:110,padding:6,position:"relative",borderTop:isToday?"2px solid #3B82F6":"none",transition:"background 0.15s",cursor:events.length>0?"pointer":"default"}}
             onClick={()=>{if(events.length>0)setSelectedDay(dayStr);}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
@@ -1500,11 +1538,10 @@ function ScheduleTab(){
             </div>
             {groups.slice(0,3).map(g=>{
               const ev=g.rep;
-              const nc=NOTION_STATUS_COLOR[ev.status]||{bg:"#EDE9FE",color:"#6D28D9"};
+              const nc=ORDER_STATUS_COLOR[ev.status]||{bg:"#EDE9FE",color:"#6D28D9"};
               return(
                 <div key={g.key} title={`${ev.status||"발주"}${ev.supplier?" · "+ev.supplier:""}${ev.code?" · "+ev.code:""}`}
                   style={{display:"flex",gap:6,alignItems:"center",padding:"6px 7px",borderRadius:4,marginBottom:2,background:nc.bg,border:"1px solid "+nc.color+"55",fontSize:12,lineHeight:1.3,userSelect:"none"}}>
-                  {ev.image&&<img src={ev.image} alt="" loading="lazy" onError={e=>{e.currentTarget.style.display="none";}} style={{width:26,height:26,borderRadius:4,objectFit:"cover",flexShrink:0,background:"#FFF",border:"1px solid rgba(0,0,0,0.06)"}} />}
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:4,color:nc.color,fontWeight:600,fontSize:11}}>
                       <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ev.status||"발주"}</span>
@@ -1523,39 +1560,59 @@ function ScheduleTab(){
       </div>
     </SectionCard>}
 
-    {/* v77: 날짜 상세 패널 (읽기 전용, 오버레이 + X + ESC) */}
+    {/* 날짜 상세 패널 (오버레이 + X + ESC) — 상태 뱃지 클릭으로 상태 직접 변경 */}
     {selectedDay&&(()=>{
-      const dayEvents=notionEvents.filter(n=>n.date===selectedDay&&matchesCalSearch(n));
+      const dayEvents=calEvents.filter(n=>n.date===selectedDay&&matchesCalSearch(n));
       const has=(v)=>v!==null&&v!==undefined&&v!=="";
       const dayTotalQty=dayEvents.reduce((s,ev)=>s+(Number(ev.qty)||0),0);
       const dayGroups=groupEvents(dayEvents);
       const colTh={padding:"5px 4px",textAlign:"left",fontSize:10,fontWeight:700,color:"#94A3B8",borderBottom:"1px solid #E2E8F0",whiteSpace:"nowrap"};
       const colTd={padding:"5px 4px",fontSize:11,color:"#334155",borderBottom:"1px solid #F1F5F9",verticalAlign:"top"};
+      const closePanel=()=>{setStatusMenu(null);setSelectedDay(null);};
       return(
-        <div onClick={()=>setSelectedDay(null)} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.5)",display:"flex",justifyContent:"flex-end",zIndex:1000}}>
-          <div onClick={e=>e.stopPropagation()} style={{background:"#FFF",width:"min(560px, 92vw)",height:"100%",overflowY:"auto",boxShadow:"-8px 0 30px rgba(0,0,0,0.2)",padding:24,boxSizing:"border-box"}}>
+        <div onClick={closePanel} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.5)",display:"flex",justifyContent:"flex-end",zIndex:1000}}>
+          <div onClick={e=>{e.stopPropagation();setStatusMenu(null);}} style={{background:"#FFF",width:"min(560px, 92vw)",height:"100%",overflowY:"auto",boxShadow:"-8px 0 30px rgba(0,0,0,0.2)",padding:24,boxSizing:"border-box"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
               <div style={{fontSize:18,fontWeight:700,color:"#0F172A"}}>📅 {selectedDay}</div>
-              <button onClick={()=>setSelectedDay(null)} style={{border:"none",background:"#F1F5F9",borderRadius:8,width:32,height:32,fontSize:18,cursor:"pointer",color:"#475569"}}>✕</button>
+              <button onClick={closePanel} style={{border:"none",background:"#F1F5F9",borderRadius:8,width:32,height:32,fontSize:18,cursor:"pointer",color:"#475569"}}>✕</button>
             </div>
             <div style={{fontSize:14,color:"#64748B",marginBottom:16}}>입고 예정 {dayEvents.length}건(상품 {dayGroups.length}종){dayTotalQty>0?` · 총 ${dayTotalQty.toLocaleString()}장`:""}</div>
             {dayGroups.map(g=>{
               const ev=g.rep;
-              const nc=NOTION_STATUS_COLOR[ev.status]||{bg:"#EDE9FE",color:"#6D28D9"};
-              const rawId=String(ev.id).replace(/^notion-/,"").replace(/-/g,"");
-              // 생산공장(업체): 노션 vendor→supplier. 그룹 내 중복 제거, 없으면 미표시.
+              const nc=ORDER_STATUS_COLOR[ev.status]||{bg:"#EDE9FE",color:"#6D28D9"};
+              // 업체: 생산건=생산공장(factory), 프린팅 외주=업체(vendor). 그룹 내 중복 제거.
               const gSuppliers=[...new Set(g.events.map(o=>String(o.supplier||"").trim()).filter(Boolean))].join(", ");
+              const menuOpen=statusMenu===g.key;
+              const busy=statusBusy===g.key;
               return(<div key={g.key} style={{border:"1px solid #E2E8F0",borderRadius:12,padding:16,marginBottom:14}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:10}}>
-                  <div style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}>
-                    {ev.image&&<img src={ev.image} alt="" loading="lazy" onError={e=>{e.currentTarget.style.display="none";}} style={{width:44,height:44,borderRadius:8,objectFit:"cover",flexShrink:0,background:"#F8FAFC",border:"1px solid #E2E8F0"}} />}
-                    <div style={{minWidth:0}}>
-                      <div style={{fontSize:16,fontWeight:700,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.name}</div>
-                      {gSuppliers&&<div style={{fontSize:12,color:"#94A3B8",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>🏭 {gSuppliers}</div>}
-                      <div style={{fontSize:12,color:"#94A3B8",marginTop:2}}>총 {g.totalQty.toLocaleString()}장 · {g.events.length}옵션</div>
-                    </div>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:10}}>
+                  <div style={{minWidth:0}}>
+                    <div style={{fontSize:16,fontWeight:700,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.name}</div>
+                    {gSuppliers&&<div style={{fontSize:12,color:"#94A3B8",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ev.source==="print"?"🖨":"🏭"} {gSuppliers}</div>}
+                    <div style={{fontSize:12,color:"#94A3B8",marginTop:2}}>총 {g.totalQty.toLocaleString()}장 · {g.events.length}옵션</div>
                   </div>
-                  {ev.status&&<span style={{fontSize:12,fontWeight:700,color:nc.color,background:nc.bg,border:"1px solid "+nc.color+"55",borderRadius:6,padding:"2px 8px",whiteSpace:"nowrap",flexShrink:0}}>{ev.status}</span>}
+                  {/* 상태 뱃지 클릭 → 드롭다운. 수동 지정(status_manual)이면 뱃지 안에 작은 점(•) */}
+                  <div onClick={e=>e.stopPropagation()} style={{position:"relative",flexShrink:0}}>
+                    <button onClick={()=>setStatusMenu(menuOpen?null:g.key)} disabled={busy} title="클릭하여 상태 변경"
+                      style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:12,fontWeight:700,color:nc.color,background:nc.bg,border:"1px solid "+nc.color+"55",borderRadius:6,padding:"3px 9px",whiteSpace:"nowrap",cursor:busy?"wait":"pointer",opacity:busy?0.6:1}}>
+                      {ev.statusManual&&<span title="수동 지정됨" style={{fontSize:14,lineHeight:1}}>•</span>}
+                      {ev.status||"상태 지정"}
+                      <span style={{fontSize:9,opacity:0.7}}>▼</span>
+                    </button>
+                    {menuOpen&&(
+                      <div style={{position:"absolute",top:"calc(100% + 4px)",right:0,minWidth:160,background:"#FFF",border:"1px solid #E2E8F0",borderRadius:10,boxShadow:"0 12px 32px rgba(15,23,42,0.16)",zIndex:60,overflow:"hidden"}}>
+                        {ORDER_STATUS_OPTIONS.map(st=>{
+                          const c=ORDER_STATUS_COLOR[st];
+                          const sel=ev.status===st;
+                          return(<div key={st} onClick={()=>changeStatus(g,st)}
+                            style={{display:"flex",alignItems:"center",gap:8,padding:"8px 12px",fontSize:13,fontWeight:sel?700:500,color:"#334155",background:sel?"#F8FAFC":"#FFF",cursor:"pointer",whiteSpace:"nowrap"}}
+                            onMouseEnter={e=>e.currentTarget.style.background="#F1F5F9"} onMouseLeave={e=>e.currentTarget.style.background=sel?"#F8FAFC":"#FFF"}>
+                            <span style={{width:9,height:9,borderRadius:"50%",background:c.color,flexShrink:0}} />{st}
+                          </div>);
+                        })}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div style={{overflowX:"auto",borderRadius:8,border:"1px solid #EEF2F6"}}>
                   <table style={{width:"100%",borderCollapse:"collapse"}}>
@@ -1566,15 +1623,16 @@ function ScheduleTab(){
                     <tbody>
                       {g.events.map((o,oi)=>{
                         const recNum=has(o.received)&&Number.isFinite(Number(o.received))?Number(o.received):null;
+                        const opt=fmtOption(o.option);
                         return(
                         <tr key={o.id||oi}>
                           <td style={{...colTd,whiteSpace:"nowrap"}}>{has(o.orderDate)?o.orderDate:"-"}</td>
                           <td style={{...colTd,whiteSpace:"nowrap"}}>{has(o.date)?o.date:"-"}</td>
                           <td style={colTd}>{has(o.round)?o.round:"-"}</td>
-                          <td style={colTd}>{has(o.colorSize)?o.colorSize:"-"}</td>
+                          <td style={colTd}>{opt||"-"}</td>
                           <td style={{...colTd,textAlign:"right",fontWeight:700,color:"#0F172A",whiteSpace:"nowrap"}}>{(Number(o.qty)||0).toLocaleString()}</td>
                           <td style={{...colTd,textAlign:"right",fontWeight:700,color:recNum!==null?"#0F766E":"#94A3B8",whiteSpace:"nowrap"}}>{recNum!==null?recNum.toLocaleString():"-"}</td>
-                          <td style={{...colTd,textAlign:"right",whiteSpace:"nowrap"}}>{has(o.amount)?(Number.isFinite(Number(o.amount))?Number(o.amount).toLocaleString()+"원":String(o.amount)):"-"}</td>
+                          <td style={{...colTd,textAlign:"right",whiteSpace:"nowrap",color:"#94A3B8"}}>-</td>
                         </tr>);
                       })}
                       <tr style={{background:"#FAFAF9"}}>
@@ -1586,44 +1644,6 @@ function ScheduleTab(){
                     </tbody>
                   </table>
                 </div>
-                <div style={{marginTop:12,display:"flex",alignItems:"center",gap:14}}>
-                  <a href={`https://www.notion.so/${rawId}`} target="_blank" rel="noreferrer" style={{fontSize:13,fontWeight:600,color:"#2563EB",textDecoration:"none"}}>↗ 노션 열기</a>
-                  <button onClick={()=>toggleComments(rawId)} style={{border:"none",background:"none",padding:0,fontSize:13,fontWeight:600,color:"#7C3AED",cursor:"pointer"}}>
-                    💬 댓글·첨부 {commentData[rawId]?.open?"접기":"보기"}
-                  </button>
-                </div>
-                {commentData[rawId]?.open&&(()=>{
-                  const cd=commentData[rawId];
-                  const thumb={width:84,height:84,borderRadius:8,objectFit:"cover",background:"#F1F5F9",border:"1px solid #E2E8F0",cursor:"pointer",flexShrink:0};
-                  return(<div style={{marginTop:10,background:"#FAFAF9",border:"1px solid #EEF2F6",borderRadius:10,padding:"10px 12px"}}>
-                    {cd.loading&&<div style={{fontSize:13,color:"#94A3B8"}}>불러오는 중…</div>}
-                    {!cd.loading&&cd.error&&<div style={{fontSize:13,color:"#DC2626"}}>{cd.error}</div>}
-                    {!cd.loading&&!cd.error&&cd.data&&(()=>{
-                      const{comments=[],bodyImages=[],commentsError}=cd.data;
-                      return(<>
-                        {commentsError&&<div style={{fontSize:12,color:"#B45309",background:"#FFFBEB",border:"1px solid #FDE68A",borderRadius:6,padding:"4px 8px",marginBottom:8}}>댓글 권한 미설정</div>}
-                        <div style={{fontSize:12,fontWeight:700,color:"#94A3B8",marginBottom:6,letterSpacing:0.3}}>💬 댓글</div>
-                        {comments.length===0?(
-                          <div style={{fontSize:13,color:"#94A3B8",marginBottom:bodyImages.length>0?10:0}}>댓글 없음</div>
-                        ):comments.map((c,ci)=>(
-                          <div key={ci} style={{marginBottom:8,paddingBottom:8,borderBottom:ci<comments.length-1?"1px solid #F1F5F9":"none"}}>
-                            {c.text&&<div style={{fontSize:13,color:"#334155",whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{c.text}</div>}
-                            {c.at&&<div style={{fontSize:11,color:"#94A3B8",marginTop:2}}>{String(c.at).replace("T"," ").slice(0,16)}</div>}
-                            {Array.isArray(c.images)&&c.images.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:6}}>
-                              {c.images.map((src,ii)=>(<img key={ii} src={src} alt="" loading="lazy" referrerPolicy="no-referrer" onError={e=>{e.currentTarget.style.display="none";}} onClick={()=>window.open(src,"_blank","noopener")} style={thumb} />))}
-                            </div>}
-                          </div>
-                        ))}
-                        {bodyImages.length>0&&<>
-                          <div style={{fontSize:12,fontWeight:700,color:"#94A3B8",margin:"10px 0 6px",letterSpacing:0.3}}>🖼 본문 이미지</div>
-                          <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-                            {bodyImages.map((src,bi)=>(<img key={bi} src={src} alt="" loading="lazy" referrerPolicy="no-referrer" onError={e=>{e.currentTarget.style.display="none";}} onClick={()=>window.open(src,"_blank","noopener")} style={thumb} />))}
-                          </div>
-                        </>}
-                      </>);
-                    })()}
-                  </div>);
-                })()}
               </div>);
             })}
             {dayGroups.length===0&&<div style={{textAlign:"center",color:"#94A3B8",padding:30}}>표시할 발주가 없습니다.</div>}
