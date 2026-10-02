@@ -1679,10 +1679,11 @@ function ScheduleTab(){
       const dayGroups=groupEvents(dayEvents);
       const colTh={padding:"5px 4px",textAlign:"left",fontSize:10,fontWeight:700,color:"#94A3B8",borderBottom:"1px solid #E2E8F0",whiteSpace:"nowrap"};
       const colTd={padding:"5px 4px",fontSize:11,color:"#334155",borderBottom:"1px solid #F1F5F9",verticalAlign:"top"};
+      const oneLine={whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"};
       const closePanel=()=>{setStatusMenu(null);setSelectedDay(null);};
       return(
         <div onClick={closePanel} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.5)",display:"flex",justifyContent:"flex-end",zIndex:1000}}>
-          <div onClick={e=>{e.stopPropagation();setStatusMenu(null);}} style={{background:"#FFF",width:"min(560px, 92vw)",height:"100%",overflowY:"auto",boxShadow:"-8px 0 30px rgba(0,0,0,0.2)",padding:24,boxSizing:"border-box"}}>
+          <div onClick={e=>{e.stopPropagation();setStatusMenu(null);}} style={{background:"#FFF",width:"min(1100px, 92vw)",height:"100%",overflowY:"auto",boxShadow:"-8px 0 30px rgba(0,0,0,0.2)",padding:24,boxSizing:"border-box"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
               <div style={{fontSize:18,fontWeight:700,color:"#0F172A"}}>📅 {selectedDay}</div>
               <button onClick={closePanel} style={{border:"none",background:"#F1F5F9",borderRadius:8,width:32,height:32,fontSize:18,cursor:"pointer",color:"#475569"}}>✕</button>
@@ -1732,11 +1733,16 @@ function ScheduleTab(){
                   </div>
                 </div>
                 <div style={{overflowX:"auto",borderRadius:8,border:"1px solid #EEF2F6"}}>
-                  <table style={{width:"100%",borderCollapse:"collapse"}}>
+                  <table style={{width:"100%",minWidth:980,tableLayout:"fixed",borderCollapse:"collapse"}}>
+                    <colgroup>
+                      <col style={{width:56}} /><col style={{width:90}} /><col /><col style={{width:110}} />
+                      <col style={{width:80}} /><col style={{width:80}} /><col style={{width:80}} />
+                      <col style={{width:110}} /><col style={{width:110}} /><col style={{width:110}} />
+                    </colgroup>
                     <thead><tr style={{background:"#F8FAFC"}}>
-                      <th style={{...colTh,width:32}}></th><th style={colTh}>상품코드</th><th style={colTh}>상품명</th><th style={colTh}>옵션</th>
+                      <th style={colTh}></th><th style={colTh}>상품코드</th><th style={colTh}>상품명</th><th style={colTh}>옵션</th>
                       <th style={{...colTh,textAlign:"right"}}>발주수량</th><th style={{...colTh,textAlign:"right"}}>입고수량</th><th style={{...colTh,textAlign:"right"}}>잔량</th>
-                      <th style={colTh}>입고예정일</th><th style={colTh}>조정입고일</th><th style={colTh}>실입고일</th>
+                      <th style={{...colTh,textAlign:"center"}}>입고예정일</th><th style={{...colTh,textAlign:"center"}}>조정입고일</th><th style={{...colTh,textAlign:"center"}}>실입고일</th>
                     </tr></thead>
                     <tbody>
                       {g.events.map((o,oi)=>{
@@ -1748,14 +1754,14 @@ function ScheduleTab(){
                         <tr key={o.id||oi} style={has(o.receivedDate)?{background:"#F0FDF4"}:undefined}>
                           <td style={{...colTd,verticalAlign:"middle"}}><CalThumb src={o.imageUrl} size={32} /></td>
                           <td style={{...colTd,whiteSpace:"nowrap"}}>{o.code||"-"}</td>
-                          <td style={colTd}>{o.item||o.displayName||"-"}</td>
-                          <td style={colTd}>{opt||"-"}</td>
+                          <td style={{...colTd,...oneLine}} title={o.displayName||o.item||""}>{o.displayName||o.item||"-"}</td>
+                          <td style={{...colTd,...oneLine}} title={opt||""}>{opt||"-"}</td>
                           <td style={{...colTd,textAlign:"right",fontWeight:700,color:"#0F172A",whiteSpace:"nowrap"}}>{(Number(o.qty)||0).toLocaleString()}</td>
                           <td style={{...colTd,textAlign:"right",fontWeight:700,color:recNum!==null?"#0F766E":"#94A3B8",whiteSpace:"nowrap"}}>{recNum!==null?recNum.toLocaleString():"-"}</td>
                           <td style={{...colTd,textAlign:"right",whiteSpace:"nowrap",...(remain>0?{fontWeight:800,color:"#EA580C"}:{color:"#94A3B8"})}}>{remain.toLocaleString()}</td>
-                          <td style={{...colTd,whiteSpace:"nowrap"}}>{has(o.eta)?o.eta:"-"}</td>
-                          <td style={{...colTd,whiteSpace:"nowrap",...(revisedDiff?{color:"#2563EB",fontWeight:700}:{})}}>{has(o.revisedEta)?o.revisedEta:"-"}</td>
-                          <td style={{...colTd,whiteSpace:"nowrap"}}>{has(o.receivedDate)?o.receivedDate:"-"}</td>
+                          <td style={{...colTd,whiteSpace:"nowrap",textAlign:"center"}}>{has(o.eta)?o.eta:"-"}</td>
+                          <td style={{...colTd,whiteSpace:"nowrap",textAlign:"center",...(revisedDiff?{color:"#2563EB",fontWeight:700}:{})}}>{has(o.revisedEta)?o.revisedEta:"-"}</td>
+                          <td style={{...colTd,whiteSpace:"nowrap",textAlign:"center"}}>{has(o.receivedDate)?o.receivedDate:"-"}</td>
                         </tr>);
                       })}
                       <tr style={{background:"#FAFAF9"}}>
