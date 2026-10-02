@@ -43,8 +43,11 @@ const addDaysYmd=(ymd,n)=>{const d=new Date(`${ymd}T00:00:00Z`);d.setUTCDate(d.g
 const daysBetweenYmd=(a,b)=>Math.round((Date.parse(`${b}T00:00:00Z`)-Date.parse(`${a}T00:00:00Z`))/86400000);
 // 입고 지연 판정 — status 와 무관한 파생 표시. eta<오늘 && (입고 0장 || (입고율<0.9 && 미입고≥100장)).
 // qty 는 mapCalendarRow 에서 이미 생산건=order_qty / 프린팅 외주=req_qty 로 통일됨.
-const isDelayedGroup=(date,qty,received,today)=>{
+// '입고 완료'·'입고 확정' 은 종결 처리된 건이라 수량이 부족해도 제외 (수동 지정·자동 판정 모두).
+const DELAY_EXCLUDED_ST=new Set(["입고완료","입고확정"]);
+const isDelayedGroup=(date,qty,received,today,status)=>{
   if(!date||date>=today||!(qty>0))return false;
+  if(DELAY_EXCLUDED_ST.has(String(status||"").replace(/\s/g,"")))return false;
   const rec=Number(received)||0;
   return rec===0||(rec/qty<0.9&&qty-rec>=100);
 };
@@ -800,7 +803,7 @@ function ScheduleTab(){
   const[baseQuery,setBaseQuery]=useState(""); // 베이스 아이템 검색어(상품명 영문)
   const[baseResults,setBaseResults]=useState(null); // null=미검색, []=결과없음
   const[baseSearching,setBaseSearching]=useState(false);
-  const[delayEvents,setDelayEvents]=useState([]); // 지연 판정용 — eta 오늘-180일 ~ 어제 (전체 기간 보기 시 제한 해제)
+  const[delayEvents,setDelayEvents]=useState({recent:[],all:[]}); // 지연 판정용 — eta 오늘-180일 ~ 어제 / 전체 기간 ~ 어제
   const[delayAllPeriod,setDelayAllPeriod]=useState(false);
   const[delayOpen,setDelayOpen]=useState(false); // 지연 배너 펼침
 
@@ -883,14 +886,13 @@ function ScheduleTab(){
   const reloadUpcoming=useCallback(async()=>{
     setUpcomingEvents(await fetchCalendarEvents(weekRange.monday,null));
   },[weekRange.monday]);
-  // 지연 후보 조회 — 기본은 최근 180일(잔량 몇 장 차이로 종결된 과거 건 제외). 체크박스 토글 시 마지막 요청만 반영.
-  const delayReqRef=useRef(0);
+  // 지연 후보 조회 — 기본 표시는 최근 180일(잔량 몇 장 차이로 종결된 과거 건 제외).
+  // 180일 내 0건이어도 배너에 전체 기간 건수를 보여주기 위해 전체 기간도 함께 조회한다.
   const reloadDelay=useCallback(async()=>{
-    const seq=++delayReqRef.current;
-    const t=kstToday();
-    const rows=await fetchCalendarEvents(delayAllPeriod?"2000-01-01":addDaysYmd(t,-180),addDaysYmd(t,-1));
-    if(seq===delayReqRef.current)setDelayEvents(rows);
-  },[delayAllPeriod]);
+    const t=kstToday(),to=addDaysYmd(t,-1);
+    const[recent,all]=await Promise.all([fetchCalendarEvents(addDaysYmd(t,-180),to),fetchCalendarEvents("2000-01-01",to)]);
+    setDelayEvents({recent,all});
+  },[]);
   useEffect(()=>{reloadCalendar();},[reloadCalendar]);
   useEffect(()=>{reloadUpcoming();},[reloadUpcoming]);
   useEffect(()=>{reloadDelay();},[reloadDelay]);
@@ -1338,14 +1340,16 @@ function ScheduleTab(){
 
   // 입고 지연 건 — 날짜별 group_key 단위(= 캘린더 카드 1개). 예정일 오름차순, 업체별로 묶어 건수 많은 업체부터.
   const todayKst=kstToday();
-  const delayGroups=(()=>{
+  const buildDelayGroups=(events)=>{
     const byDay=new Map();
-    delayEvents.forEach(ev=>{if(!byDay.has(ev.date))byDay.set(ev.date,[]);byDay.get(ev.date).push(ev);});
+    events.forEach(ev=>{if(!byDay.has(ev.date))byDay.set(ev.date,[]);byDay.get(ev.date).push(ev);});
     return[...byDay.values()].flatMap(list=>groupEvents(list))
-      .filter(g=>isDelayedGroup(g.rep.date,g.totalQty,g.totalReceived,todayKst))
+      .filter(g=>isDelayedGroup(g.rep.date,g.totalQty,g.totalReceived,todayKst,g.rep.status))
       .map(g=>({...g,shortage:Math.max(0,g.totalQty-g.totalReceived),elapsed:daysBetweenYmd(g.rep.date,todayKst)}))
       .sort((a,b)=>String(a.rep.date).localeCompare(String(b.rep.date)));
-  })();
+  };
+  const delayAllGroups=buildDelayGroups(delayEvents.all);
+  const delayGroups=delayAllPeriod?delayAllGroups:buildDelayGroups(delayEvents.recent);
   const delayShortage=delayGroups.reduce((s,g)=>s+g.shortage,0);
   const delayBySupplier=(()=>{
     const m=new Map();
@@ -1364,7 +1368,7 @@ function ScheduleTab(){
     setStatusBusy(key);
     try{
       await saveOrderStatus(key,group.rep.source,newStatus);
-      await Promise.all([reloadCalendar(),reloadUpcoming()]);
+      await Promise.all([reloadCalendar(),reloadUpcoming(),reloadDelay()]);
     }catch(e){
       console.error("[order_status] 저장 실패",e);
       setCalEvents(prevCal);setUpcomingEvents(prevUp); // 실패 시 되돌림
@@ -1509,11 +1513,11 @@ function ScheduleTab(){
       </div>
     </div>
 
-    {/* 입고 지연 배너 — 0건이면 미렌더. 헤더 클릭 시 펼침, 행 클릭 시 해당 날짜 상세 패널 */}
-    {viewMode==="calendar"&&delayGroups.length>0&&(
+    {/* 입고 지연 배너 — 전체 기간에도 0건일 때만 미렌더. 헤더 클릭 시 펼침, 행 클릭 시 해당 날짜 상세 패널 */}
+    {viewMode==="calendar"&&delayAllGroups.length>0&&(
       <div style={{background:"#FEF2F2",border:"1px solid #FECACA",borderRadius:14,marginBottom:16,overflow:"hidden"}}>
         <div onClick={()=>setDelayOpen(o=>!o)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,padding:"12px 18px",cursor:"pointer",userSelect:"none",flexWrap:"wrap"}}>
-          <span style={{fontSize:15,fontWeight:700,color:"#DC2626"}}>⚠ 입고 지연 {delayGroups.length}건 · 미입고 {delayShortage.toLocaleString()}장<span style={{fontSize:11,opacity:0.7,marginLeft:8}}>{delayOpen?"▲":"▼"}</span></span>
+          <span style={{fontSize:15,fontWeight:700,color:"#DC2626"}}>{delayGroups.length>0?`⚠ 입고 지연 ${delayGroups.length}건 · 미입고 ${delayShortage.toLocaleString()}장`:`⚠ 최근 180일 지연 없음 · 전체 기간 ${delayAllGroups.length}건`}<span style={{fontSize:11,opacity:0.7,marginLeft:8}}>{delayOpen?"▲":"▼"}</span></span>
           <label onClick={e=>e.stopPropagation()} style={{display:"inline-flex",alignItems:"center",gap:6,fontSize:12,fontWeight:600,color:"#B91C1C",cursor:"pointer",whiteSpace:"nowrap"}}>
             <input type="checkbox" checked={delayAllPeriod} onChange={e=>setDelayAllPeriod(e.target.checked)} />전체 기간 보기
           </label>
@@ -1615,7 +1619,7 @@ function ScheduleTab(){
             {groups.slice(0,3).map(g=>{
               const ev=g.rep;
               const nc=ORDER_STATUS_COLOR[ev.status]||{bg:"#EDE9FE",color:"#6D28D9"};
-              const delayed=isDelayedGroup(ev.date,g.totalQty,g.totalReceived,todayKst);
+              const delayed=isDelayedGroup(ev.date,g.totalQty,g.totalReceived,todayKst,ev.status);
               return(
                 <div key={g.key} title={`${ev.status||"발주"}${delayed?" · 지연":""}${ev.supplier?" · "+ev.supplier:""}${ev.code?" · "+ev.code:""}`}
                   style={{display:"flex",gap:6,alignItems:"center",padding:"6px 7px",borderRadius:4,marginBottom:2,background:nc.bg,border:"1px solid "+nc.color+"55",...(delayed?{borderLeft:"3px solid #DC2626"}:{}),fontSize:12,lineHeight:1.3,userSelect:"none"}}>
