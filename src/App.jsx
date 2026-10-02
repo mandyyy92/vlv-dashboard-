@@ -37,6 +37,17 @@ const ORDER_STATUS_COLOR={
 };
 const ORDER_STATUS_OPTIONS=Object.keys(ORDER_STATUS_COLOR);
 const toYmd=(d)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+// KST 기준 오늘(YYYY-MM-DD) · 날짜 문자열 ±N일 · 두 날짜 사이 일수
+const kstToday=()=>new Date(Date.now()+9*3600000).toISOString().slice(0,10);
+const addDaysYmd=(ymd,n)=>{const d=new Date(`${ymd}T00:00:00Z`);d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10);};
+const daysBetweenYmd=(a,b)=>Math.round((Date.parse(`${b}T00:00:00Z`)-Date.parse(`${a}T00:00:00Z`))/86400000);
+// 입고 지연 판정 — status 와 무관한 파생 표시. eta<오늘 && (입고 0장 || (입고율<0.9 && 미입고≥100장)).
+// qty 는 mapCalendarRow 에서 이미 생산건=order_qty / 프린팅 외주=req_qty 로 통일됨.
+const isDelayedGroup=(date,qty,received,today)=>{
+  if(!date||date>=today||!(qty>0))return false;
+  const rec=Number(received)||0;
+  return rec===0||(rec/qty<0.9&&qty-rec>=100);
+};
 // 옵션명 표기 정규화: "[버건디-M]" → "버건디/M"
 const fmtOption=(v)=>String(v||"").trim().replace(/^\[|\]$/g,"").trim().replace(/-/g,"/");
 
@@ -789,6 +800,9 @@ function ScheduleTab(){
   const[baseQuery,setBaseQuery]=useState(""); // 베이스 아이템 검색어(상품명 영문)
   const[baseResults,setBaseResults]=useState(null); // null=미검색, []=결과없음
   const[baseSearching,setBaseSearching]=useState(false);
+  const[delayEvents,setDelayEvents]=useState([]); // 지연 판정용 — eta 오늘-180일 ~ 어제 (전체 기간 보기 시 제한 해제)
+  const[delayAllPeriod,setDelayAllPeriod]=useState(false);
+  const[delayOpen,setDelayOpen]=useState(false); // 지연 배너 펼침
 
   // inventory 상품명 ilike 검색 → "베이스 아이템(한글) + 상품명(영문)" 파싱
   const searchBaseItem=async(q)=>{
@@ -869,8 +883,17 @@ function ScheduleTab(){
   const reloadUpcoming=useCallback(async()=>{
     setUpcomingEvents(await fetchCalendarEvents(weekRange.monday,null));
   },[weekRange.monday]);
+  // 지연 후보 조회 — 기본은 최근 180일(잔량 몇 장 차이로 종결된 과거 건 제외). 체크박스 토글 시 마지막 요청만 반영.
+  const delayReqRef=useRef(0);
+  const reloadDelay=useCallback(async()=>{
+    const seq=++delayReqRef.current;
+    const t=kstToday();
+    const rows=await fetchCalendarEvents(delayAllPeriod?"2000-01-01":addDaysYmd(t,-180),addDaysYmd(t,-1));
+    if(seq===delayReqRef.current)setDelayEvents(rows);
+  },[delayAllPeriod]);
   useEffect(()=>{reloadCalendar();},[reloadCalendar]);
   useEffect(()=>{reloadUpcoming();},[reloadUpcoming]);
+  useEffect(()=>{reloadDelay();},[reloadDelay]);
 
   // ── 홈에서 이동해온 요약 카드용 계산 (이번주 입고건 · 입고대기 현황) ──
   // "이번주 입고건": eta 가 이번 주 월~일 사이인 건
@@ -1313,6 +1336,23 @@ function ScheduleTab(){
     }));
   };
 
+  // 입고 지연 건 — 날짜별 group_key 단위(= 캘린더 카드 1개). 예정일 오름차순, 업체별로 묶어 건수 많은 업체부터.
+  const todayKst=kstToday();
+  const delayGroups=(()=>{
+    const byDay=new Map();
+    delayEvents.forEach(ev=>{if(!byDay.has(ev.date))byDay.set(ev.date,[]);byDay.get(ev.date).push(ev);});
+    return[...byDay.values()].flatMap(list=>groupEvents(list))
+      .filter(g=>isDelayedGroup(g.rep.date,g.totalQty,g.totalReceived,todayKst))
+      .map(g=>({...g,shortage:Math.max(0,g.totalQty-g.totalReceived),elapsed:daysBetweenYmd(g.rep.date,todayKst)}))
+      .sort((a,b)=>String(a.rep.date).localeCompare(String(b.rep.date)));
+  })();
+  const delayShortage=delayGroups.reduce((s,g)=>s+g.shortage,0);
+  const delayBySupplier=(()=>{
+    const m=new Map();
+    delayGroups.forEach(g=>{const k=g.rep.supplier||"(업체 미지정)";if(!m.has(k))m.set(k,[]);m.get(k).push(g);});
+    return[...m.entries()].sort((a,b)=>b[1].length-a[1].length);
+  })();
+
   // 상태 직접 변경 — 낙관적 업데이트 후 order_status upsert, 성공하면 뷰를 다시 조회해 화면 갱신.
   const changeStatus=async(group,newStatus)=>{
     const key=group.key;
@@ -1408,6 +1448,9 @@ function ScheduleTab(){
             return(<div key={st} onClick={()=>setWaitFilter(sel?null:st)}
               style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:c.bg,color:c.color,fontWeight:sel?800:600,cursor:"pointer",border:sel?`1.5px solid ${c.color}`:"1.5px solid transparent",opacity:op}}>{st} {cnt[st]}</div>);
           })}
+          {/* 지연: 예정일 경과 건(파생 표시) — 클릭 시 캘린더 위 지연 목록 펼침 */}
+          <div onClick={()=>{setViewMode("calendar");setDelayOpen(true);}} title="예정일이 지났는데 미입고·부족한 건"
+            style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#FEF2F2",color:"#DC2626",fontWeight:700,cursor:"pointer",border:"1.5px solid #FECACA",opacity:delayGroups.length>0?1:0.4}}>지연 {delayGroups.length}</div>
         </div>
         {/* (b) 목록(내부 스크롤) / (c) 빈 상태 — 상태 배지 전환에도 높이 고정(260) */}
         <div style={{height:260,flexShrink:0,overflowY:"auto",paddingRight:2}}>
@@ -1465,6 +1508,39 @@ function ScheduleTab(){
         )}
       </div>
     </div>
+
+    {/* 입고 지연 배너 — 0건이면 미렌더. 헤더 클릭 시 펼침, 행 클릭 시 해당 날짜 상세 패널 */}
+    {viewMode==="calendar"&&delayGroups.length>0&&(
+      <div style={{background:"#FEF2F2",border:"1px solid #FECACA",borderRadius:14,marginBottom:16,overflow:"hidden"}}>
+        <div onClick={()=>setDelayOpen(o=>!o)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,padding:"12px 18px",cursor:"pointer",userSelect:"none",flexWrap:"wrap"}}>
+          <span style={{fontSize:15,fontWeight:700,color:"#DC2626"}}>⚠ 입고 지연 {delayGroups.length}건 · 미입고 {delayShortage.toLocaleString()}장<span style={{fontSize:11,opacity:0.7,marginLeft:8}}>{delayOpen?"▲":"▼"}</span></span>
+          <label onClick={e=>e.stopPropagation()} style={{display:"inline-flex",alignItems:"center",gap:6,fontSize:12,fontWeight:600,color:"#B91C1C",cursor:"pointer",whiteSpace:"nowrap"}}>
+            <input type="checkbox" checked={delayAllPeriod} onChange={e=>setDelayAllPeriod(e.target.checked)} />전체 기간 보기
+          </label>
+        </div>
+        {delayOpen&&(
+          <div style={{borderTop:"1px solid #FECACA",background:"#FFF",maxHeight:420,overflow:"auto",paddingBottom:6}}>
+            {delayBySupplier.map(([sup,list])=>(
+              <div key={sup} style={{minWidth:720}}>
+                <div style={{padding:"10px 18px 4px",fontSize:12,fontWeight:800,color:"#991B1B"}}>{sup} {list.length}건</div>
+                {list.map(g=>(
+                  <div key={`${g.rep.date}|${g.key}`} onClick={()=>gotoSearchResult(g.rep)}
+                    style={{display:"grid",gridTemplateColumns:"92px 52px 96px minmax(0,1fr) auto 104px",alignItems:"center",gap:12,padding:"7px 18px",fontSize:13,color:"#334155",cursor:"pointer",borderBottom:"1px solid #FEF2F2"}}
+                    onMouseEnter={e=>e.currentTarget.style.background="#FEF2F2"} onMouseLeave={e=>e.currentTarget.style.background="#FFF"}>
+                    <span style={{fontWeight:600,whiteSpace:"nowrap"}}>{g.rep.date}</span>
+                    <span style={{fontWeight:700,color:"#DC2626",whiteSpace:"nowrap"}}>D+{g.elapsed}</span>
+                    <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:"#64748B"}}>{sup}</span>
+                    <span style={{fontWeight:700,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.name}</span>
+                    <span style={{whiteSpace:"nowrap",color:"#64748B"}}>발주 {g.totalQty.toLocaleString()}장 → 입고 {g.totalReceived.toLocaleString()}장</span>
+                    <span style={{whiteSpace:"nowrap",textAlign:"right",color:g.totalReceived===0?"#DC2626":"#475569",fontWeight:g.totalReceived===0?800:600}}>부족 {g.shortage.toLocaleString()}장</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    )}
 
     {/* 캘린더 뷰 */}
     {viewMode==="calendar"&&<SectionCard title={`${year}년 ${month+1}월`} actions={
@@ -1539,12 +1615,16 @@ function ScheduleTab(){
             {groups.slice(0,3).map(g=>{
               const ev=g.rep;
               const nc=ORDER_STATUS_COLOR[ev.status]||{bg:"#EDE9FE",color:"#6D28D9"};
+              const delayed=isDelayedGroup(ev.date,g.totalQty,g.totalReceived,todayKst);
               return(
-                <div key={g.key} title={`${ev.status||"발주"}${ev.supplier?" · "+ev.supplier:""}${ev.code?" · "+ev.code:""}`}
-                  style={{display:"flex",gap:6,alignItems:"center",padding:"6px 7px",borderRadius:4,marginBottom:2,background:nc.bg,border:"1px solid "+nc.color+"55",fontSize:12,lineHeight:1.3,userSelect:"none"}}>
+                <div key={g.key} title={`${ev.status||"발주"}${delayed?" · 지연":""}${ev.supplier?" · "+ev.supplier:""}${ev.code?" · "+ev.code:""}`}
+                  style={{display:"flex",gap:6,alignItems:"center",padding:"6px 7px",borderRadius:4,marginBottom:2,background:nc.bg,border:"1px solid "+nc.color+"55",...(delayed?{borderLeft:"3px solid #DC2626"}:{}),fontSize:12,lineHeight:1.3,userSelect:"none"}}>
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:4,color:nc.color,fontWeight:600,fontSize:11}}>
-                      <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ev.status||"발주"}</span>
+                      <span style={{display:"inline-flex",alignItems:"center",gap:4,minWidth:0}}>
+                        <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ev.status||"발주"}</span>
+                        {delayed&&<span style={{flexShrink:0,fontSize:10,fontWeight:800,color:"#FFF",background:"#DC2626",borderRadius:3,padding:"0 4px"}}>지연</span>}
+                      </span>
                       {ev.supplier&&<span style={{opacity:0.85,fontWeight:500,flexShrink:0}}>· {ev.supplier}</span>}
                     </div>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:4,marginTop:4}}>
