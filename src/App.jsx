@@ -73,6 +73,7 @@ const mapCalendarRow=(r,source)=>({
   option:r.option_name||"",
   season:r.season||"",
   note:r.note||"",
+  imageUrl:r.image_url||"",
 });
 
 // 필터로 두 뷰를 조회 → 단일 이벤트 배열. 실패해도 캘린더는 빈 배열로 정상 렌더.
@@ -757,6 +758,16 @@ function PackingListTab(){
 }
 
 
+// 제품 썸네일 — image_url 이 없거나 로드 실패 시 같은 크기의 회색 플레이스홀더
+const CalThumb=({src,size})=>{
+  const[failed,setFailed]=useState(false);
+  useEffect(()=>{setFailed(false);},[src]);
+  const box={display:"block",width:size,height:size,borderRadius:4,background:"#F3F4F6",flexShrink:0};
+  return src&&!failed
+    ?<img src={src} alt="" loading="lazy" decoding="async" onError={()=>setFailed(true)} style={{...box,objectFit:"cover"}} />
+    :<div style={box} />;
+};
+
 // ─── Tab 2: 입고 스케줄 (Supabase - 캘린더+업체별) ───
 function ScheduleTab(){
   const[schedules,setSchedules]=useState([]);
@@ -1357,6 +1368,7 @@ function ScheduleTab(){
       totalRemain:g.events.reduce((s,e)=>s+(Number(e.remain)||0),0),
       title:`${g.rep.supplier?`${g.rep.supplier} · `:""}${g.rep.displayName||g.rep.item||""}${g.rep.round?` (${g.rep.round}차)`:""}`,
       delayed:isGroupDelayed(g),
+      imageUrl:(g.events.find(e=>e.imageUrl)||{}).imageUrl||"", // image_url 이 있는 첫 행
     }));
   };
 
@@ -1641,6 +1653,7 @@ function ScheduleTab(){
               return(
                 <div key={g.key} title={`${ev.status||"발주"}${delayed?" · 지연":""}${revised?` · 조정 (예정 ${ev.eta||"-"})`:""}${ev.code?" · "+ev.code:""}`}
                   style={{display:"flex",gap:6,alignItems:"center",padding:"6px 7px",borderRadius:4,marginBottom:2,background:nc.bg,border:"1px solid "+nc.color+"55",...(delayed?{borderLeft:"3px solid #DC2626"}:{}),fontSize:12,lineHeight:1.3,userSelect:"none"}}>
+                  <CalThumb src={g.imageUrl} size={28} />
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{display:"flex",alignItems:"center",gap:4,color:nc.color,fontWeight:600,fontSize:11,minWidth:0}}>
                       <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ev.statusManual&&<span title="수동 지정됨">• </span>}{ev.status||"발주"}</span>
@@ -1721,7 +1734,7 @@ function ScheduleTab(){
                 <div style={{overflowX:"auto",borderRadius:8,border:"1px solid #EEF2F6"}}>
                   <table style={{width:"100%",borderCollapse:"collapse"}}>
                     <thead><tr style={{background:"#F8FAFC"}}>
-                      <th style={colTh}>상품코드</th><th style={colTh}>상품명</th><th style={colTh}>옵션</th>
+                      <th style={{...colTh,width:32}}></th><th style={colTh}>상품코드</th><th style={colTh}>상품명</th><th style={colTh}>옵션</th>
                       <th style={{...colTh,textAlign:"right"}}>발주수량</th><th style={{...colTh,textAlign:"right"}}>입고수량</th><th style={{...colTh,textAlign:"right"}}>잔량</th>
                       <th style={colTh}>입고예정일</th><th style={colTh}>조정입고일</th><th style={colTh}>실입고일</th>
                     </tr></thead>
@@ -1733,6 +1746,7 @@ function ScheduleTab(){
                         const revisedDiff=has(o.revisedEta)&&o.revisedEta!==o.eta;
                         return(
                         <tr key={o.id||oi} style={has(o.receivedDate)?{background:"#F0FDF4"}:undefined}>
+                          <td style={{...colTd,verticalAlign:"middle"}}><CalThumb src={o.imageUrl} size={32} /></td>
                           <td style={{...colTd,whiteSpace:"nowrap"}}>{o.code||"-"}</td>
                           <td style={colTd}>{o.item||o.displayName||"-"}</td>
                           <td style={colTd}>{opt||"-"}</td>
@@ -1745,7 +1759,7 @@ function ScheduleTab(){
                         </tr>);
                       })}
                       <tr style={{background:"#FAFAF9"}}>
-                        <td style={{...colTd,fontWeight:700,color:"#475569",borderBottom:"none"}} colSpan={3}>합계</td>
+                        <td style={{...colTd,fontWeight:700,color:"#475569",borderBottom:"none"}} colSpan={4}>합계</td>
                         <td style={{...colTd,textAlign:"right",fontWeight:800,color:"#0F172A",borderBottom:"none",whiteSpace:"nowrap"}}>{g.totalQty.toLocaleString()}</td>
                         <td style={{...colTd,textAlign:"right",fontWeight:800,color:"#0F766E",borderBottom:"none",whiteSpace:"nowrap"}}>{g.events.reduce((s,o)=>s+(has(o.received)&&Number.isFinite(Number(o.received))?Number(o.received):0),0).toLocaleString()}</td>
                         <td style={{...colTd,textAlign:"right",fontWeight:800,color:g.totalRemain>0?"#EA580C":"#94A3B8",borderBottom:"none",whiteSpace:"nowrap"}}>{g.totalRemain.toLocaleString()}</td>
