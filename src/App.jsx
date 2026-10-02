@@ -37,9 +37,6 @@ const ORDER_STATUS_COLOR={
 };
 const ORDER_STATUS_OPTIONS=Object.keys(ORDER_STATUS_COLOR);
 const toYmd=(d)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-// KST 기준 오늘(YYYY-MM-DD) · 두 날짜 사이 일수
-const kstToday=()=>new Date(Date.now()+9*3600000).toISOString().slice(0,10);
-const daysBetweenYmd=(a,b)=>Math.round((Date.parse(`${b}T00:00:00Z`)-Date.parse(`${a}T00:00:00Z`))/86400000);
 // 입고 지연 판정은 뷰(is_delayed)가 전담. 단 '입고 완료'·'입고 확정'으로 수동 지정된 건은 담당자 종결로 보고 제외.
 const DELAY_EXCLUDED_MANUAL_ST=new Set(["입고완료","입고확정"]);
 const isGroupDelayed=(g)=>g.events.some(e=>e.isDelayed)&&!(g.rep.statusManual&&DELAY_EXCLUDED_MANUAL_ST.has(String(g.rep.status||"").replace(/\s/g,"")));
@@ -839,7 +836,6 @@ function ScheduleTab(){
     const m=flashMsg[slot];
     return m?<div style={{marginTop:6,fontSize:12,fontWeight:600,color:m.ok===null?"#64748B":m.ok?"#16A34A":"#DC2626",whiteSpace:"pre-line"}}>{m.text}</div>:null;
   };
-  const[delayOpen,setDelayOpen]=useState(false); // 지연 배너 펼침
 
   // inventory 상품명 ilike 검색 → "베이스 아이템(한글) + 상품명(영문)" 파싱
   const searchBaseItem=async(q)=>{
@@ -1372,21 +1368,12 @@ function ScheduleTab(){
     }));
   };
 
-  // 입고 지연 건 — group_key + show_date 단위(= 캘린더 카드 1개). 표시일 오름차순, 업체별로 묶어 건수 많은 업체부터.
-  const todayKst=kstToday();
+  // 입고 지연 건 — group_key + show_date 단위(= 캘린더 카드 1개). 입고대기 현황의 '지연 N' 집계용.
   const delayGroups=(()=>{
     const byDay=new Map();
     delayEvents.forEach(ev=>{if(!byDay.has(ev.date))byDay.set(ev.date,[]);byDay.get(ev.date).push(ev);});
     return[...byDay.values()].flatMap(list=>groupEvents(list))
-      .filter(g=>g.delayed)
-      .map(g=>({...g,elapsed:daysBetweenYmd(g.rep.date,todayKst)}))
-      .sort((a,b)=>String(a.rep.date).localeCompare(String(b.rep.date)));
-  })();
-  const delayShortage=delayGroups.reduce((s,g)=>s+g.totalRemain,0);
-  const delayBySupplier=(()=>{
-    const m=new Map();
-    delayGroups.forEach(g=>{const k=g.rep.supplier||"(업체 미지정)";if(!m.has(k))m.set(k,[]);m.get(k).push(g);});
-    return[...m.entries()].sort((a,b)=>b[1].length-a[1].length);
+      .filter(g=>g.delayed);
   })();
 
   // 상태 직접 변경 — 낙관적 업데이트 후 order_status upsert, 성공하면 뷰를 다시 조회해 화면 갱신.
@@ -1484,9 +1471,9 @@ function ScheduleTab(){
             return(<div key={st} onClick={()=>setWaitFilter(sel?null:st)}
               style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:c.bg,color:c.color,fontWeight:sel?800:600,cursor:"pointer",border:sel?`1.5px solid ${c.color}`:"1.5px solid transparent",opacity:op}}>{st} {cnt[st]}</div>);
           })}
-          {/* 지연: 예정일 경과 건(파생 표시) — 클릭 시 캘린더 위 지연 목록 펼침 */}
-          <div onClick={()=>{setViewMode("calendar");setDelayOpen(true);}} title="예정일이 지났는데 미입고·부족한 건"
-            style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#FEF2F2",color:"#DC2626",fontWeight:700,cursor:"pointer",border:"1.5px solid #FECACA",opacity:delayGroups.length>0?1:0.4}}>지연 {delayGroups.length}</div>
+          {/* 지연: 뷰 is_delayed 기준 건수 */}
+          <div title="예정일이 지났는데 미입고·부족한 건"
+            style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:"#FEF2F2",color:"#DC2626",fontWeight:700,border:"1.5px solid #FECACA",opacity:delayGroups.length>0?1:0.4}}>지연 {delayGroups.length}</div>
         </div>
         {/* (b) 목록(내부 스크롤) / (c) 빈 상태 — 상태 배지 전환에도 높이 고정(260) */}
         <div style={{height:260,flexShrink:0,overflowY:"auto",paddingRight:2}}>
@@ -1544,36 +1531,6 @@ function ScheduleTab(){
         )}
       </div>
     </div>
-
-    {/* 입고 지연 배너 — 뷰 is_delayed 카드 모음, 0건이면 미렌더. 헤더 클릭 시 펼침, 행 클릭 시 해당 날짜 상세 패널 */}
-    {viewMode==="calendar"&&delayGroups.length>0&&(
-      <div style={{background:"#FEF2F2",border:"1px solid #FECACA",borderRadius:14,marginBottom:16,overflow:"hidden"}}>
-        <div onClick={()=>setDelayOpen(o=>!o)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,padding:"12px 18px",cursor:"pointer",userSelect:"none",flexWrap:"wrap"}}>
-          <span style={{fontSize:15,fontWeight:700,color:"#DC2626"}}>⚠ 입고 지연 {delayGroups.length}건 · 미입고 {delayShortage.toLocaleString()}장<span style={{fontSize:11,opacity:0.7,marginLeft:8}}>{delayOpen?"▲":"▼"}</span></span>
-        </div>
-        {delayOpen&&(
-          <div style={{borderTop:"1px solid #FECACA",background:"#FFF",maxHeight:420,overflow:"auto",paddingBottom:6}}>
-            {delayBySupplier.map(([sup,list])=>(
-              <div key={sup} style={{minWidth:720}}>
-                <div style={{padding:"10px 18px 4px",fontSize:12,fontWeight:800,color:"#991B1B"}}>{sup} {list.length}건</div>
-                {list.map(g=>(
-                  <div key={`${g.rep.date}|${g.key}`} onClick={()=>gotoSearchResult(g.rep)}
-                    style={{display:"grid",gridTemplateColumns:"92px 52px 96px minmax(0,1fr) auto 104px",alignItems:"center",gap:12,padding:"7px 18px",fontSize:13,color:"#334155",cursor:"pointer",borderBottom:"1px solid #FEF2F2"}}
-                    onMouseEnter={e=>e.currentTarget.style.background="#FEF2F2"} onMouseLeave={e=>e.currentTarget.style.background="#FFF"}>
-                    <span style={{fontWeight:600,whiteSpace:"nowrap"}}>{g.rep.date}</span>
-                    <span style={{fontWeight:700,color:"#DC2626",whiteSpace:"nowrap"}}>D+{g.elapsed}</span>
-                    <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:"#64748B"}}>{sup}</span>
-                    <span style={{fontWeight:700,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.name}</span>
-                    <span style={{whiteSpace:"nowrap",color:"#64748B"}}>발주 {g.totalQty.toLocaleString()}장 → 입고 {g.totalReceived.toLocaleString()}장</span>
-                    <span style={{whiteSpace:"nowrap",textAlign:"right",color:g.totalReceived===0?"#DC2626":"#475569",fontWeight:g.totalReceived===0?800:600}}>부족 {g.totalRemain.toLocaleString()}장</span>
-                  </div>
-                ))}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    )}
 
     {/* 캘린더 뷰 */}
     {viewMode==="calendar"&&<SectionCard title={`${year}년 ${month+1}월`} actions={
