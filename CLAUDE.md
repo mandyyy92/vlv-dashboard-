@@ -19,3 +19,11 @@
 ## 컬럼명
 - 새로 만드는 Supabase 테이블의 컬럼명은 영문으로 한다.
   (한글 컬럼은 PostgREST에서 RPC + SECURITY DEFINER 가 필요해짐)
+
+## UI 규칙
+- window.alert / window.confirm / window.prompt 사용 금지.
+  안내는 인라인 메시지(성공 녹색 / 실패 빨강 / 중립 회색, 3초 후 사라짐),
+  삭제 확인은 2단계 인라인 토글(3초 내 재클릭)로 처리한다.
+
+## 작업 규칙
+- 작업 완료 후 항상 commit + push 까지 수행한다.

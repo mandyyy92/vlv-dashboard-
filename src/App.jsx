@@ -808,7 +808,7 @@ function ScheduleTab(){
   const[delayEvents,setDelayEvents]=useState([]); // 뷰 is_delayed=true 행 (기간 제한 없음)
   const[statusError,setStatusError]=useState(null); // {key,msg} 상태 저장 실패 — 상세 패널에 인라인 표시
   // window.alert/confirm 대체 — 인라인 안내(3초 후 자동 사라짐) · 2단계 확인 토글(3초 내 재클릭 없으면 복귀)
-  const[flashMsg,setFlashMsg]=useState({}); // {slot:{ok,text}}
+  const[flashMsg,setFlashMsg]=useState({}); // {slot:{ok,text}} — ok: true=성공(녹색) / false=실패(빨강) / null=중립(회색)
   const[armed,setArmed]=useState(null); // "정말 삭제?" 상태인 버튼 slot
   const flashTimers=useRef({});
   const armTimer=useRef(null);
@@ -826,7 +826,7 @@ function ScheduleTab(){
   useEffect(()=>()=>{clearTimeout(armTimer.current);Object.values(flashTimers.current).forEach(clearTimeout);},[]);
   const renderFlash=(slot)=>{
     const m=flashMsg[slot];
-    return m?<div style={{marginTop:6,fontSize:12,fontWeight:600,color:m.ok?"#16A34A":"#DC2626",whiteSpace:"pre-line"}}>{m.text}</div>:null;
+    return m?<div style={{marginTop:6,fontSize:12,fontWeight:600,color:m.ok===null?"#64748B":m.ok?"#16A34A":"#DC2626",whiteSpace:"pre-line"}}>{m.text}</div>:null;
   };
   const[delayOpen,setDelayOpen]=useState(false); // 지연 배너 펼침
 
@@ -1839,7 +1839,9 @@ function ScheduleTab(){
                 style={{...inlineInputStyle,fontSize:13,width:130}} />);
               const confirmed=isConfirmed(s);
               return(<div key={s.id||i} style={{background:"#FFF",borderRadius:10,padding:"16px 16px",marginBottom:14,border:"1px solid #E2E8F0",position:"relative"}}>
-              <button onClick={()=>delSchedule(s.id)} style={{position:"absolute",top:8,right:8,background:"none",border:"none",cursor:"pointer",fontSize:18,color:"#94A3B8"}}>×</button>
+              <button onClick={()=>confirmTwice(`del-${s.id}`,()=>delSchedule(s.id))} style={armed===`del-${s.id}`
+                ?{position:"absolute",top:8,right:8,zIndex:1,background:"#FEF2F2",border:"1px solid #FCA5A5",borderRadius:6,padding:"2px 8px",cursor:"pointer",fontSize:12,fontWeight:700,color:"#DC2626"}
+                :{position:"absolute",top:8,right:8,background:"none",border:"none",cursor:"pointer",fontSize:18,color:"#94A3B8"}}>{armed===`del-${s.id}`?"정말 삭제?":"×"}</button>
               {s.oz_date&&<span style={{position:"absolute",top:10,right:28,padding:"1px 6px",borderRadius:3,fontSize:12,fontWeight:700,color:ddayColor(s.oz_date),background:`${ddayColor(s.oz_date)}15`}}>{dday(s.oz_date)}</span>}
               <div onClick={()=>toggleStatus(s)} title="클릭하여 상태 변경" style={{
                 display:"inline-flex",alignItems:"center",gap:4,padding:"3px 9px",borderRadius:12,
@@ -1915,7 +1917,7 @@ function ScheduleTab(){
         <textarea value={chatInput} onChange={e=>setChatInput(e.target.value)} placeholder={"예시:\n[인도] 오전 10:45\n다음주 화요일에 브이넥티 300장 입고 예정입니다\n리드타임은 14일이에요\n\n[성은교역] 오후 2:13\n린넨팬츠 500장 4/5 입고..."} style={{width:"100%",height:120,padding:14,borderRadius:10,border:"1px solid #E2E8F0",fontSize:15,background:"#F8FAFC",resize:"vertical",outline:"none",boxSizing:"border-box",lineHeight:1.6}} />
         <div style={{marginTop:10,display:"flex",gap:8}}>
           <SmallBtn primary onClick={parseChat}>🤖 AI 분석</SmallBtn>
-          <SmallBtn onClick={()=>flash("parse",false,"엑셀 다운로드 기능은 구현 예정입니다.")}>📊 엑셀 다운로드</SmallBtn>
+          <SmallBtn onClick={()=>flash("parse",null,"엑셀 다운로드 기능은 구현 예정입니다.")}>📊 엑셀 다운로드</SmallBtn>
           <SmallBtn danger onClick={()=>confirmTwice("delAll",async()=>{for(const s of schedules)await sb.remove("schedules",s.id);setSchedules([]);flash("parse",true,"전체 스케줄을 삭제했습니다.");})}>{armed==="delAll"?"정말 삭제?":"🗑 전체 삭제"}</SmallBtn>
         </div>
         {renderFlash("parse")}
