@@ -807,6 +807,27 @@ function ScheduleTab(){
   const[baseSearching,setBaseSearching]=useState(false);
   const[delayEvents,setDelayEvents]=useState([]); // 뷰 is_delayed=true 행 (기간 제한 없음)
   const[statusError,setStatusError]=useState(null); // {key,msg} 상태 저장 실패 — 상세 패널에 인라인 표시
+  // window.alert/confirm 대체 — 인라인 안내(3초 후 자동 사라짐) · 2단계 확인 토글(3초 내 재클릭 없으면 복귀)
+  const[flashMsg,setFlashMsg]=useState({}); // {slot:{ok,text}}
+  const[armed,setArmed]=useState(null); // "정말 삭제?" 상태인 버튼 slot
+  const flashTimers=useRef({});
+  const armTimer=useRef(null);
+  const flash=(slot,ok,text)=>{
+    clearTimeout(flashTimers.current[slot]);
+    setFlashMsg(p=>({...p,[slot]:{ok,text}}));
+    flashTimers.current[slot]=setTimeout(()=>setFlashMsg(p=>{const n={...p};delete n[slot];return n;}),3000);
+  };
+  const confirmTwice=(slot,action)=>{
+    clearTimeout(armTimer.current);
+    if(armed===slot){setArmed(null);action();return;}
+    setArmed(slot);
+    armTimer.current=setTimeout(()=>setArmed(null),3000);
+  };
+  useEffect(()=>()=>{clearTimeout(armTimer.current);Object.values(flashTimers.current).forEach(clearTimeout);},[]);
+  const renderFlash=(slot)=>{
+    const m=flashMsg[slot];
+    return m?<div style={{marginTop:6,fontSize:12,fontWeight:600,color:m.ok?"#16A34A":"#DC2626",whiteSpace:"pre-line"}}>{m.text}</div>:null;
+  };
   const[delayOpen,setDelayOpen]=useState(false); // 지연 배너 펼침
 
   // inventory 상품명 ilike 검색 → "베이스 아이템(한글) + 상품명(영문)" 파싱
@@ -948,7 +969,7 @@ function ScheduleTab(){
 
   // 직접 등록
   const addSchedule=async()=>{
-    if(!formName){alert("상품명을 입력하세요.");return;}
+    if(!formName){flash("add",false,"상품명을 입력하세요.");return;}
     const row={supplier:formSupplier,item:formName,qty:parseInt(formQty)||0,
       ship_date:formShipDate||null,kr_date:formKrDate||null,oz_date:formOzDate||null,
       ship_type:formShipType,note:formNote,status:"입고일정확인",
@@ -1131,16 +1152,16 @@ function ScheduleTab(){
         }catch(ie){insertErrors.push(ie.message);console.error("Insert error:",ie,row);}
       }
       setChatInput("");
-      if(addedCount>0)alert(addedCount+"건의 스케줄이 등록되었습니다.");
+      if(addedCount>0)flash("parse",true,addedCount+"건의 스케줄이 등록되었습니다.");
       else if(results.length>0){
-        alert("파싱 "+results.length+"건 성공, 저장 실패!\n\n오류: "+(insertErrors[0]||"unknown")+"\n\nSupabase schedules 테이블에 qty, kr_date, oz_date, ship_type 컬럼이 있는지 확인해주세요.");
+        flash("parse",false,"파싱 "+results.length+"건 성공, 저장 실패 — 오류: "+(insertErrors[0]||"unknown")+"\nSupabase schedules 테이블에 qty, kr_date, oz_date, ship_type 컬럼이 있는지 확인해주세요.");
       }
       else{
-        alert("스케줄을 파싱할 수 없습니다.\n날짜와 상품 정보를 확인해주세요.");
+        flash("parse",false,"스케줄을 파싱할 수 없습니다. 날짜와 상품 정보를 확인해주세요.");
       }
     }catch(e){
       console.error("parseChat error:",e);
-      alert("파싱 오류: "+e.message);
+      flash("parse",false,"파싱 오류: "+e.message);
     }
   };
 
@@ -1180,7 +1201,7 @@ function ScheduleTab(){
       if(!r)throw new Error("update returned null");
     }catch(e){
       console.error("Move error:",e);
-      alert("날짜 변경 저장 실패: "+e.message);
+      flash("supplier",false,"날짜 변경 저장 실패: "+e.message);
       // 롤백
       setSchedules(p=>p.map(s=>s.id===eventId?schedule:s));
     }
@@ -1226,7 +1247,7 @@ function ScheduleTab(){
   const saveEdit=async()=>{
     if(!editingEvent)return;
     const trimmed=editName.trim();
-    if(!trimmed){alert("상품명을 입력하세요.");return;}
+    if(!trimmed){flash("edit",false,"상품명을 입력하세요.");return;}
     const updates={item:trimmed,qty:parseInt(editQty)||0};
     const prev=schedules.find(s=>s.id===editingEvent.id);
     setSchedules(p=>p.map(s=>s.id===editingEvent.id?{...s,...updates}:s));
@@ -1236,7 +1257,7 @@ function ScheduleTab(){
       setEditingEvent(null);
     }catch(e){
       console.error("Edit save error:",e);
-      alert("저장 실패: "+e.message);
+      flash("edit",false,"저장 실패: "+e.message);
       if(prev)setSchedules(p=>p.map(s=>s.id===editingEvent.id?prev:s));
     }
   };
@@ -1285,7 +1306,7 @@ function ScheduleTab(){
       if(!r)throw new Error("update returned null");
     }catch(e){
       console.error("Inline edit error:",e);
-      alert("저장 실패: "+e.message);
+      flash(`sup-${s.id}`,false,"저장 실패: "+e.message);
       setSchedules(p=>p.map(x=>x.id===s.id?prev:x));
     }
   };
@@ -1303,7 +1324,7 @@ function ScheduleTab(){
       if(!r)throw new Error("update returned null");
     }catch(e){
       console.error("Toggle status error:",e);
-      alert("상태 변경 실패: "+e.message);
+      flash(`sup-${s.id}`,false,"상태 변경 실패: "+e.message);
       setSchedules(p=>p.map(x=>x.id===s.id?prev:x));
     }
   };
@@ -1758,12 +1779,13 @@ function ScheduleTab(){
             style={{width:"100%",padding:"9px 12px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:15,outline:"none",boxSizing:"border-box"}} />
         </div>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
-          <SmallBtn danger onClick={async()=>{if(window.confirm("이 스케줄을 삭제하시겠습니까?")){await delSchedule(editingEvent.id);setEditingEvent(null);}}}>🗑 삭제</SmallBtn>
+          <SmallBtn danger onClick={()=>confirmTwice("delEdit",async()=>{await delSchedule(editingEvent.id);setEditingEvent(null);})}>{armed==="delEdit"?"정말 삭제?":"🗑 삭제"}</SmallBtn>
           <div style={{display:"flex",gap:8}}>
             <SmallBtn onClick={()=>setEditingEvent(null)}>취소</SmallBtn>
             <SmallBtn primary onClick={saveEdit}>저장</SmallBtn>
           </div>
         </div>
+        {renderFlash("edit")}
       </div>
     </div>)}
 
@@ -1771,6 +1793,7 @@ function ScheduleTab(){
     {viewMode==="supplier"&&<>
     <div style={{padding:"8px 14px",borderRadius:8,background:"#EFF6FF",border:"1px solid #DBEAFE",marginBottom:12,fontSize:14,color:"#1E40AF",fontWeight:600}}>
       📅 {(()=>{const n=new Date();return `${n.getFullYear()}년 ${n.getMonth()+1}월부터 이후 모든 일정 표시`;})()}
+      {renderFlash("supplier")}
     </div>
     <div style={{display:"flex",gap:8,marginBottom:12}}>
       {[
@@ -1872,6 +1895,7 @@ function ScheduleTab(){
                 </select>):
                   <span onClick={()=>startInline(s,"ship_type")} title="클릭하여 수정" style={editableHover}>{s.ship_type==="Air Shipment"?"✈️ Air":s.ship_type==="Sea Shipment"?"🚢 Sea":s.ship_type==="국내"?"🚚 국내":s.ship_type||"(운송 미지정)"}</span>}
               </div>
+              {renderFlash(`sup-${s.id}`)}
             </div>);}):(
               <div style={{textAlign:"center",padding:30,color:"#94A3B8"}}>
                 <div style={{fontSize:32,marginBottom:8}}>📭</div>
@@ -1891,9 +1915,10 @@ function ScheduleTab(){
         <textarea value={chatInput} onChange={e=>setChatInput(e.target.value)} placeholder={"예시:\n[인도] 오전 10:45\n다음주 화요일에 브이넥티 300장 입고 예정입니다\n리드타임은 14일이에요\n\n[성은교역] 오후 2:13\n린넨팬츠 500장 4/5 입고..."} style={{width:"100%",height:120,padding:14,borderRadius:10,border:"1px solid #E2E8F0",fontSize:15,background:"#F8FAFC",resize:"vertical",outline:"none",boxSizing:"border-box",lineHeight:1.6}} />
         <div style={{marginTop:10,display:"flex",gap:8}}>
           <SmallBtn primary onClick={parseChat}>🤖 AI 분석</SmallBtn>
-          <SmallBtn onClick={()=>alert("엑셀 다운로드 기능\n(구현 예정)")}>📊 엑셀 다운로드</SmallBtn>
-          <SmallBtn danger onClick={async()=>{if(window.confirm("전체 스케줄을 삭제하시겠습니까?")){for(const s of schedules)await sb.remove("schedules",s.id);setSchedules([]);}}}>🗑 전체 삭제</SmallBtn>
+          <SmallBtn onClick={()=>flash("parse",false,"엑셀 다운로드 기능은 구현 예정입니다.")}>📊 엑셀 다운로드</SmallBtn>
+          <SmallBtn danger onClick={()=>confirmTwice("delAll",async()=>{for(const s of schedules)await sb.remove("schedules",s.id);setSchedules([]);flash("parse",true,"전체 스케줄을 삭제했습니다.");})}>{armed==="delAll"?"정말 삭제?":"🗑 전체 삭제"}</SmallBtn>
         </div>
+        {renderFlash("parse")}
       </SectionCard>
 
       {/* 직접 등록 */}
@@ -1937,7 +1962,10 @@ function ScheduleTab(){
             <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>비고</div>
             <Input value={formNote} onChange={e=>setFormNote(e.target.value)} placeholder="메모" />
           </div>
-          <SmallBtn primary onClick={addSchedule}>✅ 등록</SmallBtn>
+          <div>
+            <SmallBtn primary onClick={addSchedule}>✅ 등록</SmallBtn>
+            {renderFlash("add")}
+          </div>
         </div>
       </SectionCard>
     </>}
