@@ -37,29 +37,28 @@ const ORDER_STATUS_COLOR={
 };
 const ORDER_STATUS_OPTIONS=Object.keys(ORDER_STATUS_COLOR);
 const toYmd=(d)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-// KST 기준 오늘(YYYY-MM-DD) · 날짜 문자열 ±N일 · 두 날짜 사이 일수
+// KST 기준 오늘(YYYY-MM-DD) · 두 날짜 사이 일수
 const kstToday=()=>new Date(Date.now()+9*3600000).toISOString().slice(0,10);
-const addDaysYmd=(ymd,n)=>{const d=new Date(`${ymd}T00:00:00Z`);d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10);};
 const daysBetweenYmd=(a,b)=>Math.round((Date.parse(`${b}T00:00:00Z`)-Date.parse(`${a}T00:00:00Z`))/86400000);
-// 입고 지연 판정 — status 와 무관한 파생 표시. eta<오늘 && (입고 0장 || (입고율<0.9 && 미입고≥100장)).
-// qty 는 mapCalendarRow 에서 이미 생산건=order_qty / 프린팅 외주=req_qty 로 통일됨.
-// '입고 완료'·'입고 확정' 은 종결 처리된 건이라 수량이 부족해도 제외 (수동 지정·자동 판정 모두).
-const DELAY_EXCLUDED_ST=new Set(["입고완료","입고확정"]);
-const isDelayedGroup=(date,qty,received,today,status)=>{
-  if(!date||date>=today||!(qty>0))return false;
-  if(DELAY_EXCLUDED_ST.has(String(status||"").replace(/\s/g,"")))return false;
-  const rec=Number(received)||0;
-  return rec===0||(rec/qty<0.9&&qty-rec>=100);
-};
+// 입고 지연 판정은 뷰(is_delayed)가 전담. 단 '입고 완료'·'입고 확정'으로 수동 지정된 건은 담당자 종결로 보고 제외.
+const DELAY_EXCLUDED_MANUAL_ST=new Set(["입고완료","입고확정"]);
+const isGroupDelayed=(g)=>g.events.some(e=>e.isDelayed)&&!(g.rep.statusManual&&DELAY_EXCLUDED_MANUAL_ST.has(String(g.rep.status||"").replace(/\s/g,"")));
+// 뷰 자동 판정 상태 중 수동 선택지(ORDER_STATUS_OPTIONS)에 없는 값의 색상
+const statusColor=(s)=>ORDER_STATUS_COLOR[s]||(s==="지연"?{bg:"#FEE2E2",color:"#DC2626"}:null);
 // 옵션명 표기 정규화: "[버건디-M]" → "버건디/M"
 const fmtOption=(v)=>String(v||"").trim().replace(/^\[|\]$/g,"").trim().replace(/-/g,"/");
 
-// 두 뷰를 공통 이벤트 형태로 통일 (생산건=factory/order_qty, 프린팅 외주=vendor/req_qty).
+// 두 뷰를 공통 이벤트 형태로 통일 (프린팅 외주 req_qty→order_qty, vendor→factory 로 정규화).
+// date = show_date (뷰 계산: 전량 입고=실입고일, 잔량 있음=조정입고일→입고예정일).
 const mapCalendarRow=(r,source)=>({
   id:`${source}-${r.row_key}`,
   groupKey:r.group_key||"",
   source,
-  date:r.eta,
+  date:r.show_date,
+  eta:r.eta,
+  revisedEta:r.revised_eta,
+  isDelayed:r.is_delayed===true,
+  remain:Number(r.remain_qty)||0,
   orderDate:r.order_date,
   receivedDate:r.received_date,
   item:r.product_name||"",
@@ -76,27 +75,30 @@ const mapCalendarRow=(r,source)=>({
   note:r.note||"",
 });
 
-// eta 범위(gte/lte)로 두 뷰를 조회 → 단일 이벤트 배열. 실패해도 캘린더는 빈 배열로 정상 렌더.
-async function fetchCalendarEvents(fromDate,toDate){
-  const range=`&eta=gte.${fromDate}${toDate?`&eta=lte.${toDate}`:""}`;
+// 필터로 두 뷰를 조회 → 단일 이벤트 배열. 실패해도 캘린더는 빈 배열로 정상 렌더.
+async function fetchCalendarRows(filter){
   const load=async(view,source)=>{
     try{
-      const r=await fetch(`${SUPABASE_URL}/rest/v1/${view}?select=*${range}&order=eta.asc&limit=2000`,{headers:sbHeaders});
+      const r=await fetch(`${SUPABASE_URL}/rest/v1/${view}?select=*${filter}&order=show_date.asc&limit=2000`,{headers:sbHeaders});
       if(!r.ok){console.warn(`[${view}] 응답 실패`,r.status);return[];}
       const rows=await r.json();
-      return(rows||[]).filter(x=>x&&x.eta).map(x=>mapCalendarRow(x,source));
+      return(rows||[]).filter(x=>x&&x.show_date).map(x=>mapCalendarRow(x,source));
     }catch(e){console.warn(`[${view}] 호출 실패`,e);return[];}
   };
   const[orders,prints]=await Promise.all([load("v_inbound_calendar","order"),load("v_print_calendar","print")]);
   return[...orders,...prints];
 }
+// show_date 범위(gte/lte) 조회
+const fetchCalendarEvents=(fromDate,toDate)=>fetchCalendarRows(`&show_date=gte.${fromDate}${toDate?`&show_date=lte.${toDate}`:""}`);
+// 지연 건 전체 (기간 제한 없음 — 뷰 is_delayed 기준)
+const fetchDelayedEvents=()=>fetchCalendarRows("&is_delayed=is.true");
 
 // 상태 수동 지정 → order_status upsert. 시트 동기화가 건드리지 않는 테이블이라 지정 상태는 유지된다.
 async function saveOrderStatus(groupKey,source,status){
   const r=await fetch(`${SUPABASE_URL}/rest/v1/order_status?on_conflict=group_key`,{
     method:"POST",
     headers:{...sbHeaders,Prefer:"resolution=merge-duplicates,return=minimal"},
-    body:JSON.stringify({group_key:groupKey,source,status,updated_at:new Date().toISOString()}),
+    body:JSON.stringify({group_key:groupKey,source,status,updated_at:new Date().toISOString(),updated_by:"dashboard"}),
   });
   if(!r.ok)throw new Error(`저장 실패 (${r.status})`);
 }
@@ -803,8 +805,8 @@ function ScheduleTab(){
   const[baseQuery,setBaseQuery]=useState(""); // 베이스 아이템 검색어(상품명 영문)
   const[baseResults,setBaseResults]=useState(null); // null=미검색, []=결과없음
   const[baseSearching,setBaseSearching]=useState(false);
-  const[delayEvents,setDelayEvents]=useState({recent:[],all:[]}); // 지연 판정용 — eta 오늘-180일 ~ 어제 / 전체 기간 ~ 어제
-  const[delayAllPeriod,setDelayAllPeriod]=useState(false);
+  const[delayEvents,setDelayEvents]=useState([]); // 뷰 is_delayed=true 행 (기간 제한 없음)
+  const[statusError,setStatusError]=useState(null); // {key,msg} 상태 저장 실패 — 상세 패널에 인라인 표시
   const[delayOpen,setDelayOpen]=useState(false); // 지연 배너 펼침
 
   // inventory 상품명 ilike 검색 → "베이스 아이템(한글) + 상품명(영문)" 파싱
@@ -886,31 +888,27 @@ function ScheduleTab(){
   const reloadUpcoming=useCallback(async()=>{
     setUpcomingEvents(await fetchCalendarEvents(weekRange.monday,null));
   },[weekRange.monday]);
-  // 지연 후보 조회 — 기본 표시는 최근 180일(잔량 몇 장 차이로 종결된 과거 건 제외).
-  // 180일 내 0건이어도 배너에 전체 기간 건수를 보여주기 위해 전체 기간도 함께 조회한다.
   const reloadDelay=useCallback(async()=>{
-    const t=kstToday(),to=addDaysYmd(t,-1);
-    const[recent,all]=await Promise.all([fetchCalendarEvents(addDaysYmd(t,-180),to),fetchCalendarEvents("2000-01-01",to)]);
-    setDelayEvents({recent,all});
+    setDelayEvents(await fetchDelayedEvents());
   },[]);
   useEffect(()=>{reloadCalendar();},[reloadCalendar]);
   useEffect(()=>{reloadUpcoming();},[reloadUpcoming]);
   useEffect(()=>{reloadDelay();},[reloadDelay]);
 
   // ── 홈에서 이동해온 요약 카드용 계산 (이번주 입고건 · 입고대기 현황) ──
-  // "이번주 입고건": eta 가 이번 주 월~일 사이인 건
+  // "이번주 입고건": show_date 가 이번 주 월~일 사이인 건. 수량은 잔량(remain_qty) 합계.
   const thisWeekEvents=useMemo(()=>
     upcomingEvents.filter(e=>e.date&&e.date>=weekRange.monday&&e.date<=weekRange.sunday)
       .sort((a,b)=>(a.date||"").localeCompare(b.date||"")),
   [upcomingEvents,weekRange]);
-  const thisWeekQty=useMemo(()=>thisWeekEvents.reduce((sum,e)=>sum+(Number(e.qty)||0),0),[thisWeekEvents]);
+  const thisWeekQty=useMemo(()=>thisWeekEvents.reduce((sum,e)=>sum+(Number(e.remain)||0),0),[thisWeekEvents]);
   // group_key 단위(= 캘린더 카드 1개) 그룹핑. 생산건(order) / 프린팅 외주(print) 분리.
   const thisWeekGroups=useMemo(()=>{
     const m=new Map();
     thisWeekEvents.forEach(ev=>{
       const key=ev.groupKey||`${ev.displayName||""}__${ev.round||""}`;
       if(!m.has(key))m.set(key,{key,rep:ev,qty:0});
-      m.get(key).qty+=(Number(ev.qty)||0);
+      m.get(key).qty+=(Number(ev.remain)||0);
     });
     const groups=Array.from(m.values());
     const outsource=groups.filter(g=>g.rep.source==="print");
@@ -1335,22 +1333,23 @@ function ScheduleTab(){
       name:`${g.rep.displayName||g.rep.item||""}${g.rep.round?`_${g.rep.round}차`:""}`,
       totalQty:g.events.reduce((s,e)=>s+(Number(e.qty)||0),0),
       totalReceived:g.events.reduce((s,e)=>s+(Number(e.received)||0),0),
+      totalRemain:g.events.reduce((s,e)=>s+(Number(e.remain)||0),0),
+      title:`${g.rep.supplier?`${g.rep.supplier} · `:""}${g.rep.displayName||g.rep.item||""}${g.rep.round?` (${g.rep.round}차)`:""}`,
+      delayed:isGroupDelayed(g),
     }));
   };
 
-  // 입고 지연 건 — 날짜별 group_key 단위(= 캘린더 카드 1개). 예정일 오름차순, 업체별로 묶어 건수 많은 업체부터.
+  // 입고 지연 건 — group_key + show_date 단위(= 캘린더 카드 1개). 표시일 오름차순, 업체별로 묶어 건수 많은 업체부터.
   const todayKst=kstToday();
-  const buildDelayGroups=(events)=>{
+  const delayGroups=(()=>{
     const byDay=new Map();
-    events.forEach(ev=>{if(!byDay.has(ev.date))byDay.set(ev.date,[]);byDay.get(ev.date).push(ev);});
+    delayEvents.forEach(ev=>{if(!byDay.has(ev.date))byDay.set(ev.date,[]);byDay.get(ev.date).push(ev);});
     return[...byDay.values()].flatMap(list=>groupEvents(list))
-      .filter(g=>isDelayedGroup(g.rep.date,g.totalQty,g.totalReceived,todayKst,g.rep.status))
-      .map(g=>({...g,shortage:Math.max(0,g.totalQty-g.totalReceived),elapsed:daysBetweenYmd(g.rep.date,todayKst)}))
+      .filter(g=>g.delayed)
+      .map(g=>({...g,elapsed:daysBetweenYmd(g.rep.date,todayKst)}))
       .sort((a,b)=>String(a.rep.date).localeCompare(String(b.rep.date)));
-  };
-  const delayAllGroups=buildDelayGroups(delayEvents.all);
-  const delayGroups=delayAllPeriod?delayAllGroups:buildDelayGroups(delayEvents.recent);
-  const delayShortage=delayGroups.reduce((s,g)=>s+g.shortage,0);
+  })();
+  const delayShortage=delayGroups.reduce((s,g)=>s+g.totalRemain,0);
   const delayBySupplier=(()=>{
     const m=new Map();
     delayGroups.forEach(g=>{const k=g.rep.supplier||"(업체 미지정)";if(!m.has(k))m.set(k,[]);m.get(k).push(g);});
@@ -1365,14 +1364,14 @@ function ScheduleTab(){
     const prevCal=calEvents,prevUp=upcomingEvents;
     const patch=(arr)=>arr.map(e=>e.groupKey===key?{...e,status:newStatus,statusManual:true}:e);
     setCalEvents(patch);setUpcomingEvents(patch);
-    setStatusBusy(key);
+    setStatusBusy(key);setStatusError(null);
     try{
       await saveOrderStatus(key,group.rep.source,newStatus);
       await Promise.all([reloadCalendar(),reloadUpcoming(),reloadDelay()]);
     }catch(e){
       console.error("[order_status] 저장 실패",e);
       setCalEvents(prevCal);setUpcomingEvents(prevUp); // 실패 시 되돌림
-      alert("상태 변경 실패: "+(e&&e.message?e.message:e));
+      setStatusError({key,msg:"상태 변경 실패: "+(e&&e.message?e.message:e)});
     }finally{setStatusBusy(null);}
   };
 
@@ -1462,7 +1461,7 @@ function ScheduleTab(){
             <div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:14}}>{waitFilter?`'${waitFilter}' 상태 건이 없습니다`:"예정된 입고대기 건이 없습니다"}</div>
           ):(
             shownWait.map((e,i)=>{
-              const c=ORDER_STATUS_COLOR[e.status]||{bg:"#EDE9FE",color:"#6D28D9"};
+              const c=statusColor(e.status)||{bg:"#EDE9FE",color:"#6D28D9"};
               return(<div key={e.id||i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"9px 12px",borderRadius:8,marginBottom:6,background:"#F8FAFC",border:"1px solid #E2E8F0"}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0,flex:1}}>
                   <span style={{flexShrink:0,width:8,height:8,borderRadius:"50%",background:c.color}} />
@@ -1513,14 +1512,11 @@ function ScheduleTab(){
       </div>
     </div>
 
-    {/* 입고 지연 배너 — 전체 기간에도 0건일 때만 미렌더. 헤더 클릭 시 펼침, 행 클릭 시 해당 날짜 상세 패널 */}
-    {viewMode==="calendar"&&delayAllGroups.length>0&&(
+    {/* 입고 지연 배너 — 뷰 is_delayed 카드 모음, 0건이면 미렌더. 헤더 클릭 시 펼침, 행 클릭 시 해당 날짜 상세 패널 */}
+    {viewMode==="calendar"&&delayGroups.length>0&&(
       <div style={{background:"#FEF2F2",border:"1px solid #FECACA",borderRadius:14,marginBottom:16,overflow:"hidden"}}>
         <div onClick={()=>setDelayOpen(o=>!o)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,padding:"12px 18px",cursor:"pointer",userSelect:"none",flexWrap:"wrap"}}>
-          <span style={{fontSize:15,fontWeight:700,color:"#DC2626"}}>{delayGroups.length>0?`⚠ 입고 지연 ${delayGroups.length}건 · 미입고 ${delayShortage.toLocaleString()}장`:`⚠ 최근 180일 지연 없음 · 전체 기간 ${delayAllGroups.length}건`}<span style={{fontSize:11,opacity:0.7,marginLeft:8}}>{delayOpen?"▲":"▼"}</span></span>
-          <label onClick={e=>e.stopPropagation()} style={{display:"inline-flex",alignItems:"center",gap:6,fontSize:12,fontWeight:600,color:"#B91C1C",cursor:"pointer",whiteSpace:"nowrap"}}>
-            <input type="checkbox" checked={delayAllPeriod} onChange={e=>setDelayAllPeriod(e.target.checked)} />전체 기간 보기
-          </label>
+          <span style={{fontSize:15,fontWeight:700,color:"#DC2626"}}>⚠ 입고 지연 {delayGroups.length}건 · 미입고 {delayShortage.toLocaleString()}장<span style={{fontSize:11,opacity:0.7,marginLeft:8}}>{delayOpen?"▲":"▼"}</span></span>
         </div>
         {delayOpen&&(
           <div style={{borderTop:"1px solid #FECACA",background:"#FFF",maxHeight:420,overflow:"auto",paddingBottom:6}}>
@@ -1536,7 +1532,7 @@ function ScheduleTab(){
                     <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:"#64748B"}}>{sup}</span>
                     <span style={{fontWeight:700,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.name}</span>
                     <span style={{whiteSpace:"nowrap",color:"#64748B"}}>발주 {g.totalQty.toLocaleString()}장 → 입고 {g.totalReceived.toLocaleString()}장</span>
-                    <span style={{whiteSpace:"nowrap",textAlign:"right",color:g.totalReceived===0?"#DC2626":"#475569",fontWeight:g.totalReceived===0?800:600}}>부족 {g.shortage.toLocaleString()}장</span>
+                    <span style={{whiteSpace:"nowrap",textAlign:"right",color:g.totalReceived===0?"#DC2626":"#475569",fontWeight:g.totalReceived===0?800:600}}>부족 {g.totalRemain.toLocaleString()}장</span>
                   </div>
                 ))}
               </div>
@@ -1573,7 +1569,7 @@ function ScheduleTab(){
             {calSearchResults.length===0&&<div style={{padding:"14px 12px",fontSize:13,color:"#94A3B8"}}>검색 결과가 없습니다 (입고 완료 제외)</div>}
             {calSearchResults.slice(0,20).map(g=>{
               const ev=g.rep;
-              const nc=ORDER_STATUS_COLOR[ev.status]||{bg:"#EDE9FE",color:"#6D28D9"};
+              const nc=statusColor(ev.status)||{bg:"#EDE9FE",color:"#6D28D9"};
               return(
                 <div key={g.key} onClick={()=>gotoSearchResult(ev)}
                   style={{display:"flex",gap:10,alignItems:"center",padding:"9px 12px",borderBottom:"1px solid #F1F5F9",cursor:"pointer"}}
@@ -1618,23 +1614,20 @@ function ScheduleTab(){
             </div>
             {groups.slice(0,3).map(g=>{
               const ev=g.rep;
-              const nc=ORDER_STATUS_COLOR[ev.status]||{bg:"#EDE9FE",color:"#6D28D9"};
-              const delayed=isDelayedGroup(ev.date,g.totalQty,g.totalReceived,todayKst,ev.status);
+              const nc=statusColor(ev.status)||{bg:"#EDE9FE",color:"#6D28D9"};
+              const delayed=g.delayed;
+              const revised=!!ev.revisedEta&&ev.date===ev.revisedEta&&ev.revisedEta!==ev.eta; // 조정입고일로 떠 있는 카드
               return(
-                <div key={g.key} title={`${ev.status||"발주"}${delayed?" · 지연":""}${ev.supplier?" · "+ev.supplier:""}${ev.code?" · "+ev.code:""}`}
+                <div key={g.key} title={`${ev.status||"발주"}${delayed?" · 지연":""}${revised?` · 조정 (예정 ${ev.eta||"-"})`:""}${ev.code?" · "+ev.code:""}`}
                   style={{display:"flex",gap:6,alignItems:"center",padding:"6px 7px",borderRadius:4,marginBottom:2,background:nc.bg,border:"1px solid "+nc.color+"55",...(delayed?{borderLeft:"3px solid #DC2626"}:{}),fontSize:12,lineHeight:1.3,userSelect:"none"}}>
                   <div style={{flex:1,minWidth:0}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:4,color:nc.color,fontWeight:600,fontSize:11}}>
-                      <span style={{display:"inline-flex",alignItems:"center",gap:4,minWidth:0}}>
-                        <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ev.status||"발주"}</span>
-                        {delayed&&<span style={{flexShrink:0,fontSize:10,fontWeight:800,color:"#FFF",background:"#DC2626",borderRadius:3,padding:"0 4px"}}>지연</span>}
-                      </span>
-                      {ev.supplier&&<span style={{opacity:0.85,fontWeight:500,flexShrink:0}}>· {ev.supplier}</span>}
+                    <div style={{display:"flex",alignItems:"center",gap:4,color:nc.color,fontWeight:600,fontSize:11,minWidth:0}}>
+                      <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ev.statusManual&&<span title="수동 지정됨">• </span>}{ev.status||"발주"}</span>
+                      {delayed&&<span style={{flexShrink:0,fontSize:10,fontWeight:800,color:"#FFF",background:"#DC2626",borderRadius:3,padding:"0 4px"}}>지연</span>}
+                      {revised&&<span style={{flexShrink:0,fontSize:10,fontWeight:700,color:"#475569",background:"#E2E8F0",borderRadius:3,padding:"0 4px"}}>조정</span>}
                     </div>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:4,marginTop:4}}>
-                      <span style={{fontWeight:700,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.name}</span>
-                      {g.totalReceived>0&&<span style={{color:"#0F172A",fontWeight:700,flexShrink:0}}>실입고 {g.totalReceived.toLocaleString()}장</span>}
-                    </div>
+                    <div style={{fontWeight:700,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginTop:4}}>{g.title}</div>
+                    <div style={{fontSize:11,fontWeight:600,color:g.totalRemain>0?"#C2410C":"#0F766E",marginTop:2}}>{g.totalRemain>0?`잔량 ${g.totalRemain.toLocaleString()}장`:`입고 ${g.totalReceived.toLocaleString()}장`}</div>
                   </div>
                 </div>);
             })}
@@ -1663,7 +1656,7 @@ function ScheduleTab(){
             <div style={{fontSize:14,color:"#64748B",marginBottom:16}}>입고 예정 {dayEvents.length}건(상품 {dayGroups.length}종){dayTotalQty>0?` · 총 ${dayTotalQty.toLocaleString()}장`:""}</div>
             {dayGroups.map(g=>{
               const ev=g.rep;
-              const nc=ORDER_STATUS_COLOR[ev.status]||{bg:"#EDE9FE",color:"#6D28D9"};
+              const nc=statusColor(ev.status)||{bg:"#EDE9FE",color:"#6D28D9"};
               // 업체: 생산건=생산공장(factory), 프린팅 외주=업체(vendor). 그룹 내 중복 제거.
               const gSuppliers=[...new Set(g.events.map(o=>String(o.supplier||"").trim()).filter(Boolean))].join(", ");
               const menuOpen=statusMenu===g.key;
@@ -1683,6 +1676,12 @@ function ScheduleTab(){
                       {ev.status||"상태 지정"}
                       <span style={{fontSize:9,opacity:0.7}}>▼</span>
                     </button>
+                    {statusError&&statusError.key===g.key&&(
+                      <div style={{marginTop:4,display:"flex",alignItems:"center",gap:6,fontSize:11,fontWeight:600,color:"#DC2626",whiteSpace:"nowrap"}}>
+                        {statusError.msg}
+                        <span onClick={()=>setStatusError(null)} style={{cursor:"pointer",color:"#94A3B8"}}>✕</span>
+                      </div>
+                    )}
                     {menuOpen&&(
                       <div style={{position:"absolute",top:"calc(100% + 4px)",right:0,minWidth:160,background:"#FFF",border:"1px solid #E2E8F0",borderRadius:10,boxShadow:"0 12px 32px rgba(15,23,42,0.16)",zIndex:60,overflow:"hidden"}}>
                         {ORDER_STATUS_OPTIONS.map(st=>{
@@ -1701,29 +1700,35 @@ function ScheduleTab(){
                 <div style={{overflowX:"auto",borderRadius:8,border:"1px solid #EEF2F6"}}>
                   <table style={{width:"100%",borderCollapse:"collapse"}}>
                     <thead><tr style={{background:"#F8FAFC"}}>
-                      <th style={colTh}>발주일</th><th style={colTh}>입고일</th><th style={colTh}>차수</th><th style={colTh}>옵션</th>
-                      <th style={{...colTh,textAlign:"right"}}>발주수량</th><th style={{...colTh,textAlign:"right"}}>실입고수량</th><th style={{...colTh,textAlign:"right"}}>금액</th>
+                      <th style={colTh}>상품코드</th><th style={colTh}>상품명</th><th style={colTh}>옵션</th>
+                      <th style={{...colTh,textAlign:"right"}}>발주수량</th><th style={{...colTh,textAlign:"right"}}>입고수량</th><th style={{...colTh,textAlign:"right"}}>잔량</th>
+                      <th style={colTh}>입고예정일</th><th style={colTh}>조정입고일</th><th style={colTh}>실입고일</th>
                     </tr></thead>
                     <tbody>
                       {g.events.map((o,oi)=>{
                         const recNum=has(o.received)&&Number.isFinite(Number(o.received))?Number(o.received):null;
                         const opt=fmtOption(o.option);
+                        const remain=Number(o.remain)||0;
+                        const revisedDiff=has(o.revisedEta)&&o.revisedEta!==o.eta;
                         return(
-                        <tr key={o.id||oi}>
-                          <td style={{...colTd,whiteSpace:"nowrap"}}>{has(o.orderDate)?o.orderDate:"-"}</td>
-                          <td style={{...colTd,whiteSpace:"nowrap"}}>{has(o.date)?o.date:"-"}</td>
-                          <td style={colTd}>{has(o.round)?o.round:"-"}</td>
+                        <tr key={o.id||oi} style={has(o.receivedDate)?{background:"#F0FDF4"}:undefined}>
+                          <td style={{...colTd,whiteSpace:"nowrap"}}>{o.code||"-"}</td>
+                          <td style={colTd}>{o.item||o.displayName||"-"}</td>
                           <td style={colTd}>{opt||"-"}</td>
                           <td style={{...colTd,textAlign:"right",fontWeight:700,color:"#0F172A",whiteSpace:"nowrap"}}>{(Number(o.qty)||0).toLocaleString()}</td>
                           <td style={{...colTd,textAlign:"right",fontWeight:700,color:recNum!==null?"#0F766E":"#94A3B8",whiteSpace:"nowrap"}}>{recNum!==null?recNum.toLocaleString():"-"}</td>
-                          <td style={{...colTd,textAlign:"right",whiteSpace:"nowrap",color:"#94A3B8"}}>-</td>
+                          <td style={{...colTd,textAlign:"right",whiteSpace:"nowrap",...(remain>0?{fontWeight:800,color:"#EA580C"}:{color:"#94A3B8"})}}>{remain.toLocaleString()}</td>
+                          <td style={{...colTd,whiteSpace:"nowrap"}}>{has(o.eta)?o.eta:"-"}</td>
+                          <td style={{...colTd,whiteSpace:"nowrap",...(revisedDiff?{color:"#2563EB",fontWeight:700}:{})}}>{has(o.revisedEta)?o.revisedEta:"-"}</td>
+                          <td style={{...colTd,whiteSpace:"nowrap"}}>{has(o.receivedDate)?o.receivedDate:"-"}</td>
                         </tr>);
                       })}
                       <tr style={{background:"#FAFAF9"}}>
-                        <td style={{...colTd,fontWeight:700,color:"#475569",borderBottom:"none"}} colSpan={4}>합계</td>
+                        <td style={{...colTd,fontWeight:700,color:"#475569",borderBottom:"none"}} colSpan={3}>합계</td>
                         <td style={{...colTd,textAlign:"right",fontWeight:800,color:"#0F172A",borderBottom:"none",whiteSpace:"nowrap"}}>{g.totalQty.toLocaleString()}</td>
                         <td style={{...colTd,textAlign:"right",fontWeight:800,color:"#0F766E",borderBottom:"none",whiteSpace:"nowrap"}}>{g.events.reduce((s,o)=>s+(has(o.received)&&Number.isFinite(Number(o.received))?Number(o.received):0),0).toLocaleString()}</td>
-                        <td style={{...colTd,borderBottom:"none"}}></td>
+                        <td style={{...colTd,textAlign:"right",fontWeight:800,color:g.totalRemain>0?"#EA580C":"#94A3B8",borderBottom:"none",whiteSpace:"nowrap"}}>{g.totalRemain.toLocaleString()}</td>
+                        <td style={{...colTd,borderBottom:"none"}} colSpan={3}></td>
                       </tr>
                     </tbody>
                   </table>
