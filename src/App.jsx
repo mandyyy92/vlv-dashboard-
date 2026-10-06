@@ -6535,6 +6535,180 @@ const osNum=v=>{if(v==null)return 0;const n=Number(String(v).replace(/[^0-9.-]/g
 // 날짜 정렬 키(YYYY-MM-DD 문자열 비교) — 숫자 컬럼과 비교 방식이 달라 따로 구분.
 const OS_DATE_SORT=new Set(["ordDate","eta","inDate"]);
 
+// ─── 차수별 계약서 첨부 (order_contracts 메타 + Storage 버킷 order-contracts) ───
+// supabase-js 를 쓰지 않는 앱이라 Storage 도 REST 엔드포인트로 직접 호출(기존 SUPABASE_URL/KEY 재사용).
+// order_key = `${상품명}|${차수}|${업체}` — 옵션 행이 여러 개여도 차수 단위로 목록을 공유한다.
+const OC_BUCKET="order-contracts";
+const OC_EXT=new Set(["pdf","jpg","jpeg","png","webp","doc","docx","xls","xlsx","hwp","hwpx"]);
+const OC_MAX=20*1024*1024;
+const ocAuth={"apikey":SUPABASE_KEY,"Authorization":`Bearer ${SUPABASE_KEY}`};
+const ocOrderKey=g=>`${g.name}|${g.round}|${g.factory}`;
+// 한글·공백·특수문자 → 하이픈, 소문자화(연속 하이픈은 하나로, 양끝 하이픈 제거)
+const ocSlug=s=>String(s??"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
+const ocExtOf=name=>{const i=name.lastIndexOf(".");return i>0?name.slice(i+1).toLowerCase():"";};
+const ocSafeName=name=>{const i=name.lastIndexOf(".");const base=ocSlug(i>0?name.slice(0,i):name)||"file";const ext=ocSlug(ocExtOf(name));return ext?`${base}.${ext}`:base;};
+const ocObjPath=path=>path.split("/").map(encodeURIComponent).join("/");
+const ocSize=n=>{n=Number(n)||0;return n>=1048576?`${(n/1048576).toFixed(1)}MB`:n>=1024?`${Math.round(n/1024)}KB`:`${n}B`;};
+const ocDate=v=>{if(!v)return"-";const d=new Date(v);if(isNaN(d))return String(v);const p=x=>String(x).padStart(2,"0");return`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;};
+
+function OrderContractsSection({group,onCountChange}){
+  const orderKey=ocOrderKey(group);
+  const[list,setList]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[loadErr,setLoadErr]=useState("");
+  const[uploads,setUploads]=useState([]); // [{id,name,status:"uploading"|"done"|"error",msg}]
+  const[drag,setDrag]=useState(false);
+  const fileRef=useRef(null);
+  const uploadClear=useRef(null);
+  // 인라인 안내(3초 후 사라짐) · 2단계 삭제 확인(3초 내 재클릭)
+  const[flashMsg,setFlashMsg]=useState(null); // {ok,text} ok: true=녹색 / false=빨강 / null=회색
+  const[armed,setArmed]=useState(null);
+  const flashTimer=useRef(null);
+  const armTimer=useRef(null);
+  const flash=(ok,text)=>{clearTimeout(flashTimer.current);setFlashMsg({ok,text});flashTimer.current=setTimeout(()=>setFlashMsg(null),3000);};
+  useEffect(()=>()=>{clearTimeout(flashTimer.current);clearTimeout(armTimer.current);clearTimeout(uploadClear.current);},[]);
+
+  const load=useCallback(async()=>{
+    setLoading(true);setLoadErr("");
+    try{
+      const r=await fetch(`${SUPABASE_URL}/rest/v1/order_contracts?select=*&order_key=eq.${encodeURIComponent(orderKey)}&order=uploaded_at.desc`,{headers:sbHeaders});
+      if(!r.ok)throw new Error(`${r.status} ${await r.text()}`);
+      const data=await r.json();
+      setList(data);onCountChange(orderKey,data.length);
+    }catch(e){setLoadErr(e.message||String(e));}
+    finally{setLoading(false);}
+  },[orderKey,onCountChange]);
+  useEffect(()=>{load();},[load]);
+
+  const setUp=(id,patch)=>setUploads(p=>p.map(u=>u.id===id?{...u,...patch}:u));
+
+  const uploadOne=async(file,id)=>{
+    const ext=ocExtOf(file.name);
+    if(!OC_EXT.has(ext)){setUp(id,{status:"error",msg:`허용되지 않는 형식(.${ext||"없음"})`});return false;}
+    if(file.size>OC_MAX){setUp(id,{status:"error",msg:`20MB 초과(${ocSize(file.size)})`});return false;}
+    const path=`${ocSlug(orderKey)||"order"}/${Date.now()}_${ocSafeName(file.name)}`;
+    try{
+      const s=await fetch(`${SUPABASE_URL}/storage/v1/object/${OC_BUCKET}/${ocObjPath(path)}`,{method:"POST",headers:{...ocAuth,"Content-Type":file.type||"application/octet-stream","x-upsert":"false"},body:file});
+      if(!s.ok)throw new Error(`저장소 업로드 실패 ${s.status} ${await s.text()}`);
+      const r=await fetch(`${SUPABASE_URL}/rest/v1/order_contracts`,{method:"POST",headers:sbHeaders,body:JSON.stringify({
+        order_key:orderKey,product_name:group.name,order_round:group.round,factory:group.factory,
+        file_path:path,file_name:file.name,file_type:file.type||null,file_size:file.size,uploaded_at:new Date().toISOString(),
+      })});
+      if(!r.ok){
+        // 메타 저장 실패 → 고아 파일이 남지 않게 방금 올린 객체 정리(실패해도 무시)
+        fetch(`${SUPABASE_URL}/storage/v1/object/${OC_BUCKET}`,{method:"DELETE",headers:{...ocAuth,"Content-Type":"application/json"},body:JSON.stringify({prefixes:[path]})}).catch(()=>{});
+        throw new Error(`목록 저장 실패 ${r.status} ${await r.text()}`);
+      }
+      setUp(id,{status:"done",msg:""});
+      return true;
+    }catch(e){setUp(id,{status:"error",msg:e.message||String(e)});return false;}
+  };
+
+  const handleFiles=async(fileList)=>{
+    const files=[...(fileList||[])];
+    if(!files.length)return;
+    clearTimeout(uploadClear.current);
+    const base=Date.now();
+    const items=files.map((f,i)=>({id:`${base}-${i}`,name:f.name,status:"uploading",msg:""}));
+    setUploads(items);
+    const res=await Promise.all(files.map((f,i)=>uploadOne(f,items[i].id)));
+    if(res.some(Boolean))await load();
+    uploadClear.current=setTimeout(()=>setUploads([]),3000);
+  };
+
+  const openFile=async(c)=>{
+    // await 뒤 window.open 은 팝업 차단될 수 있어 빈 탭을 먼저 연 뒤 주소를 넣는다.
+    const w=window.open("","_blank");
+    try{
+      const r=await fetch(`${SUPABASE_URL}/storage/v1/object/sign/${OC_BUCKET}/${ocObjPath(c.file_path)}`,{method:"POST",headers:{...ocAuth,"Content-Type":"application/json"},body:JSON.stringify({expiresIn:3600})});
+      if(!r.ok)throw new Error(`${r.status} ${await r.text()}`);
+      const j=await r.json();
+      const signed=j.signedURL||j.signedUrl;
+      if(!signed)throw new Error("임시 링크 없음");
+      const url=/^https?:/.test(signed)?signed:`${SUPABASE_URL}/storage/v1${signed}`;
+      if(w)w.location.href=url;else window.open(url,"_blank","noopener");
+    }catch(e){
+      if(w)w.close();
+      flash(false,`열기 실패: ${e.message||e}`);
+    }
+  };
+
+  const removeFile=async(c)=>{
+    try{
+      const s=await fetch(`${SUPABASE_URL}/storage/v1/object/${OC_BUCKET}`,{method:"DELETE",headers:{...ocAuth,"Content-Type":"application/json"},body:JSON.stringify({prefixes:[c.file_path]})});
+      if(!s.ok)throw new Error(`저장소 삭제 실패 ${s.status} ${await s.text()}`);
+    }catch(e){flash(false,e.message||String(e));return;}
+    try{
+      const r=await fetch(`${SUPABASE_URL}/rest/v1/order_contracts?id=eq.${c.id}`,{method:"DELETE",headers:sbHeaders});
+      if(!r.ok)throw new Error(`목록 삭제 실패 ${r.status} ${await r.text()}`);
+      flash(true,`삭제됨: ${c.file_name}`);
+    }catch(e){flash(false,e.message||String(e));}
+    await load();
+  };
+  const onDelete=c=>{
+    clearTimeout(armTimer.current);
+    if(armed===c.id){setArmed(null);removeFile(c);return;}
+    setArmed(c.id);
+    armTimer.current=setTimeout(()=>setArmed(null),3000);
+  };
+
+  const btn={border:"1px solid #E2E8F0",background:"#FFF",borderRadius:6,padding:"4px 10px",fontSize:12,fontWeight:600,cursor:"pointer",color:"#334155",whiteSpace:"nowrap"};
+  const stColor={uploading:"#64748B",done:"#16A34A",error:"#DC2626"};
+  const stLabel={uploading:"업로드 중…",done:"완료",error:"실패"};
+
+  return(
+    <div style={{marginBottom:24}}>
+      <div style={{fontSize:13,fontWeight:800,color:"#0F172A",marginBottom:10}}>계약서 <span style={{color:"#94A3B8",fontWeight:600}}>{list.length}</span></div>
+
+      {/* 업로드 영역: 파일 선택 + 드래그&드롭 */}
+      <div
+        onDragOver={e=>{e.preventDefault();setDrag(true);}}
+        onDragLeave={()=>setDrag(false)}
+        onDrop={e=>{e.preventDefault();setDrag(false);handleFiles(e.dataTransfer.files);}}
+        style={{border:`1.5px dashed ${drag?"#2563EB":"#CBD5E1"}`,background:drag?"#EFF6FF":"#F8FAFC",borderRadius:10,padding:"16px",textAlign:"center",marginBottom:10}}>
+        <input ref={fileRef} type="file" multiple accept={[...OC_EXT].map(x=>"."+x).join(",")} style={{display:"none"}}
+          onChange={e=>{handleFiles(e.target.files);e.target.value="";}} />
+        <button onClick={()=>fileRef.current?.click()} style={{...btn,background:"#2563EB",borderColor:"#2563EB",color:"#FFF",padding:"6px 14px",fontSize:13}}>파일 선택</button>
+        <div style={{fontSize:12,color:"#94A3B8",marginTop:8}}>또는 파일을 여기로 끌어다 놓으세요 · pdf, jpg, png, webp, doc(x), xls(x), hwp(x) · 최대 20MB</div>
+      </div>
+
+      {uploads.length>0&&(
+        <div style={{marginBottom:10,display:"flex",flexDirection:"column",gap:4}}>
+          {uploads.map(u=>(
+            <div key={u.id} style={{display:"flex",gap:8,fontSize:12,alignItems:"baseline"}}>
+              <span style={{fontWeight:700,color:stColor[u.status],flexShrink:0}}>{stLabel[u.status]}</span>
+              <span style={{color:"#334155",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{u.name}</span>
+              {u.msg&&<span style={{color:"#DC2626",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>— {u.msg}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+      {flashMsg&&<div style={{marginBottom:8,fontSize:12,fontWeight:600,color:flashMsg.ok===null?"#64748B":flashMsg.ok?"#16A34A":"#DC2626"}}>{flashMsg.text}</div>}
+
+      {/* 첨부 목록 */}
+      {loading?(
+        <div style={{fontSize:13,color:"#94A3B8",padding:"12px 0"}}>⏳ 불러오는 중...</div>
+      ):loadErr?(
+        <div style={{fontSize:13,color:"#DC2626",padding:"12px 0"}}>계약서 목록 불러오기 실패: {loadErr}</div>
+      ):!list.length?(
+        <div style={{fontSize:13,color:"#94A3B8",padding:"12px 0"}}>첨부된 계약서가 없습니다</div>
+      ):(
+        <div style={{border:"1px solid #E2E8F0",borderRadius:10,overflow:"hidden"}}>
+          {list.map((c,i)=>(
+            <div key={c.id} style={{display:"flex",alignItems:"center",gap:12,padding:"9px 12px",borderTop:i?"1px solid #F1F5F9":"none",fontSize:13}}>
+              <span style={{flex:1,minWidth:0,fontWeight:600,color:"#0F172A",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={c.file_name}>📄 {c.file_name}</span>
+              <span style={{width:64,textAlign:"right",color:"#64748B",fontVariantNumeric:"tabular-nums",flexShrink:0}}>{ocSize(c.file_size)}</span>
+              <span style={{width:118,textAlign:"right",color:"#64748B",fontVariantNumeric:"tabular-nums",flexShrink:0}}>{ocDate(c.uploaded_at)}</span>
+              <button onClick={()=>openFile(c)} style={btn}>열기</button>
+              <button onClick={()=>onDelete(c)} style={{...btn,width:76,...(armed===c.id?{background:"#DC2626",borderColor:"#DC2626",color:"#FFF"}:{color:"#DC2626"})}}>{armed===c.id?"정말 삭제?":"삭제"}</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OrderSheetDashboard(){
   const[rows,setRows]=useState([]);
   const[loading,setLoading]=useState(true);
@@ -6587,6 +6761,34 @@ function OrderSheetDashboard(){
     })();
     return()=>{alive=false;};
   },[]);
+
+  // 차수별 계약서 개수 { order_key: n } — order_contracts 를 order_key 로 group by 해 한 번에 조회(행별 쿼리 금지).
+  // PostgREST 집계가 꺼져 있으면 order_key 만 페이징 조회해 클라이언트에서 센다. 실패해도 표는 정상 동작.
+  const[ocCounts,setOcCounts]=useState({});
+  useEffect(()=>{
+    let alive=true;
+    (async()=>{
+      try{
+        const m={};
+        const r=await fetch(`${SUPABASE_URL}/rest/v1/order_contracts?select=order_key,count()`,{headers:sbHeaders});
+        if(r.ok){
+          for(const it of await r.json())if(it.order_key)m[it.order_key]=Number(it.count)||0;
+        }else{
+          const PAGE=1000;
+          for(let off=0;;off+=PAGE){
+            const r2=await fetch(`${SUPABASE_URL}/rest/v1/order_contracts?select=order_key&limit=${PAGE}&offset=${off}`,{headers:sbHeaders});
+            if(!r2.ok)break;
+            const chunk=await r2.json();
+            for(const it of chunk)if(it.order_key)m[it.order_key]=(m[it.order_key]||0)+1;
+            if(chunk.length<PAGE)break;
+          }
+        }
+        if(alive)setOcCounts(m);
+      }catch{/* 개수 표시 없이 진행 */}
+    })();
+    return()=>{alive=false;};
+  },[]);
+  const onOcCount=useCallback((k,n)=>setOcCounts(p=>p[k]===n?p:{...p,[k]:n}),[]);
 
   // ── 필터(연도·시즌·공장·검색) ── "" = 전체
   const[fYear,setFYear]=useState("");
@@ -6816,6 +7018,7 @@ function OrderSheetDashboard(){
                     <span style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}>
                       {thumb(g.code,34)}
                       <span style={{minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.name}</span>
+                      {ocCounts[ocOrderKey(g)]>0&&<span title="첨부된 계약서" style={{flexShrink:0,fontSize:12,fontWeight:700,color:"#2563EB"}}>📎{ocCounts[ocOrderKey(g)]}</span>}
                     </span>
                   </Td>
                   {/* 덩어리1 일정 */}
@@ -6844,8 +7047,9 @@ function OrderSheetDashboard(){
 
         {/* ── 오른쪽 드로어: 선택한 (상품명+차수)의 옵션별 상세 ── */}
         {selGroup&&(<>
-          <div onClick={()=>setSelKey(null)} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.45)",zIndex:1000}} />
-          <aside style={{position:"fixed",top:0,right:0,bottom:0,width:"min(400px, 92vw)",background:"#FFFFFF",zIndex:1001,boxShadow:"-8px 0 28px rgba(0,0,0,0.12)",display:"flex",flexDirection:"column"}}>
+          <style>{"@keyframes ocSlideIn{from{transform:translateX(100%)}to{transform:translateX(0)}}@keyframes ocFadeIn{from{opacity:0}to{opacity:1}}"}</style>
+          <div onClick={()=>setSelKey(null)} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.45)",zIndex:1000,animation:"ocFadeIn .2s ease-out"}} />
+          <aside style={{position:"fixed",top:0,right:0,bottom:0,width:"min(880px, 92vw)",background:"#FFFFFF",zIndex:1001,boxShadow:"-8px 0 28px rgba(0,0,0,0.12)",display:"flex",flexDirection:"column",animation:"ocSlideIn .22s ease-out"}}>
             <div style={{display:"flex",alignItems:"flex-start",gap:12,padding:"18px 20px",borderBottom:"1px solid #E2E8F0"}}>
               {thumb(selGroup.code,88,10)}
               <div style={{flex:1,minWidth:0}}>
@@ -6855,13 +7059,14 @@ function OrderSheetDashboard(){
                   <span style={{fontSize:17,fontWeight:700,color:"#0F172A",lineHeight:1.3}}>{selGroup.name}</span>
                 </div>
                 <div style={{fontSize:12,color:"#94A3B8",marginTop:4,fontFamily:"monospace"}}>{selGroup.code||"-"}</div>
+                <div style={{fontSize:13,color:"#475569",marginTop:6}}>발주일 <b style={{color:"#0F172A"}}>{osDate(selGroup.ordDate)}</b> · 입고예정일 <b style={{color:"#0F172A"}}>{osDate(selGroup.eta)}</b></div>
               </div>
               <button onClick={()=>setSelKey(null)} aria-label="닫기" style={{border:"none",background:"#F1F5F9",borderRadius:8,width:32,height:32,fontSize:16,cursor:"pointer",color:"#475569",flexShrink:0}}>✕</button>
             </div>
 
             <div style={{flex:1,overflowY:"auto",padding:20}}>
               {/* 그룹 집계 요약 */}
-              <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8,marginBottom:16}}>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:16}}>
                 {[
                   ["발주수량",`${Math.round(selGroup.ord).toLocaleString()} pcs`,"#1E293B","#F8FAFC","#E2E8F0"],
                   ["입고수량",`${Math.round(selGroup.inb).toLocaleString()} pcs`,"#059669","#F0FDF4","#BBF7D0"],
@@ -6878,6 +7083,9 @@ function OrderSheetDashboard(){
                 <div style={{fontSize:11,fontWeight:700,color:"#94A3B8"}}>발주금액</div>
                 <div style={{fontSize:19,fontWeight:800,color:"#1E293B",marginTop:2}}>₩{Math.round(selGroup.amt).toLocaleString()}</div>
               </div>
+
+              {/* 차수별 계약서 첨부 — key 로 차수 전환 시 상태 초기화 */}
+              <OrderContractsSection key={ocOrderKey(selGroup)} group={selGroup} onCountChange={onOcCount} />
 
               {/* 옵션 리스트 — 옵션 1개 = 1행 표(썸네일 없음). 대표 썸네일은 드로어 헤더에만 둔다. */}
               <div style={{fontSize:13,fontWeight:800,color:"#0F172A",marginBottom:10}}>옵션별 상세 <span style={{color:"#94A3B8",fontWeight:600}}>{selGroup.items.length}</span></div>
