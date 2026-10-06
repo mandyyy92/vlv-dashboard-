@@ -6938,11 +6938,12 @@ function OrderSheetDashboard(){
     <span style={{display:"block",margin:"-10px -14px",padding:"10px 14px",...(OSC[i].div?{borderRight:`1px solid ${DIVC}`}:null)}}>{content}</span>
   );
 
-  // 드로어(폭 ≈360px) 옵션표 컬럼 — 가로스크롤 없이 담기게 고정폭 압축, 색상·사이즈만 가변.
-  const DRW=[{w:null,a:"left"},{w:80,a:"left"},{w:56,a:"right"},{w:56,a:"right"},{w:54,a:"right"}];
-  // Table 헬퍼 th 패딩(14px)이 좁은 컬럼엔 과해서 음수 마진으로 당기고 글자만 작게 — 헬퍼는 그대로 재사용.
-  const drwTh={display:"block",margin:"0 -10px",whiteSpace:"normal",fontSize:11,letterSpacing:0,lineHeight:1.25};
-  const drwTd={padding:"7px 4px",fontSize:12,verticalAlign:"middle"};
+  // 드로어 옵션표 컬럼 — table-layout:auto + 모든 열 width:1%·nowrap → 각 열이 내용 폭에 맞춰진다.
+  // 표는 width:auto 로 좌측 정렬(100%로 늘리지 않음), 좁은 화면은 컨테이너 가로 스크롤. 헤더·셀 정렬은 DRW 하나로 공유.
+  const DRW=[{h:"색상·사이즈",a:"left"},{h:"상품코드",a:"left"},{h:"발주수량",a:"right"},{h:"입고수량",a:"right"},{h:"입고율",a:"right"}];
+  const drwCol={width:"1%",whiteSpace:"nowrap",paddingLeft:12,paddingRight:12};
+  const drwTh={...drwCol,paddingTop:10,paddingBottom:10,background:"#F8FAFC",fontWeight:600,color:"#64748B",fontSize:11,letterSpacing:0,lineHeight:1.25,borderBottom:"1px solid #E2E8F0",textTransform:"uppercase"};
+  const drwTd={...drwCol,paddingTop:7,paddingBottom:7,fontSize:12,verticalAlign:"middle",borderBottom:"1px solid #F1F5F9",color:"#334155"};
   // Table 헬퍼의 headers 항목에 그대로 넣는 클릭 정렬 헤더.
   const sortTh=(k,label)=>(
     <span onClick={()=>toggleSort(k)} style={{cursor:"pointer",userSelect:"none",whiteSpace:"nowrap",color:sortKey===k?"#2563EB":"inherit"}}>
@@ -7089,23 +7090,26 @@ function OrderSheetDashboard(){
 
               {/* 옵션 리스트 — 옵션 1개 = 1행 표(썸네일 없음). 대표 썸네일은 드로어 헤더에만 둔다. */}
               <div style={{fontSize:13,fontWeight:800,color:"#0F172A",marginBottom:10}}>옵션별 상세 <span style={{color:"#94A3B8",fontWeight:600}}>{selGroup.items.length}</span></div>
-              <Table
-                headers={["색상·사이즈","상품코드","발주수량","입고수량","입고율"].map(h=><span key={h} style={drwTh}>{h}</span>)}
-                cols={DRW.map(c=>c.w)} aligns={DRW.map(c=>c.a)}>
-                {selGroup.items.map((it,i)=>{
-                  const o=osNum(it[OS_COL.ORD_QTY]),n=osNum(it[OS_COL.IN_QTY]);
-                  const rt=o>0?(n/o*100):0;
-                  return(
-                    <tr key={i}>
-                      <Td style={{...drwTd,textAlign:DRW[0].a,fontWeight:700,color:"#0F172A",wordBreak:"break-word"}}>{it[OS_COL.OPT]||"-"}</Td>
-                      <Td style={{...drwTd,textAlign:DRW[1].a,fontSize:11,fontFamily:"monospace",color:"#64748B",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{it[OS_COL.CODE]||"-"}</Td>
-                      <Td style={{...drwTd,textAlign:DRW[2].a,...numTd,color:"#334155"}}>{o.toLocaleString()}</Td>
-                      <Td style={{...drwTd,textAlign:DRW[3].a,...numTd,color:"#059669",fontWeight:700}}>{n.toLocaleString()}</Td>
-                      <Td style={{...drwTd,textAlign:DRW[4].a,...numTd,color:rateColor(rt),fontWeight:700}}>{rt.toFixed(1)}%</Td>
-                    </tr>
-                  );
-                })}
-              </Table>
+              <div style={{display:"inline-block",maxWidth:"100%",overflowX:"auto",verticalAlign:"top",borderRadius:10,border:"1px solid #E2E8F0"}}>
+                <table style={{width:"auto",tableLayout:"auto",borderCollapse:"collapse",fontSize:15}}>
+                  <thead><tr>{DRW.map(c=><th key={c.h} style={{...drwTh,textAlign:c.a}}>{c.h}</th>)}</tr></thead>
+                  <tbody>
+                    {selGroup.items.map((it,i)=>{
+                      const o=osNum(it[OS_COL.ORD_QTY]),n=osNum(it[OS_COL.IN_QTY]);
+                      const rt=o>0?(n/o*100):0;
+                      return(
+                        <tr key={i}>
+                          <td style={{...drwTd,textAlign:DRW[0].a,fontWeight:700,color:"#0F172A"}}>{it[OS_COL.OPT]||"-"}</td>
+                          <td style={{...drwTd,textAlign:DRW[1].a,fontSize:11,fontFamily:"monospace",color:"#64748B"}}>{it[OS_COL.CODE]||"-"}</td>
+                          <td style={{...drwTd,textAlign:DRW[2].a,...numTd,color:"#334155"}}>{o.toLocaleString()}</td>
+                          <td style={{...drwTd,textAlign:DRW[3].a,...numTd,color:"#059669",fontWeight:700}}>{n.toLocaleString()}</td>
+                          <td style={{...drwTd,textAlign:DRW[4].a,...numTd,color:rateColor(rt),fontWeight:700}}>{rt.toFixed(1)}%</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </aside>
         </>)}
