@@ -22,7 +22,6 @@ const UNIQUE_PRODUCTS=[...new Set(SKUS.map(s=>s[F.REP]))].length;
 
 const SUPPLIERS=["자체제작","국내-베키(동대문)","수입-(복건)GL","수입-(광동)BJ","수입-(복건)SY"];
 const SUPPLIER_COLORS={"자체제작":"#E8A87C","국내-베키(동대문)":"#85CDCA","수입-(복건)GL":"#D5A4CF","수입-(광동)BJ":"#8B5CF6","수입-(복건)SY":"#3B82F6"};
-const SCHEDULE_SUP_STYLES={"인도":{color:"#16A34A",bg:"#F0FDF4",icon:"🇮🇳"},"코니키즈":{color:"#2563EB",bg:"#EFF6FF",icon:"🏭"},"성은교역":{color:"#D97706",bg:"#FFFBEB",icon:"📦"},"오중":{color:"#0891B2",bg:"#ECFEFF",icon:"🏢"}};
 
 // ─── 입고 캘린더: 구글시트 동기화 뷰(v_inbound_calendar / v_print_calendar) ───
 // 상태 색상 — 캘린더 범례·카드·상세 패널 뱃지 공통.
@@ -45,7 +44,7 @@ const statusColor=(s)=>ORDER_STATUS_COLOR[s]||(s==="지연"?{bg:"#FEE2E2",color:
 // 옵션명 표기 정규화: "[버건디-M]" → "버건디/M"
 const fmtOption=(v)=>String(v||"").trim().replace(/^\[|\]$/g,"").trim().replace(/-/g,"/");
 
-// 두 뷰를 공통 이벤트 형태로 통일 (프린팅 외주 req_qty→order_qty, vendor→factory 로 정규화).
+// 두 뷰를 공통 이벤트 형태로 통일 — 프린팅 외주는 조회 직후 req_qty→order_qty, vendor→factory 로 정규화돼 들어온다.
 // date = show_date (뷰 계산: 전량 입고=실입고일, 잔량 있음=조정입고일→입고예정일).
 const mapCalendarRow=(r,source)=>({
   id:`${source}-${r.row_key}`,
@@ -61,9 +60,11 @@ const mapCalendarRow=(r,source)=>({
   item:r.product_name||"",
   displayName:r.display_name||r.product_name||"",
   round:r.order_round,
-  qty:Number(source==="print"?r.req_qty:r.order_qty)||0,
+  qty:Number(r.order_qty)||0,
   received:r.received_qty,
-  supplier:(source==="print"?r.vendor:r.factory)||"",
+  supplier:r.factory||"",
+  baseFactory:r.base_factory||"",  // 프린팅 외주 전용
+  delayReason:r.delay_reason||"",  // 프린팅 외주 전용
   status:r.status||"",
   statusManual:!!r.status_manual,
   code:r.product_code||"",
@@ -73,21 +74,23 @@ const mapCalendarRow=(r,source)=>({
   imageUrl:r.image_url||"",
 });
 
-// 필터로 두 뷰를 조회 → 단일 이벤트 배열. 실패해도 캘린더는 빈 배열로 정상 렌더.
-async function fetchCalendarRows(filter){
+// 필터로 뷰를 조회 → 단일 이벤트 배열. sources: "order"(v_inbound_calendar) / "print"(v_print_calendar). 실패해도 빈 배열로 정상 렌더.
+const CALENDAR_VIEW={order:"v_inbound_calendar",print:"v_print_calendar"};
+async function fetchCalendarRows(filter,sources=["order","print"]){
   const load=async(view,source)=>{
     try{
       const r=await fetch(`${SUPABASE_URL}/rest/v1/${view}?select=*${filter}&order=show_date.asc&limit=2000`,{headers:sbHeaders});
       if(!r.ok){console.warn(`[${view}] 응답 실패`,r.status);return[];}
       const rows=await r.json();
-      return(rows||[]).filter(x=>x&&x.show_date).map(x=>mapCalendarRow(x,source));
+      return(rows||[]).filter(x=>x&&x.show_date)
+        .map(x=>source==="print"?{...x,order_qty:x.req_qty,factory:x.vendor}:x)
+        .map(x=>mapCalendarRow(x,source));
     }catch(e){console.warn(`[${view}] 호출 실패`,e);return[];}
   };
-  const[orders,prints]=await Promise.all([load("v_inbound_calendar","order"),load("v_print_calendar","print")]);
-  return[...orders,...prints];
+  return(await Promise.all(sources.map(s=>load(CALENDAR_VIEW[s],s)))).flat();
 }
 // show_date 범위(gte/lte) 조회
-const fetchCalendarEvents=(fromDate,toDate)=>fetchCalendarRows(`&show_date=gte.${fromDate}${toDate?`&show_date=lte.${toDate}`:""}`);
+const fetchCalendarEvents=(fromDate,toDate,sources)=>fetchCalendarRows(`&show_date=gte.${fromDate}${toDate?`&show_date=lte.${toDate}`:""}`,sources);
 // 지연 건 전체 (기간 제한 없음 — 뷰 is_delayed 기준)
 const fetchDelayedEvents=()=>fetchCalendarRows("&is_delayed=is.true");
 
@@ -103,17 +106,6 @@ async function saveOrderStatus(groupKey,source,status){
 const getSupColor=(s)=>{
   if(SUPPLIER_COLORS[s])return SUPPLIER_COLORS[s];
   if(s.startsWith("자체"))return"#E8A87C";if(s.startsWith("국내"))return"#85CDCA";return"#D5A4CF";
-};
-
-// ─── Item Name Translation (English → Korean) ───
-const ENG_NAME_MAP={"PIGMENT TEE":"피그먼트 티셔츠","PIGMENT TEES":"피그먼트 티셔츠","GRAYCHILL":"그레이칠","RINGER T-SHIRT":"링거 티셔츠","UNISEX RINGER T-SHIRT":"유니섹스 링거 티셔츠","UNISEX RINGER":"유니섹스 링거","WOMEN'S LONG SLEEVE":"우먼 롱슬리브","WOMEN'S LONG SLEEVES":"우먼 롱슬리브","WOMEN’S LONG SLEEVE":"우먼 롱슬리브","WOMEN’S LONG SLEEVES":"우먼 롱슬리브","WOMEN LONG SLEEVE":"우먼 롱슬리브","WOMEN LONG SLEEVES":"우먼 롱슬리브","WOMENS LONG SLEEVE":"우먼 롱슬리브","WOMENS LONG SLEEVES":"우먼 롱슬리브","LONG SLEEVE":"롱슬리브","LONG SLEEVES":"롱슬리브","HOODIE":"후디","SWEATSHIRT":"맨투맨","T-SHIRT":"티셔츠","TEES":"티셔츠","TEE":"티셔츠","CREWNECK":"크루넥","WINDBREAKER":"바람막이","JOGGER":"조거팬츠","JOGGERS":"조거팬츠","RAGLAN":"레글런","PANTS":"팬츠","SHORTS":"쇼츠","JACKET":"자켓","VEST":"베스트","CAP":"캡","HAT":"모자","BAG":"가방","SOCKS":"양말","CARDIGAN":"가디건","POLO":"폴로","SHIRT":"셔츠","SKIRT":"스커트","DRESS":"원피스","LEGGINGS":"레깅스","ZIP UP":"집업","ZIP-UP":"집업","HALF ZIP":"하프집업","OVERSIZED":"오버사이즈","CROP":"크롭","BASIC":"베이직","ESSENTIAL":"에센셜","PIGMENT":"피그먼트","SIGNATURE":"시그니처"};
-const ENG_NAME_SORTED=Object.entries(ENG_NAME_MAP).sort((a,b)=>b[0].length-a[0].length);
-const translateItemName=(name)=>{
-  if(!name)return name;
-  const normalized=name.replace(/[‘’′`]/g,"'");
-  const up=normalized.toUpperCase().trim();
-  for(const[eng,kr] of ENG_NAME_SORTED){if(up.includes(eng))return kr;}
-  return name;
 };
 
 
@@ -765,294 +757,13 @@ const CalThumb=({src,size})=>{
     :<div style={box} />;
 };
 
-// ─── 입고 스케줄 > 프린팅 외주 (v_print_calendar · 업체별 카드 + 서랍) ───
-// 조회 직후 req_qty→order_qty, vendor→factory 로 정규화(공용 로직 재사용용). 화면의 '업체' 라벨은 vendor 값.
-// PostgREST 1회 최대 1000행 제한 → Range 페이지네이션.
-async function fetchPrintRows(){
-  const out=[];
-  for(let from=0;;from+=1000){
-    const r=await fetch(`${SUPABASE_URL}/rest/v1/v_print_calendar?select=*&order=show_date.asc.nullslast,row_key.asc`,{headers:{...sbHeaders,Range:`${from}-${from+999}`}});
-    if(!r.ok)throw new Error(`조회 실패 (${r.status})`);
-    const rows=await r.json();
-    (rows||[]).forEach(x=>{if(x)out.push({...x,order_qty:x.req_qty,factory:x.vendor});});
-    if(!rows||rows.length<1000)break;
-  }
-  return out;
-}
-const PV_FILTERS=[["all","전체"],["active","진행중"],["delayed","지연"],["done","완료"]];
-const pvNum=(v)=>Number(v)||0;
-const pvDate=(s)=>s?String(s).slice(2,10).replace(/-/g,"."):"-"; // 2026-07-31 → 26.07.31
-const pvMin=(arr)=>arr.filter(Boolean).sort()[0]||null;
-
-function PrintOutsourceView(){
-  const[rows,setRows]=useState([]);
-  const[loading,setLoading]=useState(true);
-  const[loadErr,setLoadErr]=useState(null);
-  const[search,setSearch]=useState("");
-  const[filter,setFilter]=useState("active");
-  const[selVendor,setSelVendor]=useState(null);
-  const[openBlocks,setOpenBlocks]=useState({}); // {group_key:true} 펼친 블록
-  const[busyKey,setBusyKey]=useState(null);     // order_status 저장 중인 group_key
-  const[flashMsg,setFlashMsg]=useState({});     // {group_key:{ok,text}} 3초 인라인
-  const flashTimers=useRef({});
-  const flash=(slot,ok,text)=>{
-    clearTimeout(flashTimers.current[slot]);
-    setFlashMsg(p=>({...p,[slot]:{ok,text}}));
-    flashTimers.current[slot]=setTimeout(()=>setFlashMsg(p=>{const n={...p};delete n[slot];return n;}),3000);
-  };
-  useEffect(()=>()=>Object.values(flashTimers.current).forEach(clearTimeout),[]);
-
-  useEffect(()=>{(async()=>{
-    setLoading(true);setLoadErr(null);
-    try{setRows(await fetchPrintRows());}
-    catch(e){console.error("[v_print_calendar] 조회 실패",e);setLoadErr(e&&e.message?e.message:String(e));}
-    finally{setLoading(false);}
-  })();},[]);
-
-  // ESC → 서랍 닫기
-  useEffect(()=>{
-    if(!selVendor)return;
-    const h=(e)=>{if(e.key==="Escape")setSelVendor(null);};
-    window.addEventListener("keydown",h);
-    return()=>window.removeEventListener("keydown",h);
-  },[selVendor]);
-
-  // 블록 = group_key(업체|상품|차수|입고예정일) — order_status 저장 단위와 동일.
-  const blocks=useMemo(()=>{
-    const m=new Map();
-    rows.forEach(r=>{
-      const k=r.group_key||`${r.factory}|${r.product_name}|${r.order_round}`;
-      if(!m.has(k))m.set(k,{key:k,vendor:String(r.factory||"").trim()||"(업체 미지정)",rows:[]});
-      m.get(k).rows.push(r);
-    });
-    return[...m.values()].map(b=>{
-      const rep=b.rows[0];
-      const ord=b.rows.reduce((s,r)=>s+pvNum(r.order_qty),0);
-      const inb=b.rows.reduce((s,r)=>s+pvNum(r.received_qty),0);
-      const remain=b.rows.reduce((s,r)=>s+pvNum(r.remain_qty),0);
-      const showDate=pvMin(b.rows.map(r=>r.show_date));
-      // show_date 가 조정입고일(입고예정일과 다른 revised_eta)에서 온 경우
-      const adjusted=b.rows.some(r=>r.show_date&&r.revised_eta&&r.revised_eta!==r.eta&&r.show_date===r.revised_eta&&pvNum(r.remain_qty)>0);
-      const uniq=(f)=>[...new Set(b.rows.map(f).map(v=>String(v||"").trim()).filter(Boolean))].join(", ");
-      return{...b,rep,ord,inb,remain,showDate,adjusted,
-        name:rep.display_name||rep.product_name||"",round:rep.order_round,code:rep.product_code||"",imageUrl:rep.image_url||"",
-        status:rep.status||"",statusManual:!!rep.status_manual,delayed:b.rows.some(r=>r.is_delayed===true),
-        baseFactory:uniq(r=>r.base_factory),delayReason:uniq(r=>r.delay_reason)};
-    });
-  },[rows]);
-
-  const shownBlocks=useMemo(()=>{
-    const q=search.trim().toLowerCase();
-    return blocks.filter(b=>{
-      if(filter==="active"&&!(b.remain>0))return false;
-      if(filter==="delayed"&&!b.delayed)return false;
-      if(filter==="done"&&b.remain!==0)return false;
-      if(!q)return true;
-      return b.vendor.toLowerCase().includes(q)||b.rows.some(r=>
-        [r.product_name,r.display_name,r.product_code,r.factory].some(v=>String(v||"").toLowerCase().includes(q))
-        ||String(r.order_round??"")===q.replace(/차$/,"")||`${r.order_round}차`.includes(q));
-    });
-  },[blocks,search,filter]);
-
-  const vendors=useMemo(()=>{
-    const m=new Map();
-    shownBlocks.forEach(b=>{if(!m.has(b.vendor))m.set(b.vendor,[]);m.get(b.vendor).push(b);});
-    return[...m.entries()].map(([vendor,list])=>({
-      vendor,blocks:list.slice().sort((a,b)=>String(a.showDate||"9999").localeCompare(String(b.showDate||"9999"))),
-      ord:list.reduce((s,b)=>s+b.ord,0),inb:list.reduce((s,b)=>s+b.inb,0),remain:list.reduce((s,b)=>s+b.remain,0),
-      active:list.filter(b=>b.remain>0).length,delayed:list.filter(b=>b.delayed).length,
-      earliest:pvMin(list.filter(b=>b.remain>0).map(b=>b.showDate)),
-    })).sort((a,b)=>b.delayed-a.delayed||b.remain-a.remain||a.vendor.localeCompare(b.vendor,"ko"));
-  },[shownBlocks]);
-  const selV=selVendor?vendors.find(v=>v.vendor===selVendor):null;
-
-  const changeStatus=async(b,status)=>{
-    if(!status||status===b.status)return;
-    const prev=rows;
-    setRows(rs=>rs.map(r=>r.group_key===b.key?{...r,status,status_manual:true}:r));
-    setBusyKey(b.key);
-    try{
-      await saveOrderStatus(b.key,"print",status);
-      flash(b.key,true,"저장됨");
-    }catch(e){
-      console.error("[order_status] 저장 실패",e);
-      setRows(prev);
-      flash(b.key,false,"저장 실패: "+(e&&e.message?e.message:e));
-    }finally{setBusyKey(null);}
-  };
-
-  const chip=(on)=>({padding:"6px 14px",borderRadius:999,border:`1px solid ${on?"#1E293B":"#E2E8F0"}`,background:on?"#1E293B":"#FFF",color:on?"#FFF":"#475569",fontSize:13,fontWeight:on?700:500,cursor:"pointer",whiteSpace:"nowrap"});
-  const qtyLine=(o,n,rm,fs=13)=>(
-    <div style={{display:"flex",gap:14,flexWrap:"wrap",fontSize:fs,color:"#475569"}}>
-      <span>의뢰 <b style={{color:"#0F172A"}}>{o.toLocaleString()}</b>장</span>
-      <span>입고 <b style={{color:"#059669"}}>{n.toLocaleString()}</b>장</span>
-      <span>잔량 <b style={rm>0?{color:"#EA580C",fontWeight:800}:{color:"#94A3B8",fontWeight:600}}>{rm.toLocaleString()}</b>장</span>
-    </div>
-  );
-  // 옵션표 — 서랍 폭 안에서 끝나게 width 100% + fixed. 헤더·셀 정렬 공유.
-  const PCOL=[{h:"색상·사이즈",w:"16%",a:"left"},{h:"상품코드",w:"13%",a:"left"},{h:"의뢰수량",w:"10%",a:"right"},{h:"입고수량",w:"10%",a:"right"},{h:"잔량",w:"9%",a:"right"},{h:"입고예정일",w:"14%",a:"right"},{h:"조정입고일",w:"14%",a:"right"},{h:"실입고일",w:"14%",a:"right"}];
-  const pCell={whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",paddingLeft:8,paddingRight:8};
-  const pTh={...pCell,paddingTop:8,paddingBottom:8,background:"#F8FAFC",fontWeight:600,color:"#64748B",fontSize:11,borderBottom:"1px solid #E2E8F0"};
-  const pTd={...pCell,paddingTop:7,paddingBottom:7,fontSize:12,color:"#334155",borderBottom:"1px solid #F1F5F9",fontVariantNumeric:"tabular-nums"};
-
-  return(<>
-    <style>{"@keyframes pvSlideIn{from{transform:translateX(100%)}to{transform:translateX(0)}}@keyframes pvFadeIn{from{opacity:0}to{opacity:1}}.pv-grid{display:grid;gap:14px;grid-template-columns:1fr}@media(min-width:720px){.pv-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(min-width:1100px){.pv-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}"}</style>
-    <SectionCard title="🖨 프린팅 외주 입고현황" subtitle="구글 시트(v_print_calendar) 기준 · 업체 카드를 누르면 상세">
-      {/* 필터 줄 */}
-      <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:16}}>
-        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="상품명·상품코드·차수·업체 검색"
-          style={{flex:"1 1 240px",minWidth:0,padding:"8px 12px",borderRadius:8,border:"1px solid #E2E8F0",fontSize:14,outline:"none",background:"#F8FAFC",boxSizing:"border-box"}} />
-        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-          {PV_FILTERS.map(([k,l])=><button key={k} onClick={()=>setFilter(k)} style={chip(filter===k)}>{l}</button>)}
-        </div>
-      </div>
-
-      {loading?(
-        <div style={{textAlign:"center",padding:40,color:"#94A3B8"}}>⏳ 데이터 불러오는 중...</div>
-      ):loadErr?(
-        <div style={{padding:"24px 0",fontSize:14,color:"#DC2626"}}>프린팅 외주 목록 불러오기 실패: {loadErr}</div>
-      ):vendors.length===0?(
-        <div style={{padding:"40px 0",textAlign:"center",fontSize:14,color:"#94A3B8"}}>해당 조건의 프린팅 외주 건이 없습니다</div>
-      ):(
-        <div className="pv-grid">
-          {vendors.map(v=>(
-            <div key={v.vendor} onClick={()=>setSelVendor(v.vendor)} role="button" tabIndex={0}
-              onKeyDown={e=>{if(e.key==="Enter")setSelVendor(v.vendor);}}
-              style={{minWidth:0,padding:"16px 18px",borderRadius:12,border:"1px solid #E2E8F0",background:"#FFF",cursor:"pointer",boxShadow:"0 1px 3px rgba(0,0,0,0.04)",transition:"border-color .15s"}}
-              onMouseEnter={e=>e.currentTarget.style.borderColor="#94A3B8"} onMouseLeave={e=>e.currentTarget.style.borderColor="#E2E8F0"}>
-              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
-                <span style={{minWidth:0,fontSize:16,fontWeight:800,color:"#0F172A",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={v.vendor}>{v.vendor}</span>
-                {v.delayed>0&&<span style={{flexShrink:0,fontSize:11,fontWeight:700,color:"#DC2626",background:"#FEE2E2",borderRadius:6,padding:"2px 7px"}}>지연 {v.delayed}</span>}
-                <span style={{flexShrink:0,marginLeft:"auto",fontSize:12,fontWeight:700,color:"#2563EB",background:"#EFF6FF",border:"1px solid #BFDBFE",borderRadius:999,padding:"2px 9px",whiteSpace:"nowrap"}}>진행중 {v.active}</span>
-              </div>
-              {qtyLine(v.ord,v.inb,v.remain)}
-              {v.earliest&&<div style={{marginTop:10,fontSize:12,color:"#64748B"}}>가장 빠른 입고예정 <b style={{color:"#0F172A"}}>{v.earliest}</b></div>}
-            </div>
-          ))}
-        </div>
-      )}
-    </SectionCard>
-
-    {selV&&(<>
-      <div onClick={()=>setSelVendor(null)} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.45)",zIndex:1000,animation:"pvFadeIn .2s ease-out"}} />
-      <aside style={{position:"fixed",top:0,right:0,bottom:0,width:"min(720px, 94vw)",background:"#FFFFFF",zIndex:1001,boxShadow:"-8px 0 28px rgba(0,0,0,0.12)",display:"flex",flexDirection:"column",animation:"pvSlideIn .22s ease-out"}}>
-        <div style={{display:"flex",alignItems:"flex-start",gap:12,padding:"18px 20px",borderBottom:"1px solid #E2E8F0"}}>
-          <div style={{flex:1,minWidth:0}}>
-            <div style={{fontSize:12,color:"#94A3B8",marginBottom:4}}>🖨 프린팅 외주 · {PV_FILTERS.find(f=>f[0]===filter)[1]} {selV.blocks.length}건</div>
-            <div style={{fontSize:17,fontWeight:700,color:"#0F172A",lineHeight:1.3,overflowWrap:"anywhere",marginBottom:8}}>{selV.vendor}</div>
-            {qtyLine(selV.ord,selV.inb,selV.remain,14)}
-          </div>
-          <button onClick={()=>setSelVendor(null)} aria-label="닫기" style={{border:"none",background:"#F1F5F9",borderRadius:8,width:32,height:32,fontSize:16,cursor:"pointer",color:"#475569",flexShrink:0}}>✕</button>
-        </div>
-
-        <div style={{flex:1,overflowY:"auto",padding:20}}>
-          {selV.blocks.map(b=>{
-            const open=!!openBlocks[b.key];
-            const sc=statusColor(b.status)||{bg:"#EDE9FE",color:"#6D28D9"};
-            const busy=busyKey===b.key;
-            const fm=flashMsg[b.key];
-            return(<div key={b.key} style={{border:"1px solid #E2E8F0",borderRadius:10,marginBottom:12}}>
-              <div onClick={()=>setOpenBlocks(p=>({...p,[b.key]:!open}))} style={{display:"flex",alignItems:"center",gap:8,padding:"10px 12px",cursor:"pointer",flexWrap:"wrap",rowGap:6}}>
-                <span style={{fontSize:10,color:"#94A3B8",width:10,flexShrink:0}}>{open?"▼":"▶"}</span>
-                <CalThumb src={b.imageUrl} size={28} />
-                <span style={{flex:"1 1 160px",minWidth:0,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
-                  <span style={{fontSize:14,fontWeight:700,color:"#0F172A",overflowWrap:"anywhere"}}>{b.name}{b.round!=null&&b.round!==""?<span style={{color:"#2563EB"}}> ({b.round}차)</span>:null}</span>
-                  {/* 상태 배지 = 드롭다운 → order_status upsert */}
-                  <select value={ORDER_STATUS_OPTIONS.includes(b.status)?b.status:""} disabled={busy}
-                    onClick={e=>e.stopPropagation()} onChange={e=>changeStatus(b,e.target.value)} title="클릭하여 상태 변경"
-                    style={{fontSize:12,fontWeight:700,color:sc.color,background:sc.bg,border:`1px solid ${sc.color}55`,borderRadius:6,padding:"2px 4px",cursor:busy?"wait":"pointer",opacity:busy?0.6:1,maxWidth:"100%"}}>
-                    {!ORDER_STATUS_OPTIONS.includes(b.status)&&<option value="" disabled>{b.status||"상태 지정"}</option>}
-                    {ORDER_STATUS_OPTIONS.map(s=><option key={s} value={s}>{s}</option>)}
-                  </select>
-                  {b.delayed&&<span style={{fontSize:11,fontWeight:700,color:"#DC2626",background:"#FEE2E2",borderRadius:6,padding:"2px 7px"}}>지연</span>}
-                  {b.adjusted&&<span style={{fontSize:11,fontWeight:700,color:"#64748B",background:"#F1F5F9",borderRadius:6,padding:"2px 7px"}}>조정</span>}
-                  {fm&&<span style={{fontSize:12,fontWeight:600,color:fm.ok===null?"#64748B":fm.ok?"#16A34A":"#DC2626"}}>{fm.text}</span>}
-                </span>
-                <span style={{flexShrink:0,marginLeft:"auto",fontSize:13,whiteSpace:"nowrap",color:b.remain>0?"#EA580C":"#16A34A",fontWeight:b.remain>0?800:700}}>
-                  {b.remain>0?`잔량 ${b.remain.toLocaleString()}장`:"입고 완료"}
-                </span>
-              </div>
-              {(b.baseFactory||b.delayReason)&&(
-                <div style={{padding:"0 12px 10px 48px",fontSize:12,color:"#94A3B8",lineHeight:1.5,overflowWrap:"anywhere"}}>
-                  {b.baseFactory&&<div>베이스: {b.baseFactory}</div>}
-                  {b.delayReason&&<div>{b.delayReason}</div>}
-                </div>
-              )}
-              {open&&(
-                <div style={{borderTop:"1px solid #E2E8F0",overflow:"hidden",borderRadius:"0 0 10px 10px"}}>
-                  <table style={{width:"100%",tableLayout:"fixed",borderCollapse:"collapse"}}>
-                    <colgroup>{PCOL.map(c=><col key={c.h} style={{width:c.w}} />)}</colgroup>
-                    <thead><tr>{PCOL.map(c=><th key={c.h} title={c.h} style={{...pTh,textAlign:c.a}}>{c.h}</th>)}</tr></thead>
-                    <tbody>
-                      {b.rows.map(r=>{
-                        const rm=pvNum(r.remain_qty);
-                        const revDiff=r.revised_eta&&r.revised_eta!==r.eta;
-                        const opt=fmtOption(r.option_name)||"-";
-                        return(<tr key={r.row_key}>
-                          <td title={opt} style={{...pTd,textAlign:PCOL[0].a,fontWeight:700,color:"#0F172A"}}>{opt}</td>
-                          <td title={r.product_code||""} style={{...pTd,textAlign:PCOL[1].a,fontSize:11,fontFamily:"monospace",color:"#64748B"}}>{r.product_code||"-"}</td>
-                          <td style={{...pTd,textAlign:PCOL[2].a}}>{pvNum(r.order_qty).toLocaleString()}</td>
-                          <td style={{...pTd,textAlign:PCOL[3].a,color:"#059669"}}>{pvNum(r.received_qty).toLocaleString()}</td>
-                          <td style={{...pTd,textAlign:PCOL[4].a,...(rm>0?{color:"#EA580C",fontWeight:800}:{color:"#94A3B8"})}}>{rm.toLocaleString()}</td>
-                          <td title={r.eta||""} style={{...pTd,textAlign:PCOL[5].a}}>{pvDate(r.eta)}</td>
-                          <td title={r.revised_eta||""} style={{...pTd,textAlign:PCOL[6].a,...(revDiff?{color:"#2563EB",fontWeight:700}:null)}}>{pvDate(r.revised_eta)}</td>
-                          <td title={r.received_date||""} style={{...pTd,textAlign:PCOL[7].a}}>{pvDate(r.received_date)}</td>
-                        </tr>);
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>);
-          })}
-        </div>
-      </aside>
-    </>)}
-  </>);
-}
-
-// ─── Tab 2: 입고 스케줄 (Supabase - 캘린더+업체별) ───
+// ─── Tab 2: 입고 스케줄 (구글시트 동기화 뷰 캘린더 — 생산 / 프린팅 외주) ───
 function ScheduleTab(){
-  const[schedules,setSchedules]=useState([]);
-  const[calEvents,setCalEvents]=useState([]);           // 보이는 달 ±1개월 — v_inbound_calendar + v_print_calendar
-  const[upcomingEvents,setUpcomingEvents]=useState([]); // 이번주 월요일 이후 전체 — 요약 카드·검색 드롭다운용
+  const[track,setTrack]=useState("order"); // 캘린더 source — order=생산(v_inbound_calendar) | print=프린팅 외주(v_print_calendar). state 로만 유지
+  const[calEvents,setCalEvents]=useState([]);           // 선택된 쪽의 보이는 달 ±1개월
+  const[upcomingEvents,setUpcomingEvents]=useState([]); // 이번주 월요일 이후 전체(양쪽) — 요약 카드·검색 드롭다운용
   const[calLoading,setCalLoading]=useState(true);
-  const[loading,setLoading]=useState(true);
-  const[viewMode,setViewMode]=useState("calendar");
-  const[track,setTrack]=useState("production"); // 생산 | 프린팅 외주(print) — 컴포넌트 state 로만 유지
-  const[chatInput,setChatInput]=useState("");
   const[currentMonth,setCurrentMonth]=useState(()=>{const d=new Date();return{year:d.getFullYear(),month:d.getMonth()};});
-
-  // 영업일 +N일 계산 (주말 제외)
-  const addBizDays=(dateStr,days)=>{
-    const d=new Date(dateStr);
-    let added=0;
-    while(added<days){
-      d.setDate(d.getDate()+1);
-      const dow=d.getDay();
-      if(dow!==0&&dow!==6)added++; // 일=0, 토=6 제외
-    }
-    return d.toISOString().slice(0,10);
-  };
-
-  // 직접 등록 폼
-  const[formSupplier,setFormSupplier]=useState("인도");
-  const[formName,setFormName]=useState("");
-  const[formQty,setFormQty]=useState("");
-  const[formShipDate,setFormShipDate]=useState("");
-  const[formKrDate,setFormKrDate]=useState("");
-  const[formOzDate,setFormOzDate]=useState("");
-  const[formNote,setFormNote]=useState("");
-  const[formShipType,setFormShipType]=useState("Air Shipment");
-  const[dragItem,setDragItem]=useState(null);
-  const dragItemRef=useRef(null);
-  const[dragOverDay,setDragOverDay]=useState(null);
-  const[editingEvent,setEditingEvent]=useState(null);
-  const[editName,setEditName]=useState("");
-  const[editQty,setEditQty]=useState("");
-  const[inlineEdit,setInlineEdit]=useState(null);
-  const[inlineDraft,setInlineDraft]=useState("");
-  const[statusFilter,setStatusFilter]=useState("all"); // all | confirming | confirmed
   const[calSearch,setCalSearch]=useState(""); // 캘린더 검색(제품명·상품코드·차수·업체)
   const[selectedDay,setSelectedDay]=useState(null); // 날짜 상세 패널(dayStr)
   const[statusMenu,setStatusMenu]=useState(null); // 상태 드롭다운이 열린 group_key
@@ -1062,27 +773,6 @@ function ScheduleTab(){
   const[baseSearching,setBaseSearching]=useState(false);
   const[delayEvents,setDelayEvents]=useState([]); // 뷰 is_delayed=true 행 (기간 제한 없음)
   const[statusError,setStatusError]=useState(null); // {key,msg} 상태 저장 실패 — 상세 패널에 인라인 표시
-  // window.alert/confirm 대체 — 인라인 안내(3초 후 자동 사라짐) · 2단계 확인 토글(3초 내 재클릭 없으면 복귀)
-  const[flashMsg,setFlashMsg]=useState({}); // {slot:{ok,text}} — ok: true=성공(녹색) / false=실패(빨강) / null=중립(회색)
-  const[armed,setArmed]=useState(null); // "정말 삭제?" 상태인 버튼 slot
-  const flashTimers=useRef({});
-  const armTimer=useRef(null);
-  const flash=(slot,ok,text)=>{
-    clearTimeout(flashTimers.current[slot]);
-    setFlashMsg(p=>({...p,[slot]:{ok,text}}));
-    flashTimers.current[slot]=setTimeout(()=>setFlashMsg(p=>{const n={...p};delete n[slot];return n;}),3000);
-  };
-  const confirmTwice=(slot,action)=>{
-    clearTimeout(armTimer.current);
-    if(armed===slot){setArmed(null);action();return;}
-    setArmed(slot);
-    armTimer.current=setTimeout(()=>setArmed(null),3000);
-  };
-  useEffect(()=>()=>{clearTimeout(armTimer.current);Object.values(flashTimers.current).forEach(clearTimeout);},[]);
-  const renderFlash=(slot)=>{
-    const m=flashMsg[slot];
-    return m?<div style={{marginTop:6,fontSize:12,fontWeight:600,color:m.ok===null?"#64748B":m.ok?"#16A34A":"#DC2626",whiteSpace:"pre-line"}}>{m.text}</div>:null;
-  };
 
   // inventory 상품명 ilike 검색 → "베이스 아이템(한글) + 상품명(영문)" 파싱
   const searchBaseItem=async(q)=>{
@@ -1126,16 +816,6 @@ function ScheduleTab(){
     return()=>clearTimeout(t);
   },[baseQuery]);
 
-  const SUPPLIERS=["인도","코니키즈","성은교역","오중"];
-  const SUP_STYLES=SCHEDULE_SUP_STYLES;
-
-  useEffect(()=>{(async()=>{
-    setLoading(true);
-    const data=await sb.get("schedules");
-    setSchedules(data||[]);
-    setLoading(false);
-  })();},[]);
-
   // 이번주(월~일) 범위 — 요약 카드 기준
   const weekRange=useMemo(()=>{
     const now=new Date();
@@ -1156,10 +836,10 @@ function ScheduleTab(){
     const seq=++calReqRef.current;
     setCalLoading(true);
     try{
-      const rows=await fetchCalendarEvents(monthRange.from,monthRange.to);
+      const rows=await fetchCalendarEvents(monthRange.from,monthRange.to,[track]); // 선택된 쪽만 조회
       if(seq===calReqRef.current)setCalEvents(rows);
     }finally{if(seq===calReqRef.current)setCalLoading(false);}
-  },[monthRange.from,monthRange.to]);
+  },[monthRange.from,monthRange.to,track]);
   const reloadUpcoming=useCallback(async()=>{
     setUpcomingEvents(await fetchCalendarEvents(weekRange.monday,null));
   },[weekRange.monday]);
@@ -1215,212 +895,6 @@ function ScheduleTab(){
     return()=>window.removeEventListener("keydown",h);
   },[selectedDay,statusMenu]);
 
-  // 한국도착일 입력 시 오즈센터 도착일 자동계산 (+3일)
-  const handleKrDate=(v)=>{
-    setFormKrDate(v);
-    if(v){setFormOzDate(addBizDays(v,2));}
-  };
-
-  // 직접 등록
-  const addSchedule=async()=>{
-    if(!formName){flash("add",false,"상품명을 입력하세요.");return;}
-    const row={supplier:formSupplier,item:formName,qty:parseInt(formQty)||0,
-      ship_date:formShipDate||null,kr_date:formKrDate||null,oz_date:formOzDate||null,
-      ship_type:formShipType,note:formNote,status:"입고일정확인",
-      date:formKrDate||formShipDate||formOzDate||new Date().toISOString().slice(0,10),lead_days:formSupplier==="인도"?30:formSupplier==="코니키즈"?21:14};
-    const r=await sb.insert("schedules",row);
-    if(r&&r[0]){setSchedules(p=>[r[0],...p]);setFormName("");setFormQty("");setFormShipDate("");setFormKrDate("");setFormOzDate("");setFormNote("");}
-  };
-
-  // AI 카톡 파싱
-  const parseChat=async()=>{
-    if(!chatInput.trim())return;
-    const MON={JAN:"01",FEB:"02",MAR:"03",APR:"04",APRIL:"04",MAY:"05",JUN:"06",JUNE:"06",JUL:"07",JULY:"07",AUG:"08",SEP:"09",OCT:"10",NOV:"11",DEC:"12",JANUARY:"01",FEBRUARY:"02",MARCH:"03",AUGUST:"08",SEPTEMBER:"09",OCTOBER:"10",NOVEMBER:"11",DECEMBER:"12"};
-    // 영문→한글 상품명 번역
-    const ENG_NAME={"PIGMENT TEE":"피그먼트 티셔츠","PIGMENT TEES":"피그먼트 티셔츠","GRAYCHILL":"그레이칠","RINGER T-SHIRT":"링거 티셔츠","UNISEX RINGER T-SHIRT":"유니섹스 링거 티셔츠","UNISEX RINGER":"유니섹스 링거","WOMEN'S LONG SLEEVE":"우먼 롱슬리브","WOMEN'S LONG SLEEVES":"우먼 롱슬리브","WOMEN\u2019S LONG SLEEVE":"우먼 롱슬리브","WOMEN\u2019S LONG SLEEVES":"우먼 롱슬리브","WOMEN LONG SLEEVE":"우먼 롱슬리브","WOMEN LONG SLEEVES":"우먼 롱슬리브","WOMENS LONG SLEEVE":"우먼 롱슬리브","WOMENS LONG SLEEVES":"우먼 롱슬리브","LONG SLEEVE":"롱슬리브","LONG SLEEVES":"롱슬리브","HOODIE":"후디","SWEATSHIRT":"맨투맨","T-SHIRT":"티셔츠","TEES":"티셔츠","TEE":"티셔츠","CREWNECK":"크루넥","WINDBREAKER":"바람막이","JOGGER":"조거팬츠","JOGGERS":"조거팬츠","RAGLAN":"레글런","PANTS":"팬츠","SHORTS":"쇼츠","JACKET":"자켓","VEST":"베스트","CAP":"캡","HAT":"모자","BAG":"가방","SOCKS":"양말","CARDIGAN":"가디건","POLO":"폴로","SHIRT":"셔츠","SKIRT":"스커트","DRESS":"원피스","LEGGINGS":"레깅스","ZIP UP":"집업","ZIP-UP":"집업","HALF ZIP":"하프집업","OVERSIZED":"오버사이즈","CROP":"크롭","BASIC":"베이직","ESSENTIAL":"에센셜","PIGMENT":"피그먼트","SIGNATURE":"시그니처"};
-    const translateName=(name)=>{
-      if(!name)return name;
-      // 아포스트로피 통일 (curly quotes → straight)
-      const normalized=name.replace(/[\u2018\u2019\u2032\u0060]/g,"'");
-      const up=normalized.toUpperCase().trim();
-      // 긴 키워드부터 먼저 매칭 (정확도 향상)
-      const sorted=Object.entries(ENG_NAME).sort((a,b)=>b[0].length-a[0].length);
-      for(const[eng,kr] of sorted){if(up.includes(eng))return kr;}
-      return name;
-    };
-
-    try{
-      const raw=chatInput.trim();
-      let curSup="인도";let addedCount=0;
-      const results=[];
-
-      // 날짜 추출
-      const findDate=(s)=>{
-        if(!s)return null;
-        let m;
-        // "08 April" / "3 April"
-        m=s.match(/(\d{1,2})(?:st|nd|rd|th)?\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)/i);
-        if(m){const mo=MON[m[2].toUpperCase()]||MON[m[2].toUpperCase().slice(0,3)];if(mo)return"2026-"+mo+"-"+m[1].padStart(2,"0");}
-        // "April 10" / "April 10th"
-        m=s.match(/(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?/i);
-        if(m){const mo=MON[m[1].toUpperCase()]||MON[m[1].toUpperCase().slice(0,3)];if(mo)return"2026-"+mo+"-"+m[2].padStart(2,"0");}
-        // "4/8" "4-8" "4.8"
-        m=s.match(/(\d{1,2})[\/.\-](\d{1,2})/);
-        if(m)return"2026-"+m[1].padStart(2,"0")+"-"+m[2].padStart(2,"0");
-        return null;
-      };
-      // 수량 추출
-      const findQty=(s)=>{
-        if(!s)return 0;
-        const m=s.match(/([\d,]+)\s*(?:pcs|장|ea|개)/i)||s.match(/Approx\.?\s*([\d,]+)/i)||s.match(/\(([\d,]+)\s*(?:pcs|장)?\)/i);
-        return m?parseInt(m[1].replace(/,/g,"")):0;
-      };
-
-      // 업체 감지
-      if(/인도|\bINDIA\b/i.test(raw))curSup="인도";
-      if(/코니키즈|코니/i.test(raw))curSup="코니키즈";
-      if(/성은교역|성은/i.test(raw))curSup="성은교역";
-
-      // === 방법1: "Delivery Date Korea" 패턴이 있는 경우 ===
-      if(/Delivery\s+Date\s+Korea/i.test(raw)){
-        const oneLine=raw.replace(/\r?\n/g," ").replace(/\s+/g," ");
-        const splits=oneLine.split(/Delivery\s+Date\s+Korea\s*:\s*/i);
-        // splits[0]="Air Shipment: 1600pcs - Graychill..."
-        // splits[1]="08 April Sea Shipment 5300pcs..."
-        // splits[2]="20 April Unisex Ringer..."
-        // splits[3]="14th April. Women's Long Sleeves..."
-        
-        const dateRe=/^(\d{1,2})(?:st|nd|rd|th)?\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)/i;
-        
-        // 각 split에서 날짜 추출 + remaining 분리
-        const parsed=[];
-        for(let i=1;i<splits.length;i++){
-          const seg=splits[i].trim();
-          const dm=seg.match(dateRe);
-          if(!dm)continue;
-          const mo=MON[dm[2].toUpperCase()]||MON[dm[2].toUpperCase().slice(0,3)];
-          const date="2026-"+mo+"-"+dm[1].padStart(2,"0");
-          const remaining=seg.slice(dm[0].length).replace(/^\.\s*/,"").trim();
-          
-          // 이 날짜에 연결될 아이템 텍스트
-          let itemsText="";
-          if(i===1){
-            itemsText=splits[0]; // 첫 번째 블록
-          }else{
-            // 이전 split의 remaining
-            itemsText=parsed[parsed.length-1]?parsed[parsed.length-1].remaining:"";
-          }
-          parsed.push({date,itemsText,remaining});
-        }
-        
-        // 아이템 추출 함수
-        const extract=(text,date)=>{
-          if(!text||!date)return;
-          let st="";
-          if(/Air\s+Shipment/i.test(text))st="Air Shipment";
-          if(/Sea\s+Shipment/i.test(text))st="Sea Shipment";
-          // 선적일 추출 (factory 날짜 또는 dispatched 날짜)
-          let shipDate=null;
-          if(st==="Sea Shipment"){
-            const sdm=text.match(/(?:factory|dispatched)\s+(\d{1,2})(?:st|nd|rd|th)?\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*/i)
-              ||text.match(/(\d{1,2})(?:st|nd|rd|th)?\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*(?=.*factory)/i);
-            if(sdm){const smo=MON[sdm[2].toUpperCase()]||MON[sdm[2].toUpperCase().slice(0,3)];if(smo)shipDate="2026-"+smo+"-"+sdm[1].padStart(2,"0");}
-          }
-          const parts=text.split(/\s+-\s+/);
-          for(const part of parts){
-            const qty=findQty(part);
-            let name=part.replace(/([\d,]+)\s*(?:pcs|장|ea|개)/gi,"")
-              .replace(/Air\s+Shipment\s*:?|Sea\s+Shipment\s*:?/gi,"")
-              .replace(/(?:are\s+)?packed\s+ready/gi,"")
-              .replace(/will\s+(?:also\s+)?be\s+(?:dispatched|delivered|shipped)/gi,"")
-              .replace(/(?:from|on|in)\s+(?:the\s+)?(?:factory|Korea)/gi,"")
-              .replace(/Approx\.?/gi,"")
-              .replace(/\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*/gi,"")
-              .replace(/(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{1,2}(?:st|nd|rd|th)?/gi,"")
-              .replace(/[().]/g," ").replace(/\s+/g," ").trim();
-            if(name.length>1&&qty>0){
-              results.push({item:translateName(name),qty,krDate:date,shipType:st,shipDate,supplier:curSup});
-            }
-          }
-        };
-        
-        // 각 블록 처리
-        for(const p of parsed){extract(p.itemsText,p.date);}
-        
-        // 마지막 remaining 처리 (Delivery Date Korea 없는 후속 문장)
-        const lastR=parsed.length>0?parsed[parsed.length-1].remaining:"";
-        if(lastR){
-          const d2=findDate(lastR);const q2=findQty(lastR);
-          if(d2&&q2){
-            let n2=lastR.replace(/([\d,]+)\s*(?:pcs|장|ea|개)/gi,"")
-              .replace(/will\s+be\s+delivered/gi,"").replace(/(?:on|in)\s+(?:Korea)?/gi,"")
-              .replace(/\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*/gi,"")
-              .replace(/(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{1,2}(?:st|nd|rd|th)?/gi,"")
-              .replace(/Approx\.?/gi,"").replace(/[().]/g," ").replace(/\s+/g," ").trim();
-            if(n2.length>1)results.push({item:translateName(n2),qty:q2,krDate:d2,shipType:"",supplier:curSup});
-          }
-        }
-      }
-      // === 방법2: 한글 카톡 형식 또는 기타 ===
-      else{
-        const lines=raw.split(/\r?\n/).map(l=>l.trim()).filter(l=>l);
-        let lastDate=null;
-        for(const line of lines){
-          if(/인도|\[인도\]/i.test(line))curSup="인도";
-          if(/코니키즈|코니|\[코니/i.test(line))curSup="코니키즈";
-          if(/성은교역|성은|\[성은/i.test(line))curSup="성은교역";
-          const date=findDate(line);
-          if(date)lastDate=date;
-          const qty=findQty(line);
-          const qm=line.match(/([\d,]+)\s*장/);
-          const qty2=qm?parseInt(qm[1].replace(/,/g,"")):qty;
-          let name=line.replace(/([\d,]+)\s*(?:pcs|장|ea)/gi,"").replace(/\d{1,2}[\/.\-]\d{1,2}/g,"")
-            .replace(/\[.*?\]/g,"").replace(/인도|코니키즈|성은교역|오전|오후|\d{1,2}:\d{2}/g,"")
-            .replace(/입고|예정|완료|선적/g,"").replace(/\s+/g," ").trim();
-          const useDate=date||lastDate;
-          if(useDate&&(name||qty2)){
-            results.push({item:translateName(name)||"입고건",qty:qty2,krDate:useDate,shipType:"",supplier:curSup});
-          }
-        }
-      }
-
-      // 중복 제거 + 빈 항목 제거 후 저장
-      const seen=new Set();
-      let insertErrors=[];
-      console.log("Results to save:",results);
-      for(const p of results){
-        if(!p.item||p.item.length<2)continue;
-        const key=p.item+"_"+p.qty+"_"+p.krDate;
-        if(seen.has(key))continue;seen.add(key);
-        const krDate=p.krDate||new Date().toISOString().slice(0,10);
-        const ozDate=addBizDays(krDate,2);
-        const row={supplier:p.supplier||curSup,item:p.item,qty:p.qty||0,
-          ship_date:p.shipDate||null,kr_date:krDate,oz_date:ozDate,
-          ship_type:p.shipType||"",note:"",status:"입고일정확인",
-          date:krDate,lead_days:(p.supplier||curSup)==="인도"?30:(p.supplier||curSup)==="코니키즈"?21:14};
-        console.log("Inserting:",row);
-        try{
-          const r=await sb.insert("schedules",row);
-          if(r&&r[0]){setSchedules(prev=>[r[0],...prev]);addedCount++;}
-          else{insertErrors.push("insert returned null for: "+p.item);console.log("Insert null:",row);}
-        }catch(ie){insertErrors.push(ie.message);console.error("Insert error:",ie,row);}
-      }
-      setChatInput("");
-      if(addedCount>0)flash("parse",true,addedCount+"건의 스케줄이 등록되었습니다.");
-      else if(results.length>0){
-        flash("parse",false,"파싱 "+results.length+"건 성공, 저장 실패 — 오류: "+(insertErrors[0]||"unknown")+"\nSupabase schedules 테이블에 qty, kr_date, oz_date, ship_type 컬럼이 있는지 확인해주세요.");
-      }
-      else{
-        flash("parse",false,"스케줄을 파싱할 수 없습니다. 날짜와 상품 정보를 확인해주세요.");
-      }
-    }catch(e){
-      console.error("parseChat error:",e);
-      flash("parse",false,"파싱 오류: "+e.message);
-    }
-  };
-
-  const delSchedule=async(id)=>{await sb.remove("schedules",id);setSchedules(p=>p.filter(s=>s.id!==id));};
-
   // 캘린더 데이터
   const{year,month}=currentMonth;
   const daysInMonth=new Date(year,month+1,0).getDate();
@@ -1430,166 +904,13 @@ function ScheduleTab(){
   const _t=new Date();
   const today=`${_t.getFullYear()}-${String(_t.getMonth()+1).padStart(2,"0")}-${String(_t.getDate()).padStart(2,"0")}`;
 
-  // 드래그앤드롭: 날짜 변경 후 Supabase 업데이트
-  const moveEvent=async(eventId,eventType,newDayStr)=>{
-    const schedule=schedules.find(s=>s.id===eventId);
-    if(!schedule)return;
-    const updates={};
-    if(eventType==="kr"){
-      // 같은 날짜에 떨어진 경우 무시
-      if(schedule.kr_date===newDayStr||(!schedule.kr_date&&schedule.date===newDayStr))return;
-      updates.kr_date=newDayStr;
-      updates.date=newDayStr;
-      updates.oz_date=addBizDays(newDayStr,2);
-    }else if(eventType==="oz"){
-      if(schedule.oz_date===newDayStr)return;
-      updates.oz_date=newDayStr;
-    }else if(eventType==="ship"){
-      if(schedule.ship_date===newDayStr)return;
-      updates.ship_date=newDayStr;
-    }else return;
-    // 낙관적 업데이트
-    setSchedules(p=>p.map(s=>s.id===eventId?{...s,...updates}:s));
-    try{
-      const r=await sb.update("schedules",eventId,updates);
-      if(!r)throw new Error("update returned null");
-    }catch(e){
-      console.error("Move error:",e);
-      flash("supplier",false,"날짜 변경 저장 실패: "+e.message);
-      // 롤백
-      setSchedules(p=>p.map(s=>s.id===eventId?schedule:s));
-    }
-  };
-
-  // 드래그 핸들러 (ref 사용으로 stale closure 방지)
-  const handleDragStart=(e,ev)=>{
-    const data={id:ev.id,eventType:ev.eventType};
-    dragItemRef.current=data;
-    setDragItem(data);
-    try{
-      e.dataTransfer.effectAllowed="move";
-      e.dataTransfer.setData("text/plain",JSON.stringify(data));
-    }catch(err){}
-  };
-  const handleDragEnd=()=>{
-    dragItemRef.current=null;
-    setDragItem(null);
-    setDragOverDay(null);
-  };
-  const handleCellDragOver=(e,dayStr)=>{
-    if(!dragItemRef.current)return;
-    e.preventDefault();
-    try{e.dataTransfer.dropEffect="move";}catch(err){}
-    setDragOverDay(prev=>prev===dayStr?prev:dayStr);
-  };
-  const handleCellDrop=(e,dayStr)=>{
-    e.preventDefault();
-    const item=dragItemRef.current;
-    dragItemRef.current=null;
-    setDragItem(null);
-    setDragOverDay(null);
-    if(item)moveEvent(item.id,item.eventType,dayStr);
-  };
-
-  // 클릭 → 인라인 편집 모달
-  const openEdit=(ev)=>{
-    if(dragItemRef.current)return; // 드래그 중에는 무시
-    setEditingEvent({id:ev.id,eventType:ev.eventType,label:ev.label,supplier:ev.supplier});
-    setEditName(ev.item||"");
-    setEditQty(String(ev.qty||0));
-  };
-  const saveEdit=async()=>{
-    if(!editingEvent)return;
-    const trimmed=editName.trim();
-    if(!trimmed){flash("edit",false,"상품명을 입력하세요.");return;}
-    const updates={item:trimmed,qty:parseInt(editQty)||0};
-    const prev=schedules.find(s=>s.id===editingEvent.id);
-    setSchedules(p=>p.map(s=>s.id===editingEvent.id?{...s,...updates}:s));
-    try{
-      const r=await sb.update("schedules",editingEvent.id,updates);
-      if(!r)throw new Error("update returned null");
-      setEditingEvent(null);
-    }catch(e){
-      console.error("Edit save error:",e);
-      flash("edit",false,"저장 실패: "+e.message);
-      if(prev)setSchedules(p=>p.map(s=>s.id===editingEvent.id?prev:s));
-    }
-  };
-
-  // 업체별 뷰 인라인 편집
-  const startInline=(s,field)=>{
-    setInlineEdit({id:s.id,field});
-    if(field==="qty")setInlineDraft(String(s.qty||""));
-    else if(field==="item")setInlineDraft(s.item||"");
-    else if(field==="kr_date")setInlineDraft(s.kr_date||s.date||"");
-    else setInlineDraft(s[field]||"");
-  };
-  const cancelInline=()=>{setInlineEdit(null);setInlineDraft("");};
-  const commitInline=async(s)=>{
-    if(!inlineEdit||inlineEdit.id!==s.id)return;
-    const{field}=inlineEdit;
-    const updates={};
-    if(field==="item"){
-      const v=inlineDraft.trim();
-      if(!v||v===s.item){cancelInline();return;}
-      updates.item=v;
-    }else if(field==="qty"){
-      const v=parseInt(inlineDraft)||0;
-      if(v===(s.qty||0)){cancelInline();return;}
-      updates.qty=v;
-    }else if(field==="kr_date"){
-      if(!inlineDraft||inlineDraft===s.kr_date){cancelInline();return;}
-      updates.kr_date=inlineDraft;
-      updates.date=inlineDraft;
-      updates.oz_date=addBizDays(inlineDraft,2);
-    }else if(field==="oz_date"){
-      if(!inlineDraft||inlineDraft===s.oz_date){cancelInline();return;}
-      updates.oz_date=inlineDraft;
-    }else if(field==="ship_date"){
-      if(!inlineDraft||inlineDraft===s.ship_date){cancelInline();return;}
-      updates.ship_date=inlineDraft;
-    }else if(field==="ship_type"){
-      if(inlineDraft===(s.ship_type||"")){cancelInline();return;}
-      updates.ship_type=inlineDraft;
-    }else{cancelInline();return;}
-    const prev=s;
-    setSchedules(p=>p.map(x=>x.id===s.id?{...x,...updates}:x));
-    setInlineEdit(null);setInlineDraft("");
-    try{
-      const r=await sb.update("schedules",s.id,updates);
-      if(!r)throw new Error("update returned null");
-    }catch(e){
-      console.error("Inline edit error:",e);
-      flash(`sup-${s.id}`,false,"저장 실패: "+e.message);
-      setSchedules(p=>p.map(x=>x.id===s.id?prev:x));
-    }
-  };
-  const inlineInputStyle={padding:"2px 6px",border:"1px solid #3B82F6",borderRadius:4,outline:"none",background:"#FFF",fontFamily:"inherit",boxSizing:"border-box"};
-  const editableHover={cursor:"pointer",borderRadius:3,padding:"0 3px",margin:"0 -3px",transition:"background 0.1s"};
-
-  // 상태: "입고확정"이면 확정, 그 외(입고일정확인/null/구버전 등)는 확인중
-  const isConfirmed=(s)=>s&&s.status==="입고확정";
-  const toggleStatus=async(s)=>{
-    const newStatus=isConfirmed(s)?"입고일정확인":"입고확정";
-    const prev=s;
-    setSchedules(p=>p.map(x=>x.id===s.id?{...x,status:newStatus}:x));
-    try{
-      const r=await sb.update("schedules",s.id,{status:newStatus});
-      if(!r)throw new Error("update returned null");
-    }catch(e){
-      console.error("Toggle status error:",e);
-      flash(`sup-${s.id}`,false,"상태 변경 실패: "+e.message);
-      setSchedules(p=>p.map(x=>x.id===s.id?prev:x));
-    }
-  };
-
   // 캘린더 검색 필터 (제품명/상품코드/차수/업체 부분일치, 대소문자 무시)
   const matchesCalSearch=(n)=>{
     const q=calSearch.trim().toLowerCase();
     if(!q)return true;
     return [n.displayName,n.code,n.round,n.supplier].some(v=>v!=null&&String(v).toLowerCase().includes(q));
   };
-  // 캘린더는 구글시트 동기화 뷰 이벤트만 표시 (로컬 ship/kr/oz 제외). 업체별 탭은 이 함수를 사용하지 않음.
+  // 캘린더 = 선택된 쪽(track) 뷰 이벤트. 날짜 칸 배치 기준은 show_date(ev.date).
   const getEventsForDay=(day)=>{
     const dayStr=`${monthStr}-${String(day).padStart(2,"0")}`;
     return calEvents.filter(n=>n.date===dayStr&&matchesCalSearch(n));
@@ -1642,23 +963,17 @@ function ScheduleTab(){
     }finally{setStatusBusy(null);}
   };
 
-  // D-day 계산
-  const dday=(dateStr)=>{if(!dateStr)return"";const d=Math.ceil((new Date(dateStr)-new Date())/(86400000));return d<0?`${Math.abs(d)}일 지남`:d===0?"오늘":`D-${d}`;};
-  const ddayColor=(dateStr)=>{if(!dateStr)return"#94A3B8";const d=Math.ceil((new Date(dateStr)-new Date())/(86400000));return d<0?"#DC2626":d<=3?"#D97706":"#2563EB";};
-
-  // 캘린더 검색 드롭다운 — 이번주 이후 전체(현재 달 무관)에서 검색, "입고 완료" 제외, group_key 그룹, date 오름차순
+  // 캘린더 검색 드롭다운 — 선택된 쪽의 이번주 이후 전체(현재 달 무관)에서 검색, "입고 완료" 제외, group_key 그룹, date 오름차순
   const calSearchResults=(()=>{
     if(!calSearch.trim())return null;
     const isDone=(s)=>String(s||"").replace(/\s/g,"")==="입고완료";
-    const matched=upcomingEvents.filter(n=>n.date&&matchesCalSearch(n)&&!isDone(n.status));
+    const matched=upcomingEvents.filter(n=>n.source===track&&n.date&&matchesCalSearch(n)&&!isDone(n.status));
     return groupEvents(matched).sort((a,b)=>String(a.rep.date||"").localeCompare(String(b.rep.date||"")));
   })();
   const gotoSearchResult=(ev)=>{
     if(ev.date){const[y,mo]=ev.date.split("-").map(Number);setCurrentMonth({year:y,month:mo-1});setSelectedDay(ev.date);}
     setCalSearch("");
   };
-
-  if(loading)return <SectionCard title="📅 입고 스케줄 관리"><div style={{textAlign:"center",padding:40,color:"#94A3B8"}}>⏳ 데이터 불러오는 중...</div></SectionCard>;
 
   return(<>
     {/* 헤더 */}
@@ -1670,17 +985,6 @@ function ScheduleTab(){
       {(()=>{const _t=new Date();return(<div style={{fontSize:15,fontWeight:600,color:"#3B82F6"}}>{_t.getFullYear()}년 {_t.getMonth()+1}월 {_t.getDate()}일</div>);})()}
     </div>
 
-    {/* 생산 / 프린팅 외주 세그먼트 — 프린팅 외주는 캘린더·서브탭 없이 업체별 카드 화면 */}
-    <div style={{display:"inline-flex",padding:4,borderRadius:10,background:"#F1F5F9",border:"1px solid #E2E8F0",marginBottom:16,gap:4}}>
-      {[["production","🏭 생산"],["print","🖨 프린팅 외주"]].map(([k,l])=>(
-        <button key={k} onClick={()=>setTrack(k)}
-          style={{padding:"8px 18px",borderRadius:8,border:"none",cursor:"pointer",fontSize:14,fontWeight:track===k?700:500,background:track===k?"#FFFFFF":"transparent",color:track===k?"#0F172A":"#64748B",boxShadow:track===k?"0 1px 3px rgba(0,0,0,0.08)":"none"}}>{l}</button>
-      ))}
-    </div>
-
-    {track==="print"&&<PrintOutsourceView />}
-
-    {track==="production"&&<>
     {/* 홈에서 이동: 이번주 입고건 / 입고대기 현황 (좌우 2단 · 좁은 폭이면 1단, 같은 높이) */}
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(320px,1fr))",gap:16,marginBottom:16,alignItems:"stretch"}}>
       {/* 왼쪽: 이번주 입고건 (eta 가 이번 주 월~일) */}
@@ -1755,11 +1059,12 @@ function ScheduleTab(){
       </div>
     </div>
 
-    {/* 뷰 전환 */}
-    <div style={{display:"flex",gap:8,marginBottom:16}}>
-      <SmallBtn primary={viewMode==="calendar"} onClick={()=>setViewMode("calendar")}>📅 캘린더</SmallBtn>
-      <SmallBtn primary={viewMode==="supplier"} onClick={()=>setViewMode("supplier")}>🏢 업체별</SmallBtn>
-      <SmallBtn primary={viewMode==="input"} onClick={()=>setViewMode("input")}>✏️ 등록</SmallBtn>
+    {/* 생산 / 프린팅 외주 세그먼트 — 같은 캘린더 UI, 선택된 쪽 뷰만 조회. 전환 시 검색·상세 패널 초기화 */}
+    <div style={{display:"inline-flex",padding:4,borderRadius:10,background:"#F1F5F9",border:"1px solid #E2E8F0",marginBottom:16,gap:4}}>
+      {[["order","🏭 생산"],["print","🖨 프린팅 외주"]].map(([k,l])=>(
+        <button key={k} onClick={()=>{if(track===k)return;setTrack(k);setCalEvents([]);setSelectedDay(null);setStatusMenu(null);setCalSearch("");}}
+          style={{padding:"8px 18px",borderRadius:8,border:"none",cursor:"pointer",fontSize:14,fontWeight:track===k?700:500,background:track===k?"#FFFFFF":"transparent",color:track===k?"#0F172A":"#64748B",boxShadow:track===k?"0 1px 3px rgba(0,0,0,0.08)":"none"}}>{l}</button>
+      ))}
     </div>
 
     {/* 베이스 아이템 검색 (탭 버튼 줄과 달력 사이) */}
@@ -1791,7 +1096,7 @@ function ScheduleTab(){
     </div>
 
     {/* 캘린더 뷰 */}
-    {viewMode==="calendar"&&<SectionCard title={`${year}년 ${month+1}월`} actions={
+    <SectionCard title={`${year}년 ${month+1}월 · ${track==="print"?"프린팅 외주":"생산"}`} actions={
       <div style={{display:"flex",alignItems:"center",gap:14}}>
         <div style={{display:"flex",alignItems:"center",gap:10,fontSize:12,fontWeight:600,color:"#475569",flexWrap:"wrap"}}>
           {Object.entries(ORDER_STATUS_COLOR).map(([label,c])=>(
@@ -1839,8 +1144,7 @@ function ScheduleTab(){
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:1,background:"#E2E8F0",borderRadius:10,overflow:"hidden"}}>
         {["일","월","화","수","목","금","토"].map((d,i)=>(<div key={d} style={{textAlign:"center",padding:"8px 4px",fontSize:14,fontWeight:700,color:i===0?"#DC2626":i===6?"#2563EB":"#64748B",background:"#F8FAFC"}}>{d}</div>))}
-        {Array.from({length:firstDayOfWeek},(_,i)=>(<div key={`e${i}`} style={{background:"#FAFAFA",minHeight:110}}
-          onDragOver={e=>e.preventDefault()} />))}
+        {Array.from({length:firstDayOfWeek},(_,i)=>(<div key={`e${i}`} style={{background:"#FAFAFA",minHeight:110}} />))}
         {Array.from({length:daysInMonth},(_,i)=>{
           const day=i+1;const dayStr=`${monthStr}-${String(day).padStart(2,"0")}`;
           const events=getEventsForDay(day);
@@ -1848,8 +1152,7 @@ function ScheduleTab(){
           const groups=groupEvents(events);
           const isToday=dayStr===today;
           const dow=(firstDayOfWeek+i)%7;
-          const isDragOver=dragOverDay===dayStr;
-          const cellBg=isDragOver?"#DBEAFE":isToday?"#EFF6FF":dragItem?"#FAFAFA":"#FFF";
+          const cellBg=isToday?"#EFF6FF":"#FFF";
           // 셀 클릭 → 날짜 상세 패널. 카드 최대 3개 + "+N개 더".
           return(<div key={day} style={{background:cellBg,minHeight:110,padding:6,position:"relative",borderTop:isToday?"2px solid #3B82F6":"none",transition:"background 0.15s",cursor:events.length>0?"pointer":"default"}}
             onClick={()=>{if(events.length>0)setSelectedDay(dayStr);}}>
@@ -1884,7 +1187,7 @@ function ScheduleTab(){
           </div>);
         })}
       </div>
-    </SectionCard>}
+    </SectionCard>
 
     {/* 날짜 상세 패널 (오버레이 + X + ESC) — 상태 뱃지 클릭으로 상태 직접 변경 */}
     {selectedDay&&(()=>{
@@ -1896,6 +1199,7 @@ function ScheduleTab(){
       const colTd={padding:"5px 4px",fontSize:11,color:"#334155",borderBottom:"1px solid #F1F5F9",verticalAlign:"top"};
       const oneLine={whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"};
       const closePanel=()=>{setStatusMenu(null);setSelectedDay(null);};
+      const isPrint=track==="print"; // 프린팅 외주 전용: 옵션표 '베이스 업체' 열 · 블록 헤더 아래 지연 사유
       return(
         <div onClick={closePanel} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.5)",display:"flex",justifyContent:"flex-end",zIndex:1000}}>
           <div onClick={e=>{e.stopPropagation();setStatusMenu(null);}} style={{background:"#FFF",width:"min(1100px, 92vw)",height:"100%",overflowY:"auto",boxShadow:"-8px 0 30px rgba(0,0,0,0.2)",padding:24,boxSizing:"border-box"}}>
@@ -1911,6 +1215,7 @@ function ScheduleTab(){
               const gSuppliers=[...new Set(g.events.map(o=>String(o.supplier||"").trim()).filter(Boolean))].join(", ");
               const menuOpen=statusMenu===g.key;
               const busy=statusBusy===g.key;
+              const delayReason=isPrint?[...new Set(g.events.map(o=>String(o.delayReason||"").trim()).filter(Boolean))].join(" / "):"";
               return(<div key={g.key} style={{border:"1px solid #E2E8F0",borderRadius:12,padding:16,marginBottom:14}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:10}}>
                   <div style={{minWidth:0}}>
@@ -1947,17 +1252,20 @@ function ScheduleTab(){
                     )}
                   </div>
                 </div>
+                {delayReason&&<div style={{margin:"-4px 0 10px",fontSize:12,color:"#94A3B8",lineHeight:1.5,overflowWrap:"anywhere"}}>{delayReason}</div>}
                 <div style={{overflowX:"auto",borderRadius:8,border:"1px solid #EEF2F6"}}>
-                  <table style={{width:"100%",minWidth:980,tableLayout:"fixed",borderCollapse:"collapse"}}>
+                  <table style={{width:"100%",minWidth:isPrint?1090:980,tableLayout:"fixed",borderCollapse:"collapse"}}>
                     <colgroup>
                       <col style={{width:56}} /><col style={{width:90}} /><col /><col style={{width:110}} />
                       <col style={{width:80}} /><col style={{width:80}} /><col style={{width:80}} />
                       <col style={{width:110}} /><col style={{width:110}} /><col style={{width:110}} />
+                      {isPrint&&<col style={{width:110}} />}
                     </colgroup>
                     <thead><tr style={{background:"#F8FAFC"}}>
                       <th style={colTh}></th><th style={colTh}>상품코드</th><th style={colTh}>상품명</th><th style={colTh}>옵션</th>
                       <th style={{...colTh,textAlign:"right"}}>발주수량</th><th style={{...colTh,textAlign:"right"}}>입고수량</th><th style={{...colTh,textAlign:"right"}}>잔량</th>
                       <th style={{...colTh,textAlign:"center"}}>입고예정일</th><th style={{...colTh,textAlign:"center"}}>조정입고일</th><th style={{...colTh,textAlign:"center"}}>실입고일</th>
+                      {isPrint&&<th style={colTh}>베이스 업체</th>}
                     </tr></thead>
                     <tbody>
                       {g.events.map((o,oi)=>{
@@ -1977,6 +1285,7 @@ function ScheduleTab(){
                           <td style={{...colTd,whiteSpace:"nowrap",textAlign:"center"}}>{has(o.eta)?o.eta:"-"}</td>
                           <td style={{...colTd,whiteSpace:"nowrap",textAlign:"center",...(revisedDiff?{color:"#2563EB",fontWeight:700}:{})}}>{has(o.revisedEta)?o.revisedEta:"-"}</td>
                           <td style={{...colTd,whiteSpace:"nowrap",textAlign:"center"}}>{has(o.receivedDate)?o.receivedDate:"-"}</td>
+                          {isPrint&&<td style={{...colTd,...oneLine}} title={o.baseFactory||""}>{o.baseFactory||"-"}</td>}
                         </tr>);
                       })}
                       <tr style={{background:"#FAFAF9"}}>
@@ -1984,7 +1293,7 @@ function ScheduleTab(){
                         <td style={{...colTd,textAlign:"right",fontWeight:800,color:"#0F172A",borderBottom:"none",whiteSpace:"nowrap"}}>{g.totalQty.toLocaleString()}</td>
                         <td style={{...colTd,textAlign:"right",fontWeight:800,color:"#0F766E",borderBottom:"none",whiteSpace:"nowrap"}}>{g.events.reduce((s,o)=>s+(has(o.received)&&Number.isFinite(Number(o.received))?Number(o.received):0),0).toLocaleString()}</td>
                         <td style={{...colTd,textAlign:"right",fontWeight:800,color:g.totalRemain>0?"#EA580C":"#94A3B8",borderBottom:"none",whiteSpace:"nowrap"}}>{g.totalRemain.toLocaleString()}</td>
-                        <td style={{...colTd,borderBottom:"none"}} colSpan={3}></td>
+                        <td style={{...colTd,borderBottom:"none"}} colSpan={isPrint?4:3}></td>
                       </tr>
                     </tbody>
                   </table>
@@ -1995,218 +1304,6 @@ function ScheduleTab(){
           </div>
         </div>);
     })()}
-
-    {/* 이벤트 카드 클릭 → 수정 모달 */}
-    {editingEvent&&(<div onClick={()=>setEditingEvent(null)} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
-      <div onClick={e=>e.stopPropagation()} style={{background:"#FFF",borderRadius:14,padding:24,width:420,maxWidth:"92vw",boxShadow:"0 20px 50px rgba(0,0,0,0.25)"}}>
-        <div style={{fontSize:18,fontWeight:700,color:"#0F172A",marginBottom:4}}>스케줄 수정</div>
-        <div style={{fontSize:14,color:"#64748B",marginBottom:18}}>{editingEvent.supplier} · {editingEvent.label}</div>
-        <div style={{marginBottom:14}}>
-          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>상품명</div>
-          <input value={editName} onChange={e=>setEditName(e.target.value)} autoFocus
-            onKeyDown={e=>{if(e.key==="Enter")saveEdit();if(e.key==="Escape")setEditingEvent(null);}}
-            style={{width:"100%",padding:"9px 12px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:15,outline:"none",boxSizing:"border-box"}} />
-        </div>
-        <div style={{marginBottom:18}}>
-          <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>수량 (장)</div>
-          <input type="number" value={editQty} onChange={e=>setEditQty(e.target.value)}
-            onKeyDown={e=>{if(e.key==="Enter")saveEdit();if(e.key==="Escape")setEditingEvent(null);}}
-            style={{width:"100%",padding:"9px 12px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:15,outline:"none",boxSizing:"border-box"}} />
-        </div>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
-          <SmallBtn danger onClick={()=>confirmTwice("delEdit",async()=>{await delSchedule(editingEvent.id);setEditingEvent(null);})}>{armed==="delEdit"?"정말 삭제?":"🗑 삭제"}</SmallBtn>
-          <div style={{display:"flex",gap:8}}>
-            <SmallBtn onClick={()=>setEditingEvent(null)}>취소</SmallBtn>
-            <SmallBtn primary onClick={saveEdit}>저장</SmallBtn>
-          </div>
-        </div>
-        {renderFlash("edit")}
-      </div>
-    </div>)}
-
-    {/* 업체별 뷰 */}
-    {viewMode==="supplier"&&<>
-    <div style={{padding:"8px 14px",borderRadius:8,background:"#EFF6FF",border:"1px solid #DBEAFE",marginBottom:12,fontSize:14,color:"#1E40AF",fontWeight:600}}>
-      📅 {(()=>{const n=new Date();return `${n.getFullYear()}년 ${n.getMonth()+1}월부터 이후 모든 일정 표시`;})()}
-      {renderFlash("supplier")}
-    </div>
-    <div style={{display:"flex",gap:8,marginBottom:12}}>
-      {[
-        {key:"all",label:"전체",icon:"📋"},
-        {key:"confirming",label:"입고 일정 확인중",icon:"🟡"},
-        {key:"confirmed",label:"입고 확정",icon:"🟢"},
-      ].map(f=>{
-        const active=statusFilter===f.key;
-        return(<button key={f.key} onClick={()=>setStatusFilter(f.key)} style={{
-          padding:"6px 14px",borderRadius:8,fontSize:14,fontWeight:600,cursor:"pointer",
-          border:active?"1px solid #1E293B":"1px solid #E2E8F0",
-          background:active?"#1E293B":"#FFF",color:active?"#FFF":"#475569",transition:"all 0.15s"
-        }}>{f.icon} {f.label}</button>);
-      })}
-    </div>
-    <div style={{display:"grid",gridTemplateColumns:`repeat(${SUPPLIERS.length},1fr)`,gap:16}}>
-      {(()=>{
-        const now=new Date();
-        const monthStart=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-01`;
-        const inRange=(s)=>[s.ship_date,s.kr_date,s.oz_date,s.date].some(d=>d&&d>=monthStart);
-        const todayStr=now.toISOString().slice(0,10);
-        const primaryDate=(s)=>s.oz_date||s.kr_date||s.date||"";
-        return SUPPLIERS.map(sup=>{
-        const st=SUP_STYLES[sup];
-        const matchStatus=(s)=>statusFilter==="all"||(statusFilter==="confirmed"?isConfirmed(s):!isConfirmed(s));
-        const items=schedules.filter(s=>s.supplier===sup&&inRange(s)&&matchStatus(s)).sort((a,b)=>{
-          const aD=primaryDate(a),bD=primaryDate(b);
-          const aPast=!!aD&&aD<todayStr,bPast=!!bD&&bD<todayStr;
-          if(aPast!==bPast)return aPast?1:-1;
-          if(aPast)return bD.localeCompare(aD);
-          return aD.localeCompare(bD);
-        });
-        return(<div key={sup} style={{background:st.bg,borderRadius:14,border:`1px solid ${st.color}20`,overflow:"hidden"}}>
-          <div style={{padding:"12px 18px",background:`${st.color}15`,borderBottom:`1px solid ${st.color}20`}}>
-            <span style={{fontSize:16,fontWeight:700,color:st.color}}>{st.icon} {sup}</span>
-          </div>
-          <div style={{padding:12,maxHeight:500,overflowY:"auto"}}>
-            {items.length>0?items.map((s,i)=>{
-              const isEdit=(field)=>inlineEdit&&inlineEdit.id===s.id&&inlineEdit.field===field;
-              const dateInput=(field)=>(<input type="date" autoFocus value={inlineDraft} onChange={e=>setInlineDraft(e.target.value)}
-                onBlur={()=>commitInline(s)}
-                onKeyDown={e=>{if(e.key==="Enter")commitInline(s);else if(e.key==="Escape")cancelInline();}}
-                style={{...inlineInputStyle,fontSize:13,width:130}} />);
-              const confirmed=isConfirmed(s);
-              return(<div key={s.id||i} style={{background:"#FFF",borderRadius:10,padding:"16px 16px",marginBottom:14,border:"1px solid #E2E8F0",position:"relative"}}>
-              <button onClick={()=>confirmTwice(`del-${s.id}`,()=>delSchedule(s.id))} style={armed===`del-${s.id}`
-                ?{position:"absolute",top:8,right:8,zIndex:1,background:"#FEF2F2",border:"1px solid #FCA5A5",borderRadius:6,padding:"2px 8px",cursor:"pointer",fontSize:12,fontWeight:700,color:"#DC2626"}
-                :{position:"absolute",top:8,right:8,background:"none",border:"none",cursor:"pointer",fontSize:18,color:"#94A3B8"}}>{armed===`del-${s.id}`?"정말 삭제?":"×"}</button>
-              {s.oz_date&&<span style={{position:"absolute",top:10,right:28,padding:"1px 6px",borderRadius:3,fontSize:12,fontWeight:700,color:ddayColor(s.oz_date),background:`${ddayColor(s.oz_date)}15`}}>{dday(s.oz_date)}</span>}
-              <div onClick={()=>toggleStatus(s)} title="클릭하여 상태 변경" style={{
-                display:"inline-flex",alignItems:"center",gap:4,padding:"3px 9px",borderRadius:12,
-                fontSize:12.5,fontWeight:700,cursor:"pointer",userSelect:"none",marginBottom:6,
-                background:confirmed?"#DCFCE7":"#FEF3C7",
-                color:confirmed?"#15803D":"#92400E",
-                border:"1px solid "+(confirmed?"#86EFAC":"#FCD34D")
-              }}>
-                {confirmed?"🟢 입고 확정":"🟡 입고 일정 확인중"}
-              </div>
-              <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:8,flexWrap:"wrap"}}>
-                <div style={{fontSize:17,fontWeight:800,color:"#1E293B"}}>
-                  {isEdit("item")?(<input autoFocus value={inlineDraft} onChange={e=>setInlineDraft(e.target.value)}
-                    onBlur={()=>commitInline(s)}
-                    onKeyDown={e=>{if(e.key==="Enter")commitInline(s);else if(e.key==="Escape")cancelInline();}}
-                    style={{...inlineInputStyle,fontSize:17,fontWeight:800,minWidth:120}} />):
-                    <span onClick={()=>startInline(s,"item")} title="클릭하여 수정" style={editableHover}>{translateItemName(s.item)||"(상품명)"}</span>}
-                </div>
-                <div style={{fontSize:15,color:"#334155"}}>
-                  {isEdit("qty")?(<><input type="number" autoFocus value={inlineDraft} onChange={e=>setInlineDraft(e.target.value)}
-                    onBlur={()=>commitInline(s)}
-                    onKeyDown={e=>{if(e.key==="Enter")commitInline(s);else if(e.key==="Escape")cancelInline();}}
-                    style={{...inlineInputStyle,fontSize:15,width:90}} /> 장</>):
-                    <span onClick={()=>startInline(s,"qty")} title="클릭하여 수정" style={editableHover}>{s.qty?s.qty.toLocaleString()+" 장":"(수량)"}</span>}
-                </div>
-              </div>
-              <div style={{display:"flex",gap:0,padding:"6px 8px",background:"#F8FAFC",borderRadius:6,border:"1px solid #E2E8F0",marginBottom:6}}>
-                <div style={{flex:1,display:"flex",flexDirection:"column",gap:2,borderRight:"1px solid #E2E8F0",paddingRight:6,minWidth:0}}>
-                  <div style={{fontSize:12,color:"#94A3B8"}}>🚢 선적일</div>
-                  <div style={{fontSize:14,fontWeight:700,color:"#1E293B"}}>{isEdit("ship_date")?dateInput("ship_date"):
-                    <span onClick={()=>startInline(s,"ship_date")} title="클릭하여 수정" style={editableHover}>{s.ship_date||"-"}</span>}</div>
-                </div>
-                <div style={{flex:1,display:"flex",flexDirection:"column",gap:2,borderRight:"1px solid #E2E8F0",padding:"0 6px",minWidth:0}}>
-                  <div style={{fontSize:12,color:"#94A3B8"}}>🇰🇷 한국도착</div>
-                  <div style={{fontSize:14,fontWeight:700,color:"#1E293B"}}>{isEdit("kr_date")?dateInput("kr_date"):
-                    <span onClick={()=>startInline(s,"kr_date")} title="클릭하여 수정 (오즈센터 +2영업일 자동계산)" style={editableHover}>{s.kr_date||s.date||"-"}</span>}</div>
-                </div>
-                <div style={{flex:1,display:"flex",flexDirection:"column",gap:2,paddingLeft:6,minWidth:0}}>
-                  <div style={{fontSize:12,color:"#94A3B8"}}>📦 오즈센터</div>
-                  <div style={{fontSize:14,fontWeight:700,color:"#1E293B"}}>{isEdit("oz_date")?dateInput("oz_date"):
-                    <span onClick={()=>startInline(s,"oz_date")} title="클릭하여 수정" style={editableHover}>{s.oz_date||"-"}</span>}</div>
-                </div>
-              </div>
-              <div style={{fontSize:13,color:"#94A3B8",marginTop:2}}>
-                {isEdit("ship_type")?(<select autoFocus value={inlineDraft} onChange={e=>setInlineDraft(e.target.value)}
-                  onBlur={()=>commitInline(s)}
-                  onKeyDown={e=>{if(e.key==="Enter")commitInline(s);else if(e.key==="Escape")cancelInline();}}
-                  style={{...inlineInputStyle,fontSize:13,width:140}}>
-                  <option value="">(미지정)</option>
-                  <option value="Air Shipment">✈️ Air</option>
-                  <option value="Sea Shipment">🚢 Sea</option>
-                  <option value="국내">🚚 국내</option>
-                </select>):
-                  <span onClick={()=>startInline(s,"ship_type")} title="클릭하여 수정" style={editableHover}>{s.ship_type==="Air Shipment"?"✈️ Air":s.ship_type==="Sea Shipment"?"🚢 Sea":s.ship_type==="국내"?"🚚 국내":s.ship_type||"(운송 미지정)"}</span>}
-              </div>
-              {renderFlash(`sup-${s.id}`)}
-            </div>);}):(
-              <div style={{textAlign:"center",padding:30,color:"#94A3B8"}}>
-                <div style={{fontSize:32,marginBottom:8}}>📭</div>
-                <div style={{fontSize:15}}>이번달 이후 일정 없음</div>
-              </div>
-            )}
-          </div>
-        </div>);
-      });})()}
-    </div>
-    </>}
-
-    {/* 등록 뷰 */}
-    {viewMode==="input"&&<>
-      {/* AI 스케줄 분석 */}
-      <SectionCard title="🤖 AI 스케줄 분석" subtitle="카카오톡 대화 내용 붙여넣기">
-        <textarea value={chatInput} onChange={e=>setChatInput(e.target.value)} placeholder={"예시:\n[인도] 오전 10:45\n다음주 화요일에 브이넥티 300장 입고 예정입니다\n리드타임은 14일이에요\n\n[성은교역] 오후 2:13\n린넨팬츠 500장 4/5 입고..."} style={{width:"100%",height:120,padding:14,borderRadius:10,border:"1px solid #E2E8F0",fontSize:15,background:"#F8FAFC",resize:"vertical",outline:"none",boxSizing:"border-box",lineHeight:1.6}} />
-        <div style={{marginTop:10,display:"flex",gap:8}}>
-          <SmallBtn primary onClick={parseChat}>🤖 AI 분석</SmallBtn>
-          <SmallBtn onClick={()=>flash("parse",null,"엑셀 다운로드 기능은 구현 예정입니다.")}>📊 엑셀 다운로드</SmallBtn>
-          <SmallBtn danger onClick={()=>confirmTwice("delAll",async()=>{for(const s of schedules)await sb.remove("schedules",s.id);setSchedules([]);flash("parse",true,"전체 스케줄을 삭제했습니다.");})}>{armed==="delAll"?"정말 삭제?":"🗑 전체 삭제"}</SmallBtn>
-        </div>
-        {renderFlash("parse")}
-      </SectionCard>
-
-      {/* 직접 등록 */}
-      <SectionCard title="✏️ 직접 등록">
-        <div style={{display:"grid",gridTemplateColumns:"110px 110px 1fr 90px 130px 130px 130px 1fr 90px",gap:10,alignItems:"end"}}>
-          <div>
-            <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>업체</div>
-            <select value={formSupplier} onChange={e=>setFormSupplier(e.target.value)} style={{width:"100%",padding:"8px 10px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:14,outline:"none"}}>
-              {SUPPLIERS.map(s=><option key={s}>{s}</option>)}
-            </select>
-          </div>
-          <div>
-            <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>운송</div>
-            <select value={formShipType} onChange={e=>setFormShipType(e.target.value)} style={{width:"100%",padding:"8px 10px",borderRadius:6,border:"1px solid #E2E8F0",fontSize:14,outline:"none"}}>
-              <option value="Air Shipment">✈️ Air</option>
-              <option value="Sea Shipment">🚢 Sea</option>
-              <option value="국내">🚚 국내</option>
-            </select>
-          </div>
-          <div>
-            <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>상품명</div>
-            <Input value={formName} onChange={e=>setFormName(e.target.value)} placeholder="상품명 입력" />
-          </div>
-          <div>
-            <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>수량</div>
-            <Input value={formQty} onChange={e=>setFormQty(e.target.value)} placeholder="수량" type="number" />
-          </div>
-          <div>
-            <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>🚢 선적일</div>
-            <Input type="date" value={formShipDate} onChange={e=>setFormShipDate(e.target.value)} />
-          </div>
-          <div>
-            <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>🇰🇷 한국 도착일</div>
-            <Input type="date" value={formKrDate} onChange={e=>handleKrDate(e.target.value)} />
-          </div>
-          <div>
-            <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>📦 오즈센터 도착일 (+2영업일)</div>
-            <Input type="date" value={formOzDate} onChange={e=>setFormOzDate(e.target.value)} />
-          </div>
-          <div>
-            <div style={{fontSize:13,fontWeight:600,color:"#64748B",marginBottom:4}}>비고</div>
-            <Input value={formNote} onChange={e=>setFormNote(e.target.value)} placeholder="메모" />
-          </div>
-          <div>
-            <SmallBtn primary onClick={addSchedule}>✅ 등록</SmallBtn>
-            {renderFlash("add")}
-          </div>
-        </div>
-      </SectionCard>
-    </>}
-    </>}
   </>);
 }
 
