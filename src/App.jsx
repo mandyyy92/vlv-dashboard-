@@ -6677,8 +6677,8 @@ function OrderContractsSection({group,onCountChange}){
           {uploads.map(u=>(
             <div key={u.id} style={{display:"flex",gap:8,fontSize:12,alignItems:"baseline"}}>
               <span style={{fontWeight:700,color:stColor[u.status],flexShrink:0}}>{stLabel[u.status]}</span>
-              <span style={{color:"#334155",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{u.name}</span>
-              {u.msg&&<span style={{color:"#DC2626",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>— {u.msg}</span>}
+              <span style={{minWidth:0,color:"#334155",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{u.name}</span>
+              {u.msg&&<span style={{minWidth:0,color:"#DC2626",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>— {u.msg}</span>}
             </div>
           ))}
         </div>
@@ -6695,8 +6695,8 @@ function OrderContractsSection({group,onCountChange}){
       ):(
         <div style={{border:"1px solid #E2E8F0",borderRadius:10,overflow:"hidden"}}>
           {list.map((c,i)=>(
-            <div key={c.id} style={{display:"flex",alignItems:"center",gap:12,padding:"9px 12px",borderTop:i?"1px solid #F1F5F9":"none",fontSize:13}}>
-              <span style={{flex:1,minWidth:0,fontWeight:600,color:"#0F172A",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={c.file_name}>📄 {c.file_name}</span>
+            <div key={c.id} style={{display:"flex",flexWrap:"wrap",alignItems:"center",columnGap:12,rowGap:6,padding:"9px 12px",borderTop:i?"1px solid #F1F5F9":"none",fontSize:13}}>
+              <span style={{flex:"1 1 160px",minWidth:0,fontWeight:600,color:"#0F172A",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={c.file_name}>📄 {c.file_name}</span>
               <span style={{width:64,textAlign:"right",color:"#64748B",fontVariantNumeric:"tabular-nums",flexShrink:0}}>{ocSize(c.file_size)}</span>
               <span style={{width:118,textAlign:"right",color:"#64748B",fontVariantNumeric:"tabular-nums",flexShrink:0}}>{ocDate(c.uploaded_at)}</span>
               <button onClick={()=>openFile(c)} style={btn}>열기</button>
@@ -6938,10 +6938,10 @@ function OrderSheetDashboard(){
     <span style={{display:"block",margin:"-10px -14px",padding:"10px 14px",...(OSC[i].div?{borderRight:`1px solid ${DIVC}`}:null)}}>{content}</span>
   );
 
-  // 드로어 옵션표 컬럼 — table-layout:auto + 모든 열 width:1%·nowrap → 각 열이 내용 폭에 맞춰진다.
-  // 표는 width:auto 로 좌측 정렬(100%로 늘리지 않음), 좁은 화면은 컨테이너 가로 스크롤. 헤더·셀 정렬은 DRW 하나로 공유.
-  const DRW=[{h:"색상·사이즈",a:"left"},{h:"상품코드",a:"left"},{h:"발주수량",a:"right"},{h:"입고수량",a:"right"},{h:"입고율",a:"right"}];
-  const drwCol={width:"1%",whiteSpace:"nowrap",paddingLeft:12,paddingRight:12};
+  // 드로어 옵션표 컬럼 — width:100% + table-layout:fixed, colgroup 비율 폭 → 서랍 안쪽 폭에서 끝난다(가로 스크롤 없음).
+  // 모든 셀 한 줄 + ellipsis, 좌우 패딩 10px. 헤더·셀 정렬은 DRW 하나로 공유.
+  const DRW=[{h:"색상·사이즈",w:"34%",a:"left"},{h:"상품코드",w:"22%",a:"left"},{h:"발주수량",w:"15%",a:"right"},{h:"입고수량",w:"14%",a:"right"},{h:"입고율",w:"15%",a:"right"}];
+  const drwCol={whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",paddingLeft:10,paddingRight:10};
   const drwTh={...drwCol,paddingTop:10,paddingBottom:10,background:"#F8FAFC",fontWeight:600,color:"#64748B",fontSize:11,letterSpacing:0,lineHeight:1.25,borderBottom:"1px solid #E2E8F0",textTransform:"uppercase"};
   const drwTd={...drwCol,paddingTop:7,paddingBottom:7,fontSize:12,verticalAlign:"middle",borderBottom:"1px solid #F1F5F9",color:"#334155"};
   // Table 헬퍼의 headers 항목에 그대로 넣는 클릭 정렬 헤더.
@@ -7050,14 +7050,14 @@ function OrderSheetDashboard(){
         {selGroup&&(<>
           <style>{"@keyframes ocSlideIn{from{transform:translateX(100%)}to{transform:translateX(0)}}@keyframes ocFadeIn{from{opacity:0}to{opacity:1}}"}</style>
           <div onClick={()=>setSelKey(null)} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.45)",zIndex:1000,animation:"ocFadeIn .2s ease-out"}} />
-          <aside style={{position:"fixed",top:0,right:0,bottom:0,width:"min(880px, 92vw)",background:"#FFFFFF",zIndex:1001,boxShadow:"-8px 0 28px rgba(0,0,0,0.12)",display:"flex",flexDirection:"column",animation:"ocSlideIn .22s ease-out"}}>
+          <aside style={{position:"fixed",top:0,right:0,bottom:0,width:"min(720px, 94vw)",background:"#FFFFFF",zIndex:1001,boxShadow:"-8px 0 28px rgba(0,0,0,0.12)",display:"flex",flexDirection:"column",animation:"ocSlideIn .22s ease-out"}}>
             <div style={{display:"flex",alignItems:"flex-start",gap:12,padding:"18px 20px",borderBottom:"1px solid #E2E8F0"}}>
               {thumb(selGroup.code,88,10)}
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontSize:12,color:"#94A3B8",marginBottom:4}}>{[selGroup.season,selGroup.factory].filter(Boolean).join(" · ")||"-"}</div>
-                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                <div style={{display:"flex",alignItems:"center",gap:6,minWidth:0}}>
                   {selGroup.round&&<span style={{flexShrink:0,fontSize:12,fontWeight:700,color:"#2563EB",background:"#EFF6FF",border:"1px solid #BFDBFE",borderRadius:6,padding:"1px 7px"}}>{selGroup.round}차</span>}
-                  <span style={{fontSize:17,fontWeight:700,color:"#0F172A",lineHeight:1.3}}>{selGroup.name}</span>
+                  <span style={{minWidth:0,fontSize:17,fontWeight:700,color:"#0F172A",lineHeight:1.3,overflowWrap:"anywhere"}}>{selGroup.name}</span>
                 </div>
                 <div style={{fontSize:12,color:"#94A3B8",marginTop:4,fontFamily:"monospace"}}>{selGroup.code||"-"}</div>
                 <div style={{fontSize:13,color:"#475569",marginTop:6}}>발주일 <b style={{color:"#0F172A"}}>{osDate(selGroup.ordDate)}</b> · 입고예정일 <b style={{color:"#0F172A"}}>{osDate(selGroup.eta)}</b></div>
@@ -7067,22 +7067,22 @@ function OrderSheetDashboard(){
 
             <div style={{flex:1,overflowY:"auto",padding:20}}>
               {/* 그룹 집계 요약 */}
-              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:16}}>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8,marginBottom:16}}>
                 {[
                   ["발주수량",`${Math.round(selGroup.ord).toLocaleString()} pcs`,"#1E293B","#F8FAFC","#E2E8F0"],
                   ["입고수량",`${Math.round(selGroup.inb).toLocaleString()} pcs`,"#059669","#F0FDF4","#BBF7D0"],
                   ["미입고",`${Math.round(Math.max(selGroup.short,0)).toLocaleString()} pcs`,selGroup.short>0?"#DC2626":"#94A3B8","#F8FAFC","#E2E8F0"],
                   ["입고율",`${selGroup.rate.toFixed(1)}%`,rateColor(selGroup.rate),"#EFF6FF","#BFDBFE"],
                 ].map(([l,v,c,bg,bd])=>(
-                  <div key={l} style={{padding:"10px 12px",borderRadius:8,background:bg,border:`1px solid ${bd}`}}>
+                  <div key={l} style={{minWidth:0,padding:"10px 12px",borderRadius:8,background:bg,border:`1px solid ${bd}`}}>
                     <div style={{fontSize:11,fontWeight:700,color:"#94A3B8"}}>{l}</div>
-                    <div style={{fontSize:17,fontWeight:800,color:c,marginTop:2}}>{v}</div>
+                    <div style={{fontSize:17,fontWeight:800,color:c,marginTop:2,overflowWrap:"anywhere"}}>{v}</div>
                   </div>
                 ))}
               </div>
               <div style={{padding:"10px 12px",borderRadius:8,background:"#F8FAFC",border:"1px solid #E2E8F0",marginBottom:20}}>
                 <div style={{fontSize:11,fontWeight:700,color:"#94A3B8"}}>발주금액</div>
-                <div style={{fontSize:19,fontWeight:800,color:"#1E293B",marginTop:2}}>₩{Math.round(selGroup.amt).toLocaleString()}</div>
+                <div style={{fontSize:19,fontWeight:800,color:"#1E293B",marginTop:2,overflowWrap:"anywhere"}}>₩{Math.round(selGroup.amt).toLocaleString()}</div>
               </div>
 
               {/* 차수별 계약서 첨부 — key 로 차수 전환 시 상태 초기화 */}
@@ -7090,17 +7090,18 @@ function OrderSheetDashboard(){
 
               {/* 옵션 리스트 — 옵션 1개 = 1행 표(썸네일 없음). 대표 썸네일은 드로어 헤더에만 둔다. */}
               <div style={{fontSize:13,fontWeight:800,color:"#0F172A",marginBottom:10}}>옵션별 상세 <span style={{color:"#94A3B8",fontWeight:600}}>{selGroup.items.length}</span></div>
-              <div style={{display:"inline-block",maxWidth:"100%",overflowX:"auto",verticalAlign:"top",borderRadius:10,border:"1px solid #E2E8F0"}}>
-                <table style={{width:"auto",tableLayout:"auto",borderCollapse:"collapse",fontSize:15}}>
-                  <thead><tr>{DRW.map(c=><th key={c.h} style={{...drwTh,textAlign:c.a}}>{c.h}</th>)}</tr></thead>
+              <div style={{width:"100%",overflow:"hidden",borderRadius:10,border:"1px solid #E2E8F0"}}>
+                <table style={{width:"100%",tableLayout:"fixed",borderCollapse:"collapse",fontSize:15}}>
+                  <colgroup>{DRW.map(c=><col key={c.h} style={{width:c.w}} />)}</colgroup>
+                  <thead><tr>{DRW.map(c=><th key={c.h} title={c.h} style={{...drwTh,textAlign:c.a}}>{c.h}</th>)}</tr></thead>
                   <tbody>
                     {selGroup.items.map((it,i)=>{
                       const o=osNum(it[OS_COL.ORD_QTY]),n=osNum(it[OS_COL.IN_QTY]);
                       const rt=o>0?(n/o*100):0;
                       return(
                         <tr key={i}>
-                          <td style={{...drwTd,textAlign:DRW[0].a,fontWeight:700,color:"#0F172A"}}>{it[OS_COL.OPT]||"-"}</td>
-                          <td style={{...drwTd,textAlign:DRW[1].a,fontSize:11,fontFamily:"monospace",color:"#64748B"}}>{it[OS_COL.CODE]||"-"}</td>
+                          <td title={it[OS_COL.OPT]||""} style={{...drwTd,textAlign:DRW[0].a,fontWeight:700,color:"#0F172A"}}>{it[OS_COL.OPT]||"-"}</td>
+                          <td title={it[OS_COL.CODE]||""} style={{...drwTd,textAlign:DRW[1].a,fontSize:11,fontFamily:"monospace",color:"#64748B"}}>{it[OS_COL.CODE]||"-"}</td>
                           <td style={{...drwTd,textAlign:DRW[2].a,...numTd,color:"#334155"}}>{o.toLocaleString()}</td>
                           <td style={{...drwTd,textAlign:DRW[3].a,...numTd,color:"#059669",fontWeight:700}}>{n.toLocaleString()}</td>
                           <td style={{...drwTd,textAlign:DRW[4].a,...numTd,color:rateColor(rt),fontWeight:700}}>{rt.toFixed(1)}%</td>
