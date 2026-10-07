@@ -773,6 +773,8 @@ function ScheduleTab(){
   const[baseSearching,setBaseSearching]=useState(false);
   const[delayEvents,setDelayEvents]=useState([]); // 뷰 is_delayed=true 행 (기간 제한 없음)
   const[statusError,setStatusError]=useState(null); // {key,msg} 상태 저장 실패 — 상세 패널에 인라인 표시
+  const[selectedCard,setSelectedCard]=useState(null); // 프린팅 외주: 클릭한 카드(업체·차수) key — null 이면 날짜 전체
+  const[openBlocks,setOpenBlocks]=useState({}); // 프린팅 외주 상세: 펼친 상품 블록 {group_key:true}
 
   // inventory 상품명 ilike 검색 → "베이스 아이템(한글) + 상품명(영문)" 파싱
   const searchBaseItem=async(q)=>{
@@ -936,6 +938,33 @@ function ScheduleTab(){
     }));
   };
 
+  // show_date 가 조정입고일(입고예정일과 다른 revised_eta)에서 온 행
+  const isRevisedEvent=(ev)=>!!ev.revisedEta&&ev.date===ev.revisedEta&&ev.revisedEta!==ev.eta;
+  // 프린팅 외주 캘린더 카드 = show_date + 업체(vendor) + 차수. 안의 상품은 group_key 블록(상태 저장 단위).
+  const groupPrintCards=(list)=>{
+    const m=new Map();
+    list.forEach(ev=>{
+      const key=`${ev.date}|${ev.supplier}|${ev.round??""}`;
+      if(!m.has(key))m.set(key,{key,rep:ev,events:[]});
+      m.get(key).events.push(ev);
+    });
+    return Array.from(m.values()).map(c=>{
+      const blocks=groupEvents(c.events);
+      const sts=[...new Set(blocks.map(b=>b.rep.status||""))];
+      return{...c,blocks,
+        title:`${c.rep.supplier||"(업체 미지정)"}${c.rep.round?` · ${c.rep.round}차`:""}`,
+        itemCount:new Set(c.events.map(e=>e.displayName||e.item||"")).size,
+        totalRemain:c.events.reduce((s,e)=>s+(Number(e.remain)||0),0),
+        totalReceived:c.events.reduce((s,e)=>s+(Number(e.received)||0),0),
+        mixed:sts.length>1,
+        status:sts.length>1?"혼재":sts[0],
+        delayed:blocks.some(b=>b.delayed),
+        revised:c.events.some(isRevisedEvent),
+        images:[...new Set(c.events.map(e=>e.imageUrl).filter(Boolean))].slice(0,3),
+      };
+    });
+  };
+
   // 입고 지연 건 — group_key + show_date 단위(= 캘린더 카드 1개). 입고대기 현황의 '지연 N' 집계용.
   const delayGroups=(()=>{
     const byDay=new Map();
@@ -971,7 +1000,7 @@ function ScheduleTab(){
     return groupEvents(matched).sort((a,b)=>String(a.rep.date||"").localeCompare(String(b.rep.date||"")));
   })();
   const gotoSearchResult=(ev)=>{
-    if(ev.date){const[y,mo]=ev.date.split("-").map(Number);setCurrentMonth({year:y,month:mo-1});setSelectedDay(ev.date);}
+    if(ev.date){const[y,mo]=ev.date.split("-").map(Number);setCurrentMonth({year:y,month:mo-1});setSelectedCard(null);setSelectedDay(ev.date);}
     setCalSearch("");
   };
 
@@ -1062,7 +1091,7 @@ function ScheduleTab(){
     {/* 생산 / 프린팅 외주 세그먼트 — 같은 캘린더 UI, 선택된 쪽 뷰만 조회. 전환 시 검색·상세 패널 초기화 */}
     <div style={{display:"inline-flex",padding:4,borderRadius:10,background:"#F1F5F9",border:"1px solid #E2E8F0",marginBottom:16,gap:4}}>
       {[["order","🏭 생산"],["print","🖨 프린팅 외주"]].map(([k,l])=>(
-        <button key={k} onClick={()=>{if(track===k)return;setTrack(k);setCalEvents([]);setSelectedDay(null);setStatusMenu(null);setCalSearch("");}}
+        <button key={k} onClick={()=>{if(track===k)return;setTrack(k);setCalEvents([]);setSelectedDay(null);setSelectedCard(null);setStatusMenu(null);setCalSearch("");}}
           style={{padding:"8px 18px",borderRadius:8,border:"none",cursor:"pointer",fontSize:14,fontWeight:track===k?700:500,background:track===k?"#FFFFFF":"transparent",color:track===k?"#0F172A":"#64748B",boxShadow:track===k?"0 1px 3px rgba(0,0,0,0.08)":"none"}}>{l}</button>
       ))}
     </div>
@@ -1149,13 +1178,13 @@ function ScheduleTab(){
           const day=i+1;const dayStr=`${monthStr}-${String(day).padStart(2,"0")}`;
           const events=getEventsForDay(day);
           const dayReceived=events.reduce((s,ev)=>s+(Number(ev.received)||0),0);
-          const groups=groupEvents(events);
+          const groups=track==="print"?groupPrintCards(events):groupEvents(events);
           const isToday=dayStr===today;
           const dow=(firstDayOfWeek+i)%7;
           const cellBg=isToday?"#EFF6FF":"#FFF";
           // 셀 클릭 → 날짜 상세 패널. 카드 최대 3개 + "+N개 더".
           return(<div key={day} style={{background:cellBg,minHeight:110,padding:6,position:"relative",borderTop:isToday?"2px solid #3B82F6":"none",transition:"background 0.15s",cursor:events.length>0?"pointer":"default"}}
-            onClick={()=>{if(events.length>0)setSelectedDay(dayStr);}}>
+            onClick={()=>{if(events.length>0){setSelectedCard(null);setSelectedDay(dayStr);}}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
               <span style={{fontSize:14,fontWeight:isToday?800:500,color:isToday?"#2563EB":dow===0?"#DC2626":dow===6?"#2563EB":"#334155"}}>{day}</span>
               {groups.length>0&&<span style={{display:"inline-flex",alignItems:"center",gap:4}}>
@@ -1164,6 +1193,29 @@ function ScheduleTab(){
               </span>}
             </div>
             {groups.slice(0,3).map(g=>{
+              // 프린팅 외주 카드(업체·차수) — 상태 뱃지는 읽기 전용, 클릭 시 해당 카드만 상세 패널
+              if(track==="print"){
+                const pc=g.mixed?{bg:"#F1F5F9",color:"#64748B"}:(statusColor(g.status)||{bg:"#EDE9FE",color:"#6D28D9"});
+                return(
+                <div key={g.key} onClick={e=>{e.stopPropagation();setSelectedCard(g.key);setSelectedDay(dayStr);}}
+                  title={`${g.status||"발주"}${g.delayed?" · 지연":""}${g.revised?" · 조정":""} · ${[...new Set(g.events.map(e=>e.displayName||e.item||""))].join(", ")}`}
+                  style={{display:"flex",gap:6,alignItems:"center",padding:"6px 7px",borderRadius:4,marginBottom:2,background:pc.bg,border:"1px solid "+pc.color+"55",...(g.delayed?{borderLeft:"3px solid #DC2626"}:{}),fontSize:12,lineHeight:1.3,userSelect:"none",cursor:"pointer"}}>
+                  <span style={{display:"flex",flexShrink:0}}>
+                    {g.images.length>0
+                      ?g.images.map((u,k)=><span key={u} style={{display:"block",marginLeft:k?-8:0,position:"relative",zIndex:3-k,borderRadius:4,boxShadow:"0 0 0 1.5px #FFF"}}><CalThumb src={u} size={24} /></span>)
+                      :<CalThumb src="" size={24} />}
+                  </span>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:4,color:pc.color,fontWeight:600,fontSize:11,minWidth:0}}>
+                      <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.status||"발주"}</span>
+                      {g.delayed&&<span style={{flexShrink:0,fontSize:10,fontWeight:800,color:"#FFF",background:"#DC2626",borderRadius:3,padding:"0 4px"}}>지연</span>}
+                      {g.revised&&<span style={{flexShrink:0,fontSize:10,fontWeight:700,color:"#475569",background:"#E2E8F0",borderRadius:3,padding:"0 4px"}}>조정</span>}
+                    </div>
+                    <div style={{fontWeight:700,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginTop:4}}>{g.title}</div>
+                    <div style={{fontSize:11,fontWeight:600,color:g.totalRemain>0?"#C2410C":"#0F766E",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>품목 {g.itemCount}종 · {g.totalRemain>0?`잔량 ${g.totalRemain.toLocaleString()}장`:`입고 ${g.totalReceived.toLocaleString()}장`}</div>
+                  </div>
+                </div>);
+              }
               const ev=g.rep;
               const nc=statusColor(ev.status)||{bg:"#EDE9FE",color:"#6D28D9"};
               const delayed=g.delayed;
@@ -1198,32 +1250,21 @@ function ScheduleTab(){
       const colTh={padding:"5px 4px",textAlign:"left",fontSize:10,fontWeight:700,color:"#94A3B8",borderBottom:"1px solid #E2E8F0",whiteSpace:"nowrap"};
       const colTd={padding:"5px 4px",fontSize:11,color:"#334155",borderBottom:"1px solid #F1F5F9",verticalAlign:"top"};
       const oneLine={whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"};
-      const closePanel=()=>{setStatusMenu(null);setSelectedDay(null);};
-      const isPrint=track==="print"; // 프린팅 외주 전용: 옵션표 '베이스 업체' 열 · 블록 헤더 아래 지연 사유
-      return(
-        <div onClick={closePanel} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.5)",display:"flex",justifyContent:"flex-end",zIndex:1000}}>
-          <div onClick={e=>{e.stopPropagation();setStatusMenu(null);}} style={{background:"#FFF",width:"min(1100px, 92vw)",height:"100%",overflowY:"auto",boxShadow:"-8px 0 30px rgba(0,0,0,0.2)",padding:24,boxSizing:"border-box"}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-              <div style={{fontSize:18,fontWeight:700,color:"#0F172A"}}>📅 {selectedDay}</div>
-              <button onClick={closePanel} style={{border:"none",background:"#F1F5F9",borderRadius:8,width:32,height:32,fontSize:18,cursor:"pointer",color:"#475569"}}>✕</button>
-            </div>
-            <div style={{fontSize:14,color:"#64748B",marginBottom:16}}>입고 예정 {dayEvents.length}건(상품 {dayGroups.length}종){dayTotalQty>0?` · 총 ${dayTotalQty.toLocaleString()}장`:""}</div>
-            {dayGroups.map(g=>{
-              const ev=g.rep;
-              const nc=statusColor(ev.status)||{bg:"#EDE9FE",color:"#6D28D9"};
-              // 업체: 생산건=생산공장(factory), 프린팅 외주=업체(vendor). 그룹 내 중복 제거.
-              const gSuppliers=[...new Set(g.events.map(o=>String(o.supplier||"").trim()).filter(Boolean))].join(", ");
-              const menuOpen=statusMenu===g.key;
-              const busy=statusBusy===g.key;
-              const delayReason=isPrint?[...new Set(g.events.map(o=>String(o.delayReason||"").trim()).filter(Boolean))].join(" / "):"";
-              return(<div key={g.key} style={{border:"1px solid #E2E8F0",borderRadius:12,padding:16,marginBottom:14}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:10}}>
-                  <div style={{minWidth:0}}>
-                    <div style={{fontSize:16,fontWeight:700,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.name}</div>
-                    {gSuppliers&&<div style={{fontSize:12,color:"#94A3B8",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ev.source==="print"?"🖨":"🏭"} {gSuppliers}</div>}
-                    <div style={{fontSize:12,color:"#94A3B8",marginTop:2}}>총 {g.totalQty.toLocaleString()}장 · {g.events.length}옵션</div>
-                  </div>
-                  {/* 상태 뱃지 클릭 → 드롭다운. 수동 지정(status_manual)이면 뱃지 안에 작은 점(•) */}
+      const closePanel=()=>{setStatusMenu(null);setSelectedDay(null);setSelectedCard(null);};
+      const isPrint=track==="print"; // 프린팅 외주 전용: 업체·차수 카드 → 상품 블록(접힘), 옵션표 '베이스 업체' 열, 지연 사유
+      // 프린팅 외주: 클릭한 카드(업체·차수)만. 셀 클릭이면 그 날짜 카드 전체.
+      const dayCards=isPrint?groupPrintCards(dayEvents):[];
+      const cards=selectedCard?dayCards.filter(c=>c.key===selectedCard):dayCards;
+      const shownEvents=isPrint?cards.flatMap(c=>c.events):dayEvents;
+      const shownBlockCount=isPrint?cards.reduce((s,c)=>s+c.blocks.length,0):dayGroups.length;
+      const shownTotalQty=isPrint?shownEvents.reduce((s,ev)=>s+(Number(ev.qty)||0),0):dayTotalQty;
+      // 상태 뱃지 클릭 → 드롭다운. 수동 지정(status_manual)이면 뱃지 안에 작은 점(•). order_status 는 group_key 단위 저장.
+      const statusPicker=(g)=>{
+        const ev=g.rep;
+        const nc=statusColor(ev.status)||{bg:"#EDE9FE",color:"#6D28D9"};
+        const menuOpen=statusMenu===g.key;
+        const busy=statusBusy===g.key;
+        return(
                   <div onClick={e=>e.stopPropagation()} style={{position:"relative",flexShrink:0}}>
                     <button onClick={()=>setStatusMenu(menuOpen?null:g.key)} disabled={busy} title="클릭하여 상태 변경"
                       style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:12,fontWeight:700,color:nc.color,background:nc.bg,border:"1px solid "+nc.color+"55",borderRadius:6,padding:"3px 9px",whiteSpace:"nowrap",cursor:busy?"wait":"pointer",opacity:busy?0.6:1}}>
@@ -1250,9 +1291,10 @@ function ScheduleTab(){
                         })}
                       </div>
                     )}
-                  </div>
-                </div>
-                {delayReason&&<div style={{margin:"-4px 0 10px",fontSize:12,color:"#94A3B8",lineHeight:1.5,overflowWrap:"anywhere"}}>{delayReason}</div>}
+                  </div>);
+      };
+      // 옵션별 표 (생산·프린팅 외주 공통, 프린팅 외주는 맨 뒤 '베이스 업체' 열)
+      const optTable=(g)=>(
                 <div style={{overflowX:"auto",borderRadius:8,border:"1px solid #EEF2F6"}}>
                   <table style={{width:"100%",minWidth:isPrint?1090:980,tableLayout:"fixed",borderCollapse:"collapse"}}>
                     <colgroup>
@@ -1297,10 +1339,64 @@ function ScheduleTab(){
                       </tr>
                     </tbody>
                   </table>
+                </div>);
+      const qtyText=(remain,received)=>remain>0?`잔량 ${remain.toLocaleString()}장`:`입고 ${received.toLocaleString()}장`;
+      const miniBadge=(label,color,bg)=><span style={{flexShrink:0,fontSize:11,fontWeight:700,color,background:bg,borderRadius:4,padding:"1px 6px",whiteSpace:"nowrap"}}>{label}</span>;
+      return(
+        <div onClick={closePanel} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.5)",display:"flex",justifyContent:"flex-end",zIndex:1000}}>
+          <div onClick={e=>{e.stopPropagation();setStatusMenu(null);}} style={{background:"#FFF",width:"min(1100px, 92vw)",height:"100%",overflowY:"auto",boxShadow:"-8px 0 30px rgba(0,0,0,0.2)",padding:24,boxSizing:"border-box"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+              <div style={{fontSize:18,fontWeight:700,color:"#0F172A"}}>📅 {selectedDay}</div>
+              <button onClick={closePanel} style={{border:"none",background:"#F1F5F9",borderRadius:8,width:32,height:32,fontSize:18,cursor:"pointer",color:"#475569"}}>✕</button>
+            </div>
+            <div style={{fontSize:14,color:"#64748B",marginBottom:16}}>
+              입고 예정 {shownEvents.length}건(상품 {shownBlockCount}종){shownTotalQty>0?` · 총 ${shownTotalQty.toLocaleString()}장`:""}
+              {isPrint&&selectedCard&&dayCards.length>1&&<span onClick={()=>setSelectedCard(null)} style={{marginLeft:10,fontSize:13,fontWeight:600,color:"#2563EB",cursor:"pointer"}}>이 날짜 전체 보기 ({dayCards.length})</span>}
+            </div>
+            {/* 프린팅 외주 — 업체·차수 카드 → 상품(group_key) 블록. 블록 본문은 헤더 클릭으로 펼침 */}
+            {isPrint&&cards.map(c=>(
+              <div key={c.key} style={{marginBottom:22}}>
+                <div style={{display:"flex",alignItems:"baseline",gap:10,flexWrap:"wrap",marginBottom:10}}>
+                  <span style={{fontSize:16,fontWeight:800,color:"#0F172A"}}>{c.title}</span>
+                  <span style={{fontSize:13,color:"#64748B"}}>품목 {c.itemCount}종 · <b style={{color:c.totalRemain>0?"#C2410C":"#0F766E"}}>{qtyText(c.totalRemain,c.totalReceived)}</b></span>
                 </div>
+                {c.blocks.map(g=>{
+                  const open=!!openBlocks[g.key];
+                  const revised=g.events.some(isRevisedEvent);
+                  const delayReason=[...new Set(g.events.map(o=>String(o.delayReason||"").trim()).filter(Boolean))].join(" / ");
+                  return(<div key={g.key} style={{border:"1px solid #E2E8F0",borderRadius:10,marginBottom:10}}>
+                    <div onClick={()=>setOpenBlocks(p=>({...p,[g.key]:!open}))} style={{display:"flex",alignItems:"center",gap:8,padding:"10px 12px",cursor:"pointer",flexWrap:"wrap",rowGap:6}}>
+                      <span style={{fontSize:10,color:"#94A3B8",width:10,flexShrink:0}}>{open?"▼":"▶"}</span>
+                      <CalThumb src={g.imageUrl} size={28} />
+                      <span style={{flex:"1 1 200px",minWidth:0,fontSize:14,fontWeight:700,color:"#1E293B",overflowWrap:"anywhere"}}>{g.rep.displayName||g.rep.item||"-"}</span>
+                      <span style={{flexShrink:0,fontSize:13,fontWeight:700,whiteSpace:"nowrap",color:g.totalRemain>0?"#C2410C":"#0F766E"}}>{qtyText(g.totalRemain,g.totalReceived)}</span>
+                      {g.delayed&&miniBadge("지연","#FFF","#DC2626")}
+                      {revised&&miniBadge("조정","#475569","#E2E8F0")}
+                      {statusPicker(g)}
+                    </div>
+                    {delayReason&&<div style={{padding:"0 12px 10px 58px",marginTop:-4,fontSize:12,color:"#94A3B8",lineHeight:1.5,overflowWrap:"anywhere"}}>{delayReason}</div>}
+                    {open&&<div style={{padding:"0 12px 12px"}}>{optTable(g)}</div>}
+                  </div>);
+                })}
+              </div>
+            ))}
+            {!isPrint&&dayGroups.map(g=>{
+              const ev=g.rep;
+              // 업체: 생산건=생산공장(factory), 프린팅 외주=업체(vendor). 그룹 내 중복 제거.
+              const gSuppliers=[...new Set(g.events.map(o=>String(o.supplier||"").trim()).filter(Boolean))].join(", ");
+              return(<div key={g.key} style={{border:"1px solid #E2E8F0",borderRadius:12,padding:16,marginBottom:14}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:10}}>
+                  <div style={{minWidth:0}}>
+                    <div style={{fontSize:16,fontWeight:700,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.name}</div>
+                    {gSuppliers&&<div style={{fontSize:12,color:"#94A3B8",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ev.source==="print"?"🖨":"🏭"} {gSuppliers}</div>}
+                    <div style={{fontSize:12,color:"#94A3B8",marginTop:2}}>총 {g.totalQty.toLocaleString()}장 · {g.events.length}옵션</div>
+                  </div>
+                  {statusPicker(g)}
+                </div>
+                {optTable(g)}
               </div>);
             })}
-            {dayGroups.length===0&&<div style={{textAlign:"center",color:"#94A3B8",padding:30}}>표시할 발주가 없습니다.</div>}
+            {shownBlockCount===0&&<div style={{textAlign:"center",color:"#94A3B8",padding:30}}>표시할 발주가 없습니다.</div>}
           </div>
         </div>);
     })()}
