@@ -816,8 +816,9 @@ function ScheduleTab(){
   const[baseQuery,setBaseQuery]=useState(""); // 베이스 아이템 검색어(상품명 영문)
   const[baseResults,setBaseResults]=useState(null); // null=미검색, []=결과없음
   const[baseSearching,setBaseSearching]=useState(false);
-  const[waitEvents,setWaitEvents]=useState([]); // 선택된 쪽의 잔량>0 행 전체(기간 제한 없음) — 상단 요약 소스
+  const[waitEvents,setWaitEvents]=useState([]); // 생산·프린팅 외주 양쪽의 잔량>0 행 전체(기간 제한 없음) — 상단 요약 소스
   const[waitFilter,setWaitFilter]=useState(null); // 입고대기 현황 상태 칩 필터 (null=전체)
+  const[delayMode,setDelayMode]=useState(false); // 입고대기 현황: 지연 뱃지 토글 — true 면 지연 건 전체(과거 포함)
   const[statusError,setStatusError]=useState(null); // {key,msg} 상태 저장 실패 — 상세 패널에 인라인 표시
   const[selectedCard,setSelectedCard]=useState(null); // 프린팅 외주: 클릭한 카드(업체·차수) key — null 이면 날짜 전체
   const[openBlocks,setOpenBlocks]=useState({}); // 프린팅 외주 상세: 펼친 상품 블록 {group_key:true}
@@ -903,9 +904,9 @@ function ScheduleTab(){
   const waitReqRef=useRef(0);
   const reloadWait=useCallback(async()=>{
     const seq=++waitReqRef.current;
-    const rows=await fetchWaitingEvents([track]);
+    const rows=await fetchWaitingEvents(["order","print"]);
     if(seq===waitReqRef.current)setWaitEvents(rows);
-  },[track]);
+  },[]);
   useEffect(()=>{reloadCalendar();},[reloadCalendar]);
   useEffect(()=>{reloadUpcoming();},[reloadUpcoming]);
   useEffect(()=>{reloadWait();},[reloadWait]);
@@ -986,24 +987,34 @@ function ScheduleTab(){
     });
   };
 
-  // ── 상단 요약 (선택된 탭 기준) ──
-  // 카드 = 캘린더와 같은 단위: 날짜별로 생산은 group_key, 프린팅 외주는 업체·차수로 묶음. 잔량 합계 0 인 카드는 제외.
-  const toCards=(list)=>{
+  // ── 상단 요약 ──
+  // 카드 = 캘린더와 같은 단위: 날짜별로 생산은 group_key, 프린팅 외주는 업체·차수로 묶음. 잔량 합계 0 · show_date 없는 카드는 제외.
+  const toCards=(list,src)=>{
     const byDay=new Map();
-    list.forEach(ev=>{if(!ev.date)return;if(!byDay.has(ev.date))byDay.set(ev.date,[]);byDay.get(ev.date).push(ev);});
+    list.forEach(ev=>{if(!ev.date||ev.source!==src)return;if(!byDay.has(ev.date))byDay.set(ev.date,[]);byDay.get(ev.date).push(ev);});
     return[...byDay.entries()]
-      .flatMap(([date,evs])=>(track==="print"?groupPrintCards(evs):groupEvents(evs)).map(c=>({...c,date,
+      .flatMap(([date,evs])=>(src==="print"?groupPrintCards(evs):groupEvents(evs)).map(c=>({...c,date,
         cardKey:`${date}|${c.key}`,
-        label:track==="print"?c.title:c.name,
-        stLabel:(track==="print"?c.status:c.rep.status)||"발주", // 캘린더 카드 뱃지와 같은 값(프린팅 외주는 '혼재' 가능)
+        label:src==="print"?c.title:c.name,
+        stLabel:(src==="print"?c.status:c.rep.status)||"발주", // 캘린더 카드 뱃지와 같은 값(프린팅 외주는 '혼재' 가능)
       })))
       .filter(c=>c.totalRemain>0)
       .sort((a,b)=>a.date.localeCompare(b.date));
   };
-  const waitCards=toCards(waitEvents.filter(e=>e.source===track));
-  const waitQty=waitCards.reduce((s,c)=>s+c.totalRemain,0);
-  const waitDelayed=waitCards.filter(c=>c.delayed).length; // 지연은 플래그 — 상태 칩과 별개로 센다
-  // 상태 칩: 이 집합을 상태별로 분해(칩 합계 = 총 건수). 0건 상태는 표시 안 함. 순서 = 상태 선택지 순 → 그 외(뷰 판정값·혼재).
+  const sumRemain=cards=>cards.reduce((s,c)=>s+c.totalRemain,0);
+  // 이번주 입고건 — 탭과 무관하게 생산 / 프린팅 외주 분리. show_date 가 이번 주(월~일)이고 잔량 있는 카드.
+  const weekBySrc=["order","print"].map(src=>{
+    const cards=toCards(waitEvents,src).filter(c=>c.date>=weekRange.monday&&c.date<=weekRange.sunday);
+    return{src,label:src==="print"?"🖨 프린팅 외주":"🏭 생산",cards,qty:sumRemain(cards),chips:[...cards].sort((a,b)=>b.totalRemain-a.totalRemain)};
+  });
+  const weekCount=weekBySrc.reduce((s,w)=>s+w.cards.length,0);
+  const weekQty=weekBySrc.reduce((s,w)=>s+w.qty,0);
+  // 입고대기 현황 — 선택된 탭 기준. 기본 = show_date 오늘 이후, 지연 토글 = 지연 건 전체(과거 포함).
+  const trackCards=toCards(waitEvents,track);
+  const delayedCards=trackCards.filter(c=>c.delayed); // 지연은 플래그 — 뱃지 건수는 토글과 무관하게 전체
+  const waitCards=delayMode?delayedCards:trackCards.filter(c=>c.date>=today);
+  const waitQty=sumRemain(waitCards);
+  // 상태 칩: 보이는 목록을 상태별로 분해(칩 합계 = 총 건수). 0건 상태는 표시 안 함. 순서 = 상태 선택지 순 → 그 외(뷰 판정값·혼재).
   const waitStatusCounts=(()=>{
     const m=new Map();
     waitCards.forEach(c=>m.set(c.stLabel,(m.get(c.stLabel)||0)+1));
@@ -1012,10 +1023,6 @@ function ScheduleTab(){
   })();
   const activeWaitFilter=waitStatusCounts.some(([s])=>s===waitFilter)?waitFilter:null;
   const shownWaitCards=activeWaitFilter?waitCards.filter(c=>c.stLabel===activeWaitFilter):waitCards;
-  // 이번주 입고건 = 잔량 있는 카드 중 show_date 가 이번 주(월~일)
-  const weekCards=waitCards.filter(c=>c.date>=weekRange.monday&&c.date<=weekRange.sunday);
-  const weekQty=weekCards.reduce((s,c)=>s+c.totalRemain,0);
-  const weekChips=[...weekCards].sort((a,b)=>b.totalRemain-a.totalRemain);
   const trackLabel=track==="print"?"프린팅 외주":"생산";
 
   // 상태 직접 변경 — 낙관적 업데이트 후 order_status upsert, 성공하면 뷰를 다시 조회해 화면 갱신.
@@ -1106,29 +1113,35 @@ function ScheduleTab(){
       {(()=>{const _t=new Date();return(<div style={{fontSize:15,fontWeight:600,color:"#3B82F6"}}>{_t.getFullYear()}년 {_t.getMonth()+1}월 {_t.getDate()}일</div>);})()}
     </div>
 
-    {/* 상단 요약: 이번주 입고건 / 입고대기 현황 — 선택된 탭(생산 / 프린팅 외주) 기준, 캘린더와 같은 카드 단위 */}
+    {/* 상단 요약: 이번주 입고건(생산·프린팅 외주 분리) / 입고대기 현황(선택된 탭 기준) — 캘린더와 같은 카드 단위 */}
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(320px,1fr))",gap:16,marginBottom:16,alignItems:"stretch"}}>
-      {/* 왼쪽: 이번주 입고건 — show_date 가 이번 주(월~일)이고 잔량 있는 카드 */}
+      {/* 왼쪽: 이번주 입고건 — show_date 가 이번 주(월~일)이고 잔량 있는 카드, 두 소스 합계 + 소스별 박스 */}
       <div style={{padding:"22px 24px",borderRadius:14,background:"linear-gradient(135deg,#EFF6FF 0%,#F5F3FF 100%)",border:"1px solid #BFDBFE",boxShadow:"0 2px 8px rgba(59,130,246,0.08)",height:"100%",boxSizing:"border-box"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div>
-            <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:6}}>
-              <span style={{fontSize:13,fontWeight:600,color:"#6366F1",letterSpacing:0.5,textTransform:"uppercase"}}>📦 이번주 입고건</span>
-              <span style={{fontSize:11,fontWeight:600,color:"#94A3B8"}}>{trackLabel} 기준</span>
-            </div>
-            <div style={{fontSize:38,fontWeight:800,color:"#3B82F6",letterSpacing:-1.5}}>{weekCards.length}<span style={{fontSize:16,fontWeight:500,color:"#93C5FD",marginLeft:4}}>건</span></div>
+            <div style={{fontSize:13,fontWeight:600,color:"#6366F1",letterSpacing:0.5,textTransform:"uppercase",marginBottom:6}}>📦 이번주 입고건</div>
+            <div style={{fontSize:38,fontWeight:800,color:"#3B82F6",letterSpacing:-1.5}}>{weekCount}<span style={{fontSize:16,fontWeight:500,color:"#93C5FD",marginLeft:4}}>건</span></div>
             <div style={{fontSize:14,color:"#6B7280",marginTop:6}}>잔량 {weekQty.toLocaleString()}장 입고 예정</div>
           </div>
           <div style={{width:48,height:48,borderRadius:12,background:"#3B82F620",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24}}>📅</div>
         </div>
-        <div style={{marginTop:12,display:"flex",gap:6,flexWrap:"wrap"}}>
-          {weekChips.slice(0,3).map(c=>(<div key={c.cardKey} title={`${c.date} · ${c.label}`} style={{fontSize:12,padding:"3px 8px",borderRadius:4,fontWeight:600,background:"#DBEAFE",color:"#1E40AF",maxWidth:220,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.label} {c.totalRemain.toLocaleString()}장</div>))}
-          {weekChips.length>3&&<div style={{fontSize:12,padding:"3px 8px",borderRadius:4,fontWeight:600,background:"#E0E7FF",color:"#4338CA"}}>+{weekChips.length-3}건</div>}
-          {weekChips.length===0&&<div style={{fontSize:12,padding:"3px 8px",borderRadius:4,fontWeight:600,background:"#F1F5F9",color:"#94A3B8"}}>이번주 입고건 없음</div>}
+        <div style={{marginTop:14,display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10}}>
+          {weekBySrc.map(w=>{
+            const isPrint=w.src==="print";
+            return(<div key={w.src} style={{minWidth:0,padding:"10px 12px",borderRadius:8,background:"rgba(255,255,255,0.6)",border:`1px solid ${isPrint?"#DDD6FE":"#BFDBFE"}`}}>
+              <div style={{fontSize:12,fontWeight:700,color:isPrint?"#7C3AED":"#2563EB"}}>{w.label}</div>
+              <div style={{fontSize:22,fontWeight:800,color:isPrint?"#5B21B6":"#1E40AF",marginTop:2,letterSpacing:-0.5}}>{w.cards.length}<span style={{fontSize:12,fontWeight:600,color:isPrint?"#C4B5FD":"#93C5FD",marginLeft:2}}>건</span></div>
+              <div style={{fontSize:12,color:"#6B7280",marginTop:1}}>잔량 {w.qty.toLocaleString()}장</div>
+              {w.chips.length>0&&<div style={{marginTop:8,display:"flex",gap:4,flexWrap:"wrap"}}>
+                {w.chips.slice(0,2).map(c=>(<div key={c.cardKey} title={`${c.date} · ${c.label} · 잔량 ${c.totalRemain.toLocaleString()}장`} style={{fontSize:12,padding:"3px 8px",borderRadius:4,fontWeight:600,maxWidth:"100%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",background:isPrint?"#EDE9FE":"#DBEAFE",color:isPrint?"#5B21B6":"#1E40AF"}}>{c.label} {c.totalRemain.toLocaleString()}장</div>))}
+                {w.chips.length>2&&<div style={{fontSize:12,padding:"3px 8px",borderRadius:4,fontWeight:600,background:isPrint?"#F5F3FF":"#E0E7FF",color:isPrint?"#6D28D9":"#4338CA"}}>+{w.chips.length-2}건</div>}
+              </div>}
+            </div>);
+          })}
         </div>
       </div>
 
-      {/* 오른쪽: 입고대기 현황 — 잔량 있는 전체 카드(기간 제한 없음). 상태 칩 합계 = 총 건수, 지연은 별도 뱃지 */}
+      {/* 오른쪽: 입고대기 현황 — 잔량 있고 show_date 오늘 이후인 카드. 지연 뱃지를 누르면 지연 건 전체(과거 포함)로 토글. 상태 칩 합계 = 총 건수 */}
       <div style={{padding:"22px 24px",borderRadius:14,background:"linear-gradient(135deg,#FEFCE8 0%,#FFFBEB 100%)",border:"1px solid #FDE68A",boxShadow:"0 2px 8px rgba(234,179,8,0.08)",height:"100%",boxSizing:"border-box",display:"flex",flexDirection:"column",minHeight:0}}>
         <div style={{marginBottom:12}}>
           <div style={{display:"flex",alignItems:"baseline",gap:8}}>
@@ -1136,8 +1149,10 @@ function ScheduleTab(){
             <span style={{fontSize:11,fontWeight:600,color:"#94A3B8"}}>{trackLabel} 기준</span>
           </div>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginTop:6}}>
-            <span style={{fontSize:14,fontWeight:700,color:"#334155"}}>총 {waitCards.length}건 · {waitQty.toLocaleString()}장</span>
-            {waitDelayed>0&&<span title="지연은 상태가 아니라 플래그입니다 — 위 건수 중 지연 표시된 카드 수(상태 칩과 중복 집계)" style={{fontSize:12,fontWeight:700,color:"#FFF",background:"#DC2626",borderRadius:10,padding:"2px 9px",whiteSpace:"nowrap"}}>지연 {waitDelayed}건</span>}
+            <span style={{fontSize:14,fontWeight:700,color:"#334155"}}>{delayMode?"지연 건 ":""}총 {waitCards.length}건 · {waitQty.toLocaleString()}장</span>
+            {(delayedCards.length>0||delayMode)&&<button onClick={()=>{setDelayMode(v=>!v);setWaitFilter(null);}}
+              title={delayMode?"다시 누르면 오늘 이후 목록으로 돌아갑니다":"지연 건 전체(지난 날짜 포함)만 보기 — 지연은 상태가 아니라 플래그입니다"}
+              style={{fontSize:12,fontWeight:700,color:delayMode?"#DC2626":"#FFF",background:delayMode?"#FFF":"#DC2626",border:"1.5px solid #DC2626",borderRadius:10,padding:"2px 9px",whiteSpace:"nowrap",cursor:"pointer"}}>{delayMode?"✕ ":""}지연 {delayedCards.length}건</button>}
           </div>
         </div>
         {/* 상태 칩 — 클릭 필터(다시 누르면 해제). 0건 상태는 숨김 */}
@@ -1147,13 +1162,13 @@ function ScheduleTab(){
             const sel=activeWaitFilter===st;
             return(<div key={st} onClick={()=>setWaitFilter(sel?null:st)}
               title={st==="지연"?"뷰 판정 상태: 예정일이 지났고 입고 수량 0":undefined}
-              style={{fontSize:12,padding:"3px 8px",borderRadius:4,fontWeight:600,background:c.bg,color:c.color,fontWeight:sel?800:600,cursor:"pointer",border:sel?`1.5px solid ${c.color}`:"1.5px solid transparent",opacity:activeWaitFilter&&!sel?0.4:1}}>{st==="지연"?"지연(미입고)":st} {n}</div>);
+              style={{fontSize:12,padding:"3px 8px",borderRadius:4,background:c.bg,color:c.color,fontWeight:sel?800:600,cursor:"pointer",border:sel?`1.5px solid ${c.color}`:"1.5px solid transparent",opacity:activeWaitFilter&&!sel?0.4:1}}>{st==="지연"?"지연(미입고)":st} {n}</div>);
           })}
         </div>
         {/* 목록(내부 스크롤, 높이 고정) — show_date 빠른 순 */}
         <div style={{height:260,flexShrink:0,overflowY:"auto",paddingRight:2}}>
           {shownWaitCards.length===0?(
-            <div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:14}}>{activeWaitFilter?`'${activeWaitFilter}' 상태 건이 없습니다`:"입고대기 건이 없습니다"}</div>
+            <div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:14}}>{activeWaitFilter?`'${activeWaitFilter}' 상태 건이 없습니다`:delayMode?"지연 건이 없습니다":"오늘 이후 입고대기 건이 없습니다"}</div>
           ):(
             shownWaitCards.map(c=>{
               const sc=statusColor(c.stLabel)||{bg:"#EDE9FE",color:"#6D28D9"};
@@ -1176,7 +1191,7 @@ function ScheduleTab(){
     {/* 생산 / 프린팅 외주 세그먼트 — 같은 캘린더 UI, 선택된 쪽 뷰만 조회. 전환 시 검색·상세 패널 초기화 */}
     <div style={{display:"inline-flex",padding:4,borderRadius:10,background:"#F1F5F9",border:"1px solid #E2E8F0",marginBottom:16,gap:4}}>
       {[["order","🏭 생산"],["print","🖨 프린팅 외주"]].map(([k,l])=>(
-        <button key={k} onClick={()=>{if(track===k)return;setTrack(k);setCalEvents([]);setWaitEvents([]);setWaitFilter(null);setSelectedDay(null);setSelectedCard(null);setStatusMenu(null);setCalSearch("");}}
+        <button key={k} onClick={()=>{if(track===k)return;setTrack(k);setCalEvents([]);setWaitFilter(null);setDelayMode(false);setSelectedDay(null);setSelectedCard(null);setStatusMenu(null);setCalSearch("");}}
           style={{padding:"8px 18px",borderRadius:8,border:"none",cursor:"pointer",fontSize:14,fontWeight:track===k?700:500,background:track===k?"#FFFFFF":"transparent",color:track===k?"#0F172A":"#64748B",boxShadow:track===k?"0 1px 3px rgba(0,0,0,0.08)":"none"}}>{l}</button>
       ))}
     </div>
