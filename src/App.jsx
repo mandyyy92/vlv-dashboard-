@@ -6130,8 +6130,82 @@ const ocObjPath=path=>path.split("/").map(encodeURIComponent).join("/");
 const ocSize=n=>{n=Number(n)||0;return n>=1048576?`${(n/1048576).toFixed(1)}MB`:n>=1024?`${Math.round(n/1024)}KB`:`${n}B`;};
 const ocDate=v=>{if(!v)return"-";const d=new Date(v);if(isNaN(d))return String(v);const p=x=>String(x).padStart(2,"0");return`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;};
 
-function OrderContractsSection({group,onCountChange}){
+const ocValidate=file=>{
+  const ext=ocExtOf(file.name);
+  if(!OC_EXT.has(ext))return`허용되지 않는 형식(.${ext||"없음"})`;
+  if(file.size>OC_MAX)return`20MB 초과(${ocSize(file.size)})`;
+  return"";
+};
+async function ocStorageUpload(path,file){
+  const s=await fetch(`${SUPABASE_URL}/storage/v1/object/${OC_BUCKET}/${ocObjPath(path)}`,{method:"POST",headers:{...ocAuth,"Content-Type":file.type||"application/octet-stream","x-upsert":"false"},body:file});
+  if(!s.ok)throw new Error(`저장소 업로드 실패 ${s.status} ${await s.text()}`);
+}
+async function ocStorageRemove(path){
+  const s=await fetch(`${SUPABASE_URL}/storage/v1/object/${OC_BUCKET}`,{method:"DELETE",headers:{...ocAuth,"Content-Type":"application/json"},body:JSON.stringify({prefixes:[path]})});
+  if(!s.ok)throw new Error(`저장소 삭제 실패 ${s.status} ${await s.text()}`);
+}
+// 서명 URL(1시간)로 새 탭. await 뒤 window.open 은 팝업 차단될 수 있어 빈 탭을 먼저 연 뒤 주소를 넣는다. 실패 시 메시지 반환.
+async function ocOpenFile(path){
+  const w=window.open("","_blank");
+  try{
+    const r=await fetch(`${SUPABASE_URL}/storage/v1/object/sign/${OC_BUCKET}/${ocObjPath(path)}`,{method:"POST",headers:{...ocAuth,"Content-Type":"application/json"},body:JSON.stringify({expiresIn:3600})});
+    if(!r.ok)throw new Error(`${r.status} ${await r.text()}`);
+    const j=await r.json();
+    const signed=j.signedURL||j.signedUrl;
+    if(!signed)throw new Error("임시 링크 없음");
+    const url=/^https?:/.test(signed)?signed:`${SUPABASE_URL}/storage/v1${signed}`;
+    if(w)w.location.href=url;else window.open(url,"_blank","noopener");
+    return"";
+  }catch(e){
+    if(w)w.close();
+    return`열기 실패: ${e.message||e}`;
+  }
+}
+// id 기준 update → 갱신된 행 반환(0행이면 실패 처리)
+async function ocPatchRow(table,id,patch){
+  const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${encodeURIComponent(id)}`,{method:"PATCH",headers:sbHeaders,body:JSON.stringify(patch)});
+  if(!r.ok)throw new Error(`${r.status} ${await r.text()}`);
+  const rows=await r.json();
+  if(!Array.isArray(rows)||!rows.length)throw new Error("변경된 행 없음");
+  return rows[0];
+}
+const ocFmtAmt=v=>v==null||v===""||!Number.isFinite(Number(v))?"":Number(v).toLocaleString();
+// 금액 입력 — 천단위 콤마로 표시, 포커스가 빠질 때 숫자(비우면 null)로 onCommit
+function OcAmountInput({value,onCommit,placeholder,style}){
+  const[text,setText]=useState(ocFmtAmt(value));
+  useEffect(()=>{setText(ocFmtAmt(value));},[value]);
+  return <input type="text" inputMode="numeric" value={text} placeholder={placeholder}
+    onChange={e=>{const d=e.target.value.replace(/[^0-9]/g,"");setText(d?Number(d).toLocaleString():"");}}
+    onBlur={()=>{const d=text.replace(/[^0-9]/g,"");onCommit(d?Number(d):null);}}
+    style={style} />;
+}
+// 행별 인라인 메시지(3초 후 사라짐) — {ok,text} ok: true=녹색 / false=빨강
+function useRowFlash(){
+  const[msgs,setMsgs]=useState({});
+  const timers=useRef({});
+  useEffect(()=>()=>Object.values(timers.current).forEach(clearTimeout),[]);
+  const flashRow=useCallback((id,ok,text)=>{
+    clearTimeout(timers.current[id]);
+    setMsgs(p=>({...p,[id]:{ok,text}}));
+    timers.current[id]=setTimeout(()=>setMsgs(p=>{const n={...p};delete n[id];return n;}),3000);
+  },[]);
+  return[msgs,flashRow];
+}
+const ocMsgStyle=m=>({fontSize:12,fontWeight:600,color:m.ok?"#16A34A":"#DC2626",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",minWidth:0});
+const ocInput={height:30,padding:"0 8px",borderRadius:6,border:"1px solid #CBD5E1",fontSize:12,color:"#1E293B",background:"#FFF",boxSizing:"border-box",minWidth:0};
+// order_contracts doc_type 별 설정. 계약서는 doc_type 도입 전 행(null)도 계약서로 본다.
+const OC_DOC={
+  contract:{title:"계약서",icon:"📄",empty:"첨부된 계약서가 없습니다",prefix:"",filter:"&or=(doc_type.eq.contract,doc_type.is.null)"},
+  tax_invoice:{title:"세금계산서",icon:"🧾",empty:"첨부된 세금계산서가 없습니다",prefix:"tax/",filter:"&doc_type=eq.tax_invoice"},
+};
+// 표 차수 행의 보유 문서 아이콘
+const OC_BADGES=[["contract","📄","계약서"],["tax_invoice","🧾","세금계산서"],["expense","💳","지출결의서"]];
+
+// 계약서 / 세금계산서 첨부 섹션 (order_contracts, docType 으로 구분). 세금계산서는 행마다 발행일·공급가액 입력 + 합계.
+function OrderContractsSection({group,docType="contract",onCountChange}){
   const orderKey=ocOrderKey(group);
+  const cfg=OC_DOC[docType];
+  const isTax=docType==="tax_invoice";
   const[list,setList]=useState([]);
   const[loading,setLoading]=useState(true);
   const[loadErr,setLoadErr]=useState("");
@@ -6144,38 +6218,37 @@ function OrderContractsSection({group,onCountChange}){
   const[armed,setArmed]=useState(null);
   const flashTimer=useRef(null);
   const armTimer=useRef(null);
+  const[rowMsgs,flashRow]=useRowFlash();
   const flash=(ok,text)=>{clearTimeout(flashTimer.current);setFlashMsg({ok,text});flashTimer.current=setTimeout(()=>setFlashMsg(null),3000);};
   useEffect(()=>()=>{clearTimeout(flashTimer.current);clearTimeout(armTimer.current);clearTimeout(uploadClear.current);},[]);
 
   const load=useCallback(async()=>{
     setLoading(true);setLoadErr("");
     try{
-      const r=await fetch(`${SUPABASE_URL}/rest/v1/order_contracts?select=*&order_key=eq.${encodeURIComponent(orderKey)}&order=uploaded_at.desc`,{headers:sbHeaders});
+      const r=await fetch(`${SUPABASE_URL}/rest/v1/order_contracts?select=*&order_key=eq.${encodeURIComponent(orderKey)}${cfg.filter}&order=uploaded_at.desc`,{headers:sbHeaders});
       if(!r.ok)throw new Error(`${r.status} ${await r.text()}`);
       const data=await r.json();
-      setList(data);onCountChange(orderKey,data.length);
+      setList(data);onCountChange(orderKey,docType,data.length);
     }catch(e){setLoadErr(e.message||String(e));}
     finally{setLoading(false);}
-  },[orderKey,onCountChange]);
+  },[orderKey,docType,cfg.filter,onCountChange]);
   useEffect(()=>{load();},[load]);
 
   const setUp=(id,patch)=>setUploads(p=>p.map(u=>u.id===id?{...u,...patch}:u));
 
   const uploadOne=async(file,id)=>{
-    const ext=ocExtOf(file.name);
-    if(!OC_EXT.has(ext)){setUp(id,{status:"error",msg:`허용되지 않는 형식(.${ext||"없음"})`});return false;}
-    if(file.size>OC_MAX){setUp(id,{status:"error",msg:`20MB 초과(${ocSize(file.size)})`});return false;}
-    const path=`${ocSlug(orderKey)||"order"}/${Date.now()}_${ocSafeName(file.name)}`;
+    const err=ocValidate(file);
+    if(err){setUp(id,{status:"error",msg:err});return false;}
+    const path=`${cfg.prefix}${ocSlug(orderKey)||"order"}/${Date.now()}_${ocSafeName(file.name)}`;
     try{
-      const s=await fetch(`${SUPABASE_URL}/storage/v1/object/${OC_BUCKET}/${ocObjPath(path)}`,{method:"POST",headers:{...ocAuth,"Content-Type":file.type||"application/octet-stream","x-upsert":"false"},body:file});
-      if(!s.ok)throw new Error(`저장소 업로드 실패 ${s.status} ${await s.text()}`);
+      await ocStorageUpload(path,file);
       const r=await fetch(`${SUPABASE_URL}/rest/v1/order_contracts`,{method:"POST",headers:sbHeaders,body:JSON.stringify({
-        order_key:orderKey,product_name:group.name,order_round:group.round,factory:group.factory,
+        order_key:orderKey,product_name:group.name,order_round:group.round,factory:group.factory,doc_type:docType,
         file_path:path,file_name:file.name,file_type:file.type||null,file_size:file.size,uploaded_at:new Date().toISOString(),
       })});
       if(!r.ok){
         // 메타 저장 실패 → 고아 파일이 남지 않게 방금 올린 객체 정리(실패해도 무시)
-        fetch(`${SUPABASE_URL}/storage/v1/object/${OC_BUCKET}`,{method:"DELETE",headers:{...ocAuth,"Content-Type":"application/json"},body:JSON.stringify({prefixes:[path]})}).catch(()=>{});
+        ocStorageRemove(path).catch(()=>{});
         throw new Error(`목록 저장 실패 ${r.status} ${await r.text()}`);
       }
       setUp(id,{status:"done",msg:""});
@@ -6195,28 +6268,11 @@ function OrderContractsSection({group,onCountChange}){
     uploadClear.current=setTimeout(()=>setUploads([]),3000);
   };
 
-  const openFile=async(c)=>{
-    // await 뒤 window.open 은 팝업 차단될 수 있어 빈 탭을 먼저 연 뒤 주소를 넣는다.
-    const w=window.open("","_blank");
-    try{
-      const r=await fetch(`${SUPABASE_URL}/storage/v1/object/sign/${OC_BUCKET}/${ocObjPath(c.file_path)}`,{method:"POST",headers:{...ocAuth,"Content-Type":"application/json"},body:JSON.stringify({expiresIn:3600})});
-      if(!r.ok)throw new Error(`${r.status} ${await r.text()}`);
-      const j=await r.json();
-      const signed=j.signedURL||j.signedUrl;
-      if(!signed)throw new Error("임시 링크 없음");
-      const url=/^https?:/.test(signed)?signed:`${SUPABASE_URL}/storage/v1${signed}`;
-      if(w)w.location.href=url;else window.open(url,"_blank","noopener");
-    }catch(e){
-      if(w)w.close();
-      flash(false,`열기 실패: ${e.message||e}`);
-    }
-  };
+  const openFile=async(c)=>{const err=await ocOpenFile(c.file_path);if(err)flash(false,err);};
 
   const removeFile=async(c)=>{
-    try{
-      const s=await fetch(`${SUPABASE_URL}/storage/v1/object/${OC_BUCKET}`,{method:"DELETE",headers:{...ocAuth,"Content-Type":"application/json"},body:JSON.stringify({prefixes:[c.file_path]})});
-      if(!s.ok)throw new Error(`저장소 삭제 실패 ${s.status} ${await s.text()}`);
-    }catch(e){flash(false,e.message||String(e));return;}
+    try{await ocStorageRemove(c.file_path);}
+    catch(e){flash(false,e.message||String(e));return;}
     try{
       const r=await fetch(`${SUPABASE_URL}/rest/v1/order_contracts?id=eq.${c.id}`,{method:"DELETE",headers:sbHeaders});
       if(!r.ok)throw new Error(`목록 삭제 실패 ${r.status} ${await r.text()}`);
@@ -6231,13 +6287,24 @@ function OrderContractsSection({group,onCountChange}){
     armTimer.current=setTimeout(()=>setArmed(null),3000);
   };
 
+  // 세금계산서 발행일·공급가액 — 포커스가 빠질 때 바뀐 값만 update
+  const saveTax=async(c,field,value)=>{
+    if((c[field]??null)===value)return;
+    try{
+      const row=await ocPatchRow("order_contracts",c.id,{[field]:value});
+      setList(p=>p.map(x=>x.id===c.id?{...x,...row}:x));
+      flashRow(c.id,true,"저장됨");
+    }catch(e){flashRow(c.id,false,`저장 실패: ${e.message||e}`);}
+  };
+  const supplySum=isTax?list.reduce((s,c)=>s+(c.supply_amount!=null&&c.supply_amount!==""?Number(c.supply_amount)||0:0),0):0;
+
   const btn={border:"1px solid #E2E8F0",background:"#FFF",borderRadius:6,padding:"4px 10px",fontSize:12,fontWeight:600,cursor:"pointer",color:"#334155",whiteSpace:"nowrap"};
   const stColor={uploading:"#64748B",done:"#16A34A",error:"#DC2626"};
   const stLabel={uploading:"업로드 중…",done:"완료",error:"실패"};
 
   return(
     <div style={{marginBottom:24}}>
-      <div style={{fontSize:13,fontWeight:800,color:"#0F172A",marginBottom:10}}>계약서 <span style={{color:"#94A3B8",fontWeight:600}}>{list.length}</span></div>
+      <div style={{fontSize:13,fontWeight:800,color:"#0F172A",marginBottom:10}}>{cfg.title} <span style={{color:"#94A3B8",fontWeight:600}}>{list.length}</span></div>
 
       {/* 업로드 영역: 파일 선택 + 드래그&드롭 */}
       <div
@@ -6268,22 +6335,230 @@ function OrderContractsSection({group,onCountChange}){
       {loading?(
         <div style={{fontSize:13,color:"#94A3B8",padding:"12px 0"}}>⏳ 불러오는 중...</div>
       ):loadErr?(
-        <div style={{fontSize:13,color:"#DC2626",padding:"12px 0"}}>계약서 목록 불러오기 실패: {loadErr}</div>
+        <div style={{fontSize:13,color:"#DC2626",padding:"12px 0"}}>{cfg.title} 목록 불러오기 실패: {loadErr}</div>
       ):!list.length?(
-        <div style={{fontSize:13,color:"#94A3B8",padding:"12px 0"}}>첨부된 계약서가 없습니다</div>
+        <div style={{fontSize:13,color:"#94A3B8",padding:"12px 0"}}>{cfg.empty}</div>
       ):(
         <div style={{border:"1px solid #E2E8F0",borderRadius:10,overflow:"hidden"}}>
           {list.map((c,i)=>(
             <div key={c.id} style={{display:"flex",flexWrap:"wrap",alignItems:"center",columnGap:12,rowGap:6,padding:"9px 12px",borderTop:i?"1px solid #F1F5F9":"none",fontSize:13}}>
-              <span style={{flex:"1 1 160px",minWidth:0,fontWeight:600,color:"#0F172A",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={c.file_name}>📄 {c.file_name}</span>
+              <span style={{flex:"1 1 160px",minWidth:0,fontWeight:600,color:"#0F172A",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={c.file_name}>{cfg.icon} {c.file_name}</span>
               <span style={{width:64,textAlign:"right",color:"#64748B",fontVariantNumeric:"tabular-nums",flexShrink:0}}>{ocSize(c.file_size)}</span>
-              <span style={{width:118,textAlign:"right",color:"#64748B",fontVariantNumeric:"tabular-nums",flexShrink:0}}>{ocDate(c.uploaded_at)}</span>
+              {!isTax&&<span style={{width:118,textAlign:"right",color:"#64748B",fontVariantNumeric:"tabular-nums",flexShrink:0}}>{ocDate(c.uploaded_at)}</span>}
               <button onClick={()=>openFile(c)} style={btn}>열기</button>
               <button onClick={()=>onDelete(c)} style={{...btn,width:76,...(armed===c.id?{background:"#DC2626",borderColor:"#DC2626",color:"#FFF"}:{color:"#DC2626"})}}>{armed===c.id?"정말 삭제?":"삭제"}</button>
+              {isTax&&(
+                <div style={{flexBasis:"100%",display:"flex",flexWrap:"wrap",alignItems:"center",gap:8,fontSize:12,color:"#64748B"}}>
+                  <label style={{display:"inline-flex",alignItems:"center",gap:6}}>발행일
+                    <input type="date" key={`${c.id}|${c.issue_date||""}`} defaultValue={c.issue_date||""}
+                      onBlur={e=>saveTax(c,"issue_date",e.target.value||null)} style={{...ocInput,width:136}} />
+                  </label>
+                  <label style={{display:"inline-flex",alignItems:"center",gap:6}}>공급가액
+                    <OcAmountInput value={c.supply_amount} placeholder="0" onCommit={v=>saveTax(c,"supply_amount",v)} style={{...ocInput,width:120,textAlign:"right"}} />
+                  </label>
+                  {rowMsgs[c.id]&&<span style={ocMsgStyle(rowMsgs[c.id])}>{rowMsgs[c.id].text}</span>}
+                </div>
+              )}
             </div>
           ))}
         </div>
       )}
+      {isTax&&<div style={{marginTop:8,textAlign:"right",fontSize:13,color:"#64748B"}}>공급가액 합계 <b style={{color:"#0F172A",fontVariantNumeric:"tabular-nums"}}>₩{supplySum.toLocaleString()}</b></div>}
+    </div>
+  );
+}
+
+// ─── 차수별 지출결의서 (order_expense_docs, 첨부는 order-contracts 버킷 expense/ 아래) ───
+const EX_KINDS=["계약금","중도금","잔금","기타"];
+const EX_FIELDS=["kind","doc_no","amount","doc_date","memo"];
+const exNorm=(f,v)=>f==="amount"?(v==null||v===""||!Number.isFinite(Number(v))?null:Number(v)):(v==null||v===""?null:String(v));
+const exSnap=r=>Object.fromEntries(EX_FIELDS.map(f=>[f,exNorm(f,r[f])]));
+const exKindIdx=k=>{const i=EX_KINDS.indexOf(k);return i<0?EX_KINDS.length:i;};
+// 구분(계약금→중도금→잔금→기타) → 일자(빈 일자는 뒤)
+const exSort=(a,b)=>exKindIdx(a.kind)-exKindIdx(b.kind)||String(a.doc_date||"9999").localeCompare(String(b.doc_date||"9999"));
+const EX_FILE_NULL={file_path:null,file_name:null,file_type:null,file_size:null};
+
+function OrderExpenseSection({group,onCountChange}){
+  const orderKey=ocOrderKey(group);
+  // _key = React key(신규 행은 임시값, DB 행은 id) · id 는 insert 후 생김 · _saved = 마지막 저장값(변경 감지)
+  const[rows,setRows]=useState([]);
+  const rowsRef=useRef(rows);
+  rowsRef.current=rows;
+  const[loading,setLoading]=useState(true);
+  const[loadErr,setLoadErr]=useState("");
+  const[msgs,flashRow]=useRowFlash();
+  const[armed,setArmed]=useState(null);
+  const armTimer=useRef(null);
+  const[busy,setBusy]=useState({}); // 첨부 업로드·삭제 중인 _key
+  const inflight=useRef({}); // _key → 진행 중인 저장(같은 신규 행이 두 번 insert 되지 않게)
+  const fileRefs=useRef({});
+  useEffect(()=>()=>clearTimeout(armTimer.current),[]);
+
+  const load=useCallback(async()=>{
+    setLoading(true);setLoadErr("");
+    try{
+      const r=await fetch(`${SUPABASE_URL}/rest/v1/order_expense_docs?select=*&order_key=eq.${encodeURIComponent(orderKey)}&order=created_at.asc`,{headers:sbHeaders});
+      if(!r.ok)throw new Error(`${r.status} ${await r.text()}`);
+      const data=await r.json();
+      setRows(data.map(x=>({...x,_key:x.id,_saved:exSnap(x)})));
+    }catch(e){setLoadErr(e.message||String(e));}
+    finally{setLoading(false);}
+  },[orderKey]);
+  useEffect(()=>{load();},[load]);
+  // 저장된 건수 → 표의 💳 아이콘 개수
+  const savedCount=rows.filter(r=>r.id).length;
+  useEffect(()=>{if(!loading&&!loadErr)onCountChange(orderKey,"expense",savedCount);},[savedCount,loading,loadErr,orderKey,onCountChange]);
+
+  // state 와 ref 를 함께 갱신 — 직후 saveRow 가 최신 값을 읽도록
+  const applyRows=fn=>{rowsRef.current=fn(rowsRef.current);setRows(fn);};
+  const patchRow=(key,obj)=>applyRows(arr=>arr.map(r=>r._key===key?{...r,...obj}:r));
+  const addRow=()=>{const key=`new-${Date.now()}`;applyRows(arr=>[...arr,{_key:key,kind:EX_KINDS[0],doc_no:"",amount:null,doc_date:"",memo:"",...EX_FILE_NULL,_saved:{}}]);};
+
+  // 행 저장 — 신규는 insert(차수 정보 포함), 기존은 바뀐 칸만 update. 저장된 행 id 반환(실패 null).
+  // force=false 면 아무것도 입력 안 한 신규 행은 저장하지 않는다.
+  const saveRow=async(key,force=false)=>{
+    while(inflight.current[key])await inflight.current[key];
+    const run=(async()=>{
+      const r=rowsRef.current.find(x=>x._key===key);
+      if(!r)return null;
+      const vals=exSnap(r);
+      if(r.id){
+        const changed=EX_FIELDS.filter(f=>vals[f]!==(r._saved[f]??null));
+        if(!changed.length)return r.id;
+        try{
+          await ocPatchRow("order_expense_docs",r.id,Object.fromEntries(changed.map(f=>[f,vals[f]])));
+          patchRow(key,{_saved:{...r._saved,...vals}});
+          flashRow(key,true,"저장됨");
+          return r.id;
+        }catch(e){flashRow(key,false,`저장 실패: ${e.message||e}`);return null;}
+      }
+      if(!force&&EX_FIELDS.every(f=>f==="kind"||vals[f]==null))return null;
+      try{
+        const res=await fetch(`${SUPABASE_URL}/rest/v1/order_expense_docs`,{method:"POST",headers:sbHeaders,body:JSON.stringify({
+          order_key:orderKey,product_name:group.name,order_round:group.round,factory:group.factory,...vals,created_by:"dashboard",
+        })});
+        if(!res.ok)throw new Error(`${res.status} ${await res.text()}`);
+        const saved=(await res.json())[0];
+        if(!saved||!saved.id)throw new Error("저장된 행 없음");
+        patchRow(key,{id:saved.id,created_at:saved.created_at,_saved:vals});
+        flashRow(key,true,"저장됨");
+        return saved.id;
+      }catch(e){flashRow(key,false,`저장 실패: ${e.message||e}`);return null;}
+    })();
+    inflight.current[key]=run;
+    try{return await run;}finally{if(inflight.current[key]===run)delete inflight.current[key];}
+  };
+
+  const setBusyKey=(key,on)=>setBusy(p=>{const n={...p};if(on)n[key]=true;else delete n[key];return n;});
+  const attach=async(key,file)=>{
+    if(!file)return;
+    const err=ocValidate(file);
+    if(err){flashRow(key,false,err);return;}
+    setBusyKey(key,true);
+    try{
+      const id=await saveRow(key,true);
+      if(!id)return;
+      const path=`expense/${ocSlug(orderKey)||"order"}/${Date.now()}_${ocSafeName(file.name)}`;
+      await ocStorageUpload(path,file);
+      const meta={file_path:path,file_name:file.name,file_type:file.type||null,file_size:file.size};
+      try{await ocPatchRow("order_expense_docs",id,meta);}
+      catch(e){ocStorageRemove(path).catch(()=>{});throw e;}
+      patchRow(key,meta);
+      flashRow(key,true,"첨부됨");
+    }catch(e){flashRow(key,false,`첨부 실패: ${e.message||e}`);}
+    finally{setBusyKey(key,false);}
+  };
+  const detach=async(r)=>{
+    setBusyKey(r._key,true);
+    try{
+      await ocStorageRemove(r.file_path);
+      await ocPatchRow("order_expense_docs",r.id,EX_FILE_NULL);
+      patchRow(r._key,EX_FILE_NULL);
+      flashRow(r._key,true,"첨부 삭제됨");
+    }catch(e){flashRow(r._key,false,`첨부 삭제 실패: ${e.message||e}`);}
+    finally{setBusyKey(r._key,false);}
+  };
+  // 행 삭제 — 첨부가 있으면 Storage 먼저 삭제, 실패하면 행은 유지
+  const removeRow=async(key)=>{
+    if(inflight.current[key])await inflight.current[key];
+    const r=rowsRef.current.find(x=>x._key===key);
+    if(!r)return;
+    if(!r.id){applyRows(arr=>arr.filter(x=>x._key!==key));return;}
+    if(r.file_path){
+      try{await ocStorageRemove(r.file_path);}
+      catch(e){flashRow(key,false,e.message||String(e));return;}
+    }
+    try{
+      const res=await fetch(`${SUPABASE_URL}/rest/v1/order_expense_docs?id=eq.${encodeURIComponent(r.id)}`,{method:"DELETE",headers:sbHeaders});
+      if(!res.ok)throw new Error(`삭제 실패 ${res.status} ${await res.text()}`);
+      applyRows(arr=>arr.filter(x=>x._key!==key));
+    }catch(e){
+      if(r.file_path)patchRow(key,EX_FILE_NULL); // 첨부는 이미 지워졌으므로 행에서도 비움
+      flashRow(key,false,e.message||String(e));
+    }
+  };
+  // 2단계 인라인 확인(3초 내 재클릭)
+  const confirmThen=(id,fn)=>{
+    clearTimeout(armTimer.current);
+    if(armed===id){setArmed(null);fn();return;}
+    setArmed(id);
+    armTimer.current=setTimeout(()=>setArmed(null),3000);
+  };
+
+  // 저장된 행은 구분→일자 정렬, 아직 저장 안 된 신규 행은 추가한 순서대로 맨 아래
+  const shown=[...rows.filter(r=>r.id).sort(exSort),...rows.filter(r=>!r.id)];
+  const total=rows.reduce((s,r)=>s+(exNorm("amount",r.amount)||0),0);
+  const btn={border:"1px solid #E2E8F0",background:"#FFF",borderRadius:6,padding:"4px 10px",fontSize:12,fontWeight:600,cursor:"pointer",color:"#334155",whiteSpace:"nowrap"};
+  const armedBtn={background:"#DC2626",borderColor:"#DC2626",color:"#FFF"};
+
+  return(
+    <div style={{marginBottom:24}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+        <div style={{fontSize:13,fontWeight:800,color:"#0F172A"}}>지출결의서 <span style={{color:"#94A3B8",fontWeight:600}}>{savedCount}</span></div>
+        {!loading&&!loadErr&&<button onClick={addRow} style={{...btn,background:"#2563EB",borderColor:"#2563EB",color:"#FFF"}}>+ 추가</button>}
+      </div>
+      {loading?(
+        <div style={{fontSize:13,color:"#94A3B8",padding:"12px 0"}}>⏳ 불러오는 중...</div>
+      ):loadErr?(
+        <div style={{fontSize:13,color:"#DC2626",padding:"12px 0"}}>지출결의서 불러오기 실패: {loadErr}</div>
+      ):!shown.length?(
+        <div style={{fontSize:13,color:"#94A3B8",padding:"12px 0"}}>등록된 지출결의서가 없습니다</div>
+      ):(
+        <div style={{border:"1px solid #E2E8F0",borderRadius:10,overflow:"hidden"}}>
+          {shown.map((r,i)=>{
+            const k=r._key;
+            const isBusy=!!busy[k];
+            return(
+            <div key={k} style={{padding:"10px 12px",borderTop:i?"1px solid #F1F5F9":"none",background:r.id?"#FFF":"#FFFBEB"}}>
+              <div style={{display:"flex",flexWrap:"wrap",alignItems:"center",gap:6}}>
+                <select value={r.kind||""} onChange={e=>{patchRow(k,{kind:e.target.value});saveRow(k);}} style={{...ocInput,width:84,padding:"0 4px"}}>
+                  {EX_KINDS.map(x=><option key={x} value={x}>{x}</option>)}
+                </select>
+                <input type="text" value={r.doc_no||""} placeholder="하이웍스 기안 문서번호" onChange={e=>patchRow(k,{doc_no:e.target.value})} onBlur={()=>saveRow(k)} style={{...ocInput,flex:"1 1 150px"}} />
+                <OcAmountInput value={r.amount} placeholder="금액" onCommit={v=>{patchRow(k,{amount:v});saveRow(k);}} style={{...ocInput,width:110,textAlign:"right"}} />
+                <input type="date" value={r.doc_date||""} onChange={e=>patchRow(k,{doc_date:e.target.value})} onBlur={()=>saveRow(k)} style={{...ocInput,width:132}} />
+                <input type="text" value={r.memo||""} placeholder="비고" onChange={e=>patchRow(k,{memo:e.target.value})} onBlur={()=>saveRow(k)} style={{...ocInput,flex:"1 1 110px"}} />
+              </div>
+              <div style={{display:"flex",flexWrap:"wrap",alignItems:"center",gap:8,marginTop:6,fontSize:12}}>
+                {r.file_path?(<>
+                  <span style={{flex:"0 1 auto",minWidth:0,maxWidth:"100%",color:"#334155",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={r.file_name||""}>📎 {r.file_name||"첨부"} <span style={{color:"#94A3B8",fontWeight:500}}>{ocSize(r.file_size)}</span></span>
+                  <button onClick={async()=>{const err=await ocOpenFile(r.file_path);if(err)flashRow(k,false,err);}} style={btn}>열기</button>
+                  <button disabled={isBusy} onClick={()=>confirmThen(`file:${k}`,()=>detach(r))} style={{...btn,color:"#DC2626",...(armed===`file:${k}`?armedBtn:{})}}>{armed===`file:${k}`?"정말 삭제?":"첨부 삭제"}</button>
+                </>):(<>
+                  <input ref={el=>{if(el)fileRefs.current[k]=el;else delete fileRefs.current[k];}} type="file" accept={[...OC_EXT].map(x=>"."+x).join(",")} style={{display:"none"}}
+                    onChange={e=>{const f=e.target.files&&e.target.files[0];e.target.value="";attach(k,f);}} />
+                  <button disabled={isBusy} onClick={()=>fileRefs.current[k]?.click()} style={btn}>{isBusy?"업로드 중…":"파일 첨부"}</button>
+                  <span style={{color:"#94A3B8"}}>선택 · 최대 20MB</span>
+                </>)}
+                {msgs[k]&&<span style={ocMsgStyle(msgs[k])}>{msgs[k].text}</span>}
+                <span style={{flex:1}} />
+                <button disabled={isBusy} onClick={()=>confirmThen(`row:${k}`,()=>removeRow(k))} style={{...btn,width:76,color:"#DC2626",...(armed===`row:${k}`?armedBtn:{})}}>{armed===`row:${k}`?"정말 삭제?":"삭제"}</button>
+              </div>
+            </div>);
+          })}
+        </div>
+      )}
+      {!loading&&!loadErr&&<div style={{marginTop:8,textAlign:"right",fontSize:13,color:"#64748B"}}>지출결의 합계 <b style={{color:"#0F172A",fontVariantNumeric:"tabular-nums"}}>₩{total.toLocaleString()}</b></div>}
     </div>
   );
 }
@@ -6341,33 +6616,36 @@ function OrderSheetDashboard(){
     return()=>{alive=false;};
   },[]);
 
-  // 차수별 계약서 개수 { order_key: n } — order_contracts 를 order_key 로 group by 해 한 번에 조회(행별 쿼리 금지).
-  // PostgREST 집계가 꺼져 있으면 order_key 만 페이징 조회해 클라이언트에서 센다. 실패해도 표는 정상 동작.
+  // 차수별 보유 문서 개수 { order_key: {contract,tax_invoice,expense} } — order_contracts 는 order_key+doc_type,
+  // order_expense_docs 는 order_key 로 각각 한 번씩 group by 조회(행별 쿼리 금지).
+  // PostgREST 집계가 꺼져 있으면 키 컬럼만 페이징 조회해 클라이언트에서 센다. 실패해도 표는 정상 동작.
   const[ocCounts,setOcCounts]=useState({});
   useEffect(()=>{
     let alive=true;
     (async()=>{
-      try{
-        const m={};
-        const r=await fetch(`${SUPABASE_URL}/rest/v1/order_contracts?select=order_key,count()`,{headers:sbHeaders});
-        if(r.ok){
-          for(const it of await r.json())if(it.order_key)m[it.order_key]=Number(it.count)||0;
-        }else{
-          const PAGE=1000;
-          for(let off=0;;off+=PAGE){
-            const r2=await fetch(`${SUPABASE_URL}/rest/v1/order_contracts?select=order_key&limit=${PAGE}&offset=${off}`,{headers:sbHeaders});
-            if(!r2.ok)break;
-            const chunk=await r2.json();
-            for(const it of chunk)if(it.order_key)m[it.order_key]=(m[it.order_key]||0)+1;
-            if(chunk.length<PAGE)break;
-          }
+      const m={};
+      const add=(k,t,n)=>{if(!k)return;(m[k]||(m[k]={}))[t]=(m[k][t]||0)+n;};
+      const countBy=async(table,cols,typeOf)=>{
+        const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=${cols},count()`,{headers:sbHeaders});
+        if(r.ok){for(const it of await r.json())add(it.order_key,typeOf(it),Number(it.count)||0);return;}
+        const PAGE=1000;
+        for(let off=0;;off+=PAGE){
+          const r2=await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=${cols}&limit=${PAGE}&offset=${off}`,{headers:sbHeaders});
+          if(!r2.ok)break;
+          const chunk=await r2.json();
+          for(const it of chunk)add(it.order_key,typeOf(it),1);
+          if(chunk.length<PAGE)break;
         }
-        if(alive)setOcCounts(m);
-      }catch{/* 개수 표시 없이 진행 */}
+      };
+      await Promise.all([
+        countBy("order_contracts","order_key,doc_type",it=>it.doc_type||"contract").catch(()=>{}),
+        countBy("order_expense_docs","order_key",()=>"expense").catch(()=>{}),
+      ]);
+      if(alive)setOcCounts(m);
     })();
     return()=>{alive=false;};
   },[]);
-  const onOcCount=useCallback((k,n)=>setOcCounts(p=>p[k]===n?p:{...p,[k]:n}),[]);
+  const onOcCount=useCallback((k,t,n)=>setOcCounts(p=>((p[k]&&p[k][t])||0)===n?p:{...p,[k]:{...p[k],[t]:n}}),[]);
 
   // ── 필터(연도·시즌·공장·검색) ── "" = 전체
   const[fYear,setFYear]=useState("");
@@ -6598,7 +6876,7 @@ function OrderSheetDashboard(){
                     <span style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}>
                       {thumb(g.code,34)}
                       <span style={{minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.name}</span>
-                      {ocCounts[ocOrderKey(g)]>0&&<span title="첨부된 계약서" style={{flexShrink:0,fontSize:12,fontWeight:700,color:"#2563EB"}}>📎{ocCounts[ocOrderKey(g)]}</span>}
+                      {(()=>{const c=ocCounts[ocOrderKey(g)]||{};return OC_BADGES.filter(([t])=>c[t]>0).map(([t,ic,l])=><span key={t} title={l} style={{flexShrink:0,fontSize:12,fontWeight:700,color:"#2563EB"}}>{ic}{c[t]}</span>);})()}
                     </span>
                   </Td>
                   {/* 덩어리1 일정 */}
@@ -6665,7 +6943,9 @@ function OrderSheetDashboard(){
               </div>
 
               {/* 차수별 계약서 첨부 — key 로 차수 전환 시 상태 초기화 */}
-              <OrderContractsSection key={ocOrderKey(selGroup)} group={selGroup} onCountChange={onOcCount} />
+              <OrderContractsSection key={ocOrderKey(selGroup)} group={selGroup} docType="contract" onCountChange={onOcCount} />
+              <OrderContractsSection key={`tax|${ocOrderKey(selGroup)}`} group={selGroup} docType="tax_invoice" onCountChange={onOcCount} />
+              <OrderExpenseSection key={`exp|${ocOrderKey(selGroup)}`} group={selGroup} onCountChange={onOcCount} />
 
               {/* 옵션 리스트 — 옵션 1개 = 1행 표(썸네일 없음). 대표 썸네일은 드로어 헤더에만 둔다. */}
               <div style={{fontSize:13,fontWeight:800,color:"#0F172A",marginBottom:10}}>옵션별 상세 <span style={{color:"#94A3B8",fontWeight:600}}>{selGroup.items.length}</span></div>
