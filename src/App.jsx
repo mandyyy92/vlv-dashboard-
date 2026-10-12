@@ -48,6 +48,7 @@ const fmtOption=(v)=>String(v||"").trim().replace(/^\[|\]$/g,"").trim().replace(
 // date = show_date (뷰 계산: 전량 입고=실입고일, 잔량 있음=조정입고일→입고예정일).
 const mapCalendarRow=(r,source)=>({
   id:`${source}-${r.row_key}`,
+  rowKey:r.row_key,
   groupKey:r.group_key||"",
   source,
   date:r.show_date,
@@ -102,6 +103,44 @@ async function saveOrderStatus(groupKey,source,status){
     body:JSON.stringify({group_key:groupKey,source,status,updated_at:new Date().toISOString(),updated_by:"dashboard"}),
   });
   if(!r.ok)throw new Error(`저장 실패 (${r.status})`);
+}
+
+// 조정입고일 변경 — ① sheet_orders / sheet_print_orders.revised_eta 즉시 update(화면 반영)
+// ② sheet_edit_queue insert → Apps Script 가 10분 주기로 구글 시트 '조정입고일' 칸에 반영.
+// newValue: 'YYYY-MM-DD' | null(지움). ② 가 실패하면 ① 을 행별 이전 값으로 되돌린다(best-effort).
+const ETA_LOCKED_MSG="입고 완료 건은 날짜를 옮길 수 없습니다";
+const SHEET_TABLE={order:"sheet_orders",print:"sheet_print_orders"};
+const rowKeyIn=(keys)=>`row_key=in.(${keys.map(k=>encodeURIComponent(`"${String(k).replace(/["\\]/g,"\\$&")}"`)).join(",")})`;
+async function patchRevisedEta(source,rowKeys,value){
+  const r=await fetch(`${SUPABASE_URL}/rest/v1/${SHEET_TABLE[source]}?${rowKeyIn(rowKeys)}&select=row_key`,{
+    method:"PATCH",headers:sbHeaders,body:JSON.stringify({revised_eta:value}),
+  });
+  if(!r.ok)throw new Error(`조정입고일 저장 실패 (${r.status})`);
+  const rows=await r.json();
+  if(!Array.isArray(rows)||rows.length===0)throw new Error("조정입고일 저장 실패 (변경된 행 없음)"); // RLS 등으로 0행 update 된 경우
+}
+async function saveRevisedEta(source,rowKeys,newValue,prevByKey){
+  await patchRevisedEta(source,rowKeys,newValue);
+  const q=await fetch(`${SUPABASE_URL}/rest/v1/sheet_edit_queue`,{
+    method:"POST",headers:{...sbHeaders,Prefer:"return=minimal"},
+    body:JSON.stringify(rowKeys.map(k=>({target:source,row_key:k,field:"revised_eta",new_value:newValue,requested_by:"dashboard"}))),
+  });
+  if(!q.ok){
+    const byPrev=new Map();
+    rowKeys.forEach(k=>{const p=prevByKey.get(k)??null;if(!byPrev.has(p))byPrev.set(p,[]);byPrev.get(p).push(k);});
+    await Promise.all([...byPrev].map(([p,keys])=>patchRevisedEta(source,keys,p).catch(e=>console.warn("[revised_eta] 복구 실패",e))));
+    throw new Error(`시트 반영 요청 실패 (${q.status})`);
+  }
+}
+// sheet_edit_queue 의 pending / error 행 → {row_key:{status,message}} (같은 row_key 는 error 우선). 실패해도 빈 객체.
+async function fetchSheetQueue(source){
+  try{
+    const r=await fetch(`${SUPABASE_URL}/rest/v1/sheet_edit_queue?select=row_key,status,message&target=eq.${source}&status=in.(pending,error)`,{headers:sbHeaders});
+    if(!r.ok){console.warn("[sheet_edit_queue] 응답 실패",r.status);return{};}
+    const m={};
+    ((await r.json())||[]).forEach(x=>{const k=String(x.row_key);if(!m[k]||x.status==="error")m[k]={status:x.status,message:x.message||""};});
+    return m;
+  }catch(e){console.warn("[sheet_edit_queue] 호출 실패",e);return{};}
 }
 const getSupColor=(s)=>{
   if(SUPPLIER_COLORS[s])return SUPPLIER_COLORS[s];
@@ -753,7 +792,7 @@ const CalThumb=({src,size})=>{
   useEffect(()=>{setFailed(false);},[src]);
   const box={display:"block",width:size,height:size,borderRadius:4,background:"#F3F4F6",flexShrink:0};
   return src&&!failed
-    ?<img src={src} alt="" loading="lazy" decoding="async" onError={()=>setFailed(true)} style={{...box,objectFit:"cover"}} />
+    ?<img src={src} alt="" draggable={false} loading="lazy" decoding="async" onError={()=>setFailed(true)} style={{...box,objectFit:"cover"}} />
     :<div style={box} />;
 };
 
@@ -775,6 +814,15 @@ function ScheduleTab(){
   const[statusError,setStatusError]=useState(null); // {key,msg} 상태 저장 실패 — 상세 패널에 인라인 표시
   const[selectedCard,setSelectedCard]=useState(null); // 프린팅 외주: 클릭한 카드(업체·차수) key — null 이면 날짜 전체
   const[openBlocks,setOpenBlocks]=useState({}); // 프린팅 외주 상세: 펼친 상품 블록 {group_key:true}
+  const[sheetQueue,setSheetQueue]=useState({}); // sheet_edit_queue pending/error {row_key:{status,message}} — 캘린더 로드 시 조회
+  const[dragging,setDragging]=useState(null); // 드래그 중인 카드 {key,date,events}
+  const[dropDay,setDropDay]=useState(null); // 드래그가 올라가 있는 날짜 칸
+  const[etaMsg,setEtaMsg]=useState(null); // 조정입고일 변경 결과 {ok,text} — 상단 인라인, 3초 후 사라짐
+  const[etaInputRev,setEtaInputRev]=useState(0); // 서랍 date input 리마운트 키 — 저장 실패 시 원래 값으로 복원
+  const etaTimerRef=useRef(null); // 서랍 date input 입력 debounce
+  const calEventsRef=useRef([]);
+  calEventsRef.current=calEvents;
+  useEffect(()=>{if(!etaMsg)return;const t=setTimeout(()=>setEtaMsg(null),3000);return()=>clearTimeout(t);},[etaMsg]);
 
   // inventory 상품명 ilike 검색 → "베이스 아이템(한글) + 상품명(영문)" 파싱
   const searchBaseItem=async(q)=>{
@@ -838,8 +886,8 @@ function ScheduleTab(){
     const seq=++calReqRef.current;
     setCalLoading(true);
     try{
-      const rows=await fetchCalendarEvents(monthRange.from,monthRange.to,[track]); // 선택된 쪽만 조회
-      if(seq===calReqRef.current)setCalEvents(rows);
+      const[rows,queue]=await Promise.all([fetchCalendarEvents(monthRange.from,monthRange.to,[track]),fetchSheetQueue(track)]); // 선택된 쪽만 조회
+      if(seq===calReqRef.current){setCalEvents(rows);setSheetQueue(queue);}
     }finally{if(seq===calReqRef.current)setCalLoading(false);}
   },[monthRange.from,monthRange.to,track]);
   const reloadUpcoming=useCallback(async()=>{
@@ -992,6 +1040,52 @@ function ScheduleTab(){
     }finally{setStatusBusy(null);}
   };
 
+  // 조정입고일 변경(캘린더 드래그 · 서랍 date input 공통) — 낙관적 반영 후 저장, 실패 시 원래 날짜로 되돌림.
+  const changeRevisedEta=async(events,newValue)=>{
+    const source=events[0]?.source;
+    const rowKeys=[...new Set(events.map(e=>e.rowKey).filter(k=>k!=null&&k!==""))];
+    if(!source||rowKeys.length===0)return;
+    const keySet=new Set(rowKeys.map(String));
+    const prevByKey=new Map(events.map(e=>[e.rowKey,e.revisedEta||null]));
+    const prevCal=calEvents,prevUp=upcomingEvents;
+    // show_date: 잔량 있음 → 조정입고일 → 입고예정일 (전량 입고 행은 실입고일 그대로)
+    const patch=(arr)=>arr.map(e=>e.source===source&&keySet.has(String(e.rowKey))?{...e,revisedEta:newValue,date:e.remain>0?(newValue||e.eta):e.date}:e);
+    setCalEvents(patch);setUpcomingEvents(patch);
+    try{
+      await saveRevisedEta(source,rowKeys,newValue,prevByKey);
+      setSheetQueue(p=>{const n={...p};keySet.forEach(k=>{n[k]={status:"pending",message:""};});return n;});
+      setEtaMsg({ok:true,text:"조정입고일 변경됨 · 시트 반영 대기"});
+      reloadCalendar();reloadUpcoming();reloadDelay();
+    }catch(e){
+      console.error("[revised_eta] 저장 실패",e);
+      setCalEvents(prevCal);setUpcomingEvents(prevUp);
+      setEtaInputRev(v=>v+1);
+      setEtaMsg({ok:false,text:"날짜 변경 실패 — 다시 시도해주세요"});
+    }
+  };
+  // 카드 드래그 — 잔량 0 카드는 드래그 불가
+  const cardDragProps=(g,dayStr)=>g.totalRemain>0?{
+    draggable:true,
+    onDragStart:e=>{e.stopPropagation();e.dataTransfer.effectAllowed="move";try{e.dataTransfer.setData("text/plain",g.key);}catch(_){}setDragging({key:g.key,date:dayStr,events:g.events});},
+    onDragEnd:()=>{setDragging(null);setDropDay(null);},
+  }:{draggable:false,onDragStart:e=>e.preventDefault()};
+  const cardDragStyle=(g,dayStr)=>({cursor:g.totalRemain>0?"grab":"default",opacity:dragging&&dragging.key===g.key&&dragging.date===dayStr?0.5:1});
+  const dropOnDay=(dayStr)=>{
+    const d=dragging;
+    setDragging(null);setDropDay(null);
+    if(!d||d.date===dayStr)return;
+    changeRevisedEta(d.events,dayStr);
+  };
+  // 시트 반영 상태 뱃지 — error 우선(툴팁=message), 그다음 pending
+  const queueBadge=(events)=>{
+    const qs=events.map(e=>sheetQueue[String(e.rowKey)]).filter(Boolean);
+    const errs=qs.filter(q=>q.status==="error");
+    const base={flexShrink:0,fontSize:10,fontWeight:700,borderRadius:3,padding:"0 4px",whiteSpace:"nowrap"};
+    if(errs.length)return <span title={[...new Set(errs.map(q=>q.message).filter(Boolean))].join(" / ")||"시트 반영 실패"} style={{...base,color:"#FFF",background:"#DC2626"}}>시트 반영 실패</span>;
+    if(qs.length)return <span title="구글 시트 반영 대기 중 (10분 주기)" style={{...base,color:"#64748B",background:"#F1F5F9",border:"1px solid #E2E8F0"}}>시트 대기</span>;
+    return null;
+  };
+
   // 캘린더 검색 드롭다운 — 선택된 쪽의 이번주 이후 전체(현재 달 무관)에서 검색, "입고 완료" 제외, group_key 그룹, date 오름차순
   const calSearchResults=(()=>{
     if(!calSearch.trim())return null;
@@ -1005,6 +1099,7 @@ function ScheduleTab(){
   };
 
   return(<>
+    {etaMsg&&<div style={{position:"fixed",top:16,left:"50%",transform:"translateX(-50%)",zIndex:1100,padding:"10px 18px",borderRadius:10,fontSize:14,fontWeight:700,boxShadow:"0 8px 24px rgba(15,23,42,0.18)",...(etaMsg.ok?{background:"#DCFCE7",color:"#15803D",border:"1px solid #86EFAC"}:{background:"#FEE2E2",color:"#B91C1C",border:"1px solid #FCA5A5"})}}>{etaMsg.text}</div>}
     {/* 헤더 */}
     <div style={{background:"#FFF",borderRadius:14,padding:"20px 28px",border:"1px solid #E2E8F0",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
       <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -1183,8 +1278,12 @@ function ScheduleTab(){
           const dow=(firstDayOfWeek+i)%7;
           const cellBg=isToday?"#EFF6FF":"#FFF";
           // 셀 클릭 → 날짜 상세 패널. 카드 최대 3개 + "+N개 더".
-          return(<div key={day} style={{background:cellBg,minHeight:110,padding:6,position:"relative",borderTop:isToday?"2px solid #3B82F6":"none",transition:"background 0.15s",cursor:events.length>0?"pointer":"default"}}
-            onClick={()=>{if(events.length>0){setSelectedCard(null);setSelectedDay(dayStr);}}}>
+          return(<div key={day} style={{background:cellBg,minHeight:110,padding:6,position:"relative",borderTop:isToday?"2px solid #3B82F6":"none",transition:"background 0.15s",cursor:events.length>0?"pointer":"default",
+              ...(dragging?{outline:dropDay===dayStr?"2px solid #3B82F6":"1px dashed #CBD5E1",outlineOffset:-2,...(dropDay===dayStr?{background:"#EFF6FF"}:{})}:{})}}
+            onClick={()=>{if(events.length>0){setSelectedCard(null);setSelectedDay(dayStr);}}}
+            onDragOver={e=>{if(!dragging)return;e.preventDefault();e.dataTransfer.dropEffect="move";if(dropDay!==dayStr)setDropDay(dayStr);}}
+            onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget))setDropDay(p=>p===dayStr?null:p);}}
+            onDrop={e=>{e.preventDefault();dropOnDay(dayStr);}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
               <span style={{fontSize:14,fontWeight:isToday?800:500,color:isToday?"#2563EB":dow===0?"#DC2626":dow===6?"#2563EB":"#334155"}}>{day}</span>
               {groups.length>0&&<span style={{display:"inline-flex",alignItems:"center",gap:4}}>
@@ -1197,9 +1296,9 @@ function ScheduleTab(){
               if(track==="print"){
                 const pc=g.mixed?{bg:"#F1F5F9",color:"#64748B"}:(statusColor(g.status)||{bg:"#EDE9FE",color:"#6D28D9"});
                 return(
-                <div key={g.key} onClick={e=>{e.stopPropagation();setSelectedCard(g.key);setSelectedDay(dayStr);}}
-                  title={`${g.status||"발주"}${g.delayed?" · 지연":""}${g.revised?" · 조정":""} · ${[...new Set(g.events.map(e=>e.displayName||e.item||""))].join(", ")}`}
-                  style={{display:"flex",gap:6,alignItems:"center",padding:"6px 7px",borderRadius:4,marginBottom:2,background:pc.bg,border:"1px solid "+pc.color+"55",...(g.delayed?{borderLeft:"3px solid #DC2626"}:{}),fontSize:12,lineHeight:1.3,userSelect:"none",cursor:"pointer"}}>
+                <div key={g.key} onClick={e=>{e.stopPropagation();setSelectedCard(g.key);setSelectedDay(dayStr);}} {...cardDragProps(g,dayStr)}
+                  title={g.totalRemain<=0?ETA_LOCKED_MSG:`${g.status||"발주"}${g.delayed?" · 지연":""}${g.revised?" · 조정":""} · ${[...new Set(g.events.map(e=>e.displayName||e.item||""))].join(", ")}`}
+                  style={{display:"flex",gap:6,alignItems:"center",padding:"6px 7px",borderRadius:4,marginBottom:2,background:pc.bg,border:"1px solid "+pc.color+"55",...(g.delayed?{borderLeft:"3px solid #DC2626"}:{}),fontSize:12,lineHeight:1.3,userSelect:"none",cursor:"pointer",...cardDragStyle(g,dayStr)}}>
                   <span style={{display:"flex",flexShrink:0}}>
                     {g.images.length>0
                       ?g.images.map((u,k)=><span key={u} style={{display:"block",marginLeft:k?-8:0,position:"relative",zIndex:3-k,borderRadius:4,boxShadow:"0 0 0 1.5px #FFF"}}><CalThumb src={u} size={24} /></span>)
@@ -1210,6 +1309,7 @@ function ScheduleTab(){
                       <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.status||"발주"}</span>
                       {g.delayed&&<span style={{flexShrink:0,fontSize:10,fontWeight:800,color:"#FFF",background:"#DC2626",borderRadius:3,padding:"0 4px"}}>지연</span>}
                       {g.revised&&<span style={{flexShrink:0,fontSize:10,fontWeight:700,color:"#475569",background:"#E2E8F0",borderRadius:3,padding:"0 4px"}}>조정</span>}
+                      {queueBadge(g.events)}
                     </div>
                     <div style={{fontWeight:700,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginTop:4}}>{g.title}</div>
                     <div style={{fontSize:11,fontWeight:600,color:g.totalRemain>0?"#C2410C":"#0F766E",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>품목 {g.itemCount}종 · {g.totalRemain>0?`잔량 ${g.totalRemain.toLocaleString()}장`:`입고 ${g.totalReceived.toLocaleString()}장`}</div>
@@ -1221,14 +1321,15 @@ function ScheduleTab(){
               const delayed=g.delayed;
               const revised=!!ev.revisedEta&&ev.date===ev.revisedEta&&ev.revisedEta!==ev.eta; // 조정입고일로 떠 있는 카드
               return(
-                <div key={g.key} title={`${ev.status||"발주"}${delayed?" · 지연":""}${revised?` · 조정 (예정 ${ev.eta||"-"})`:""}${ev.code?" · "+ev.code:""}`}
-                  style={{display:"flex",gap:6,alignItems:"center",padding:"6px 7px",borderRadius:4,marginBottom:2,background:nc.bg,border:"1px solid "+nc.color+"55",...(delayed?{borderLeft:"3px solid #DC2626"}:{}),fontSize:12,lineHeight:1.3,userSelect:"none"}}>
+                <div key={g.key} {...cardDragProps(g,dayStr)} title={g.totalRemain<=0?ETA_LOCKED_MSG:`${ev.status||"발주"}${delayed?" · 지연":""}${revised?` · 조정 (예정 ${ev.eta||"-"})`:""}${ev.code?" · "+ev.code:""}`}
+                  style={{display:"flex",gap:6,alignItems:"center",padding:"6px 7px",borderRadius:4,marginBottom:2,background:nc.bg,border:"1px solid "+nc.color+"55",...(delayed?{borderLeft:"3px solid #DC2626"}:{}),fontSize:12,lineHeight:1.3,userSelect:"none",...cardDragStyle(g,dayStr)}}>
                   <CalThumb src={g.imageUrl} size={28} />
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{display:"flex",alignItems:"center",gap:4,color:nc.color,fontWeight:600,fontSize:11,minWidth:0}}>
                       <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ev.statusManual&&<span title="수동 지정됨">• </span>}{ev.status||"발주"}</span>
                       {delayed&&<span style={{flexShrink:0,fontSize:10,fontWeight:800,color:"#FFF",background:"#DC2626",borderRadius:3,padding:"0 4px"}}>지연</span>}
                       {revised&&<span style={{flexShrink:0,fontSize:10,fontWeight:700,color:"#475569",background:"#E2E8F0",borderRadius:3,padding:"0 4px"}}>조정</span>}
+                      {queueBadge(g.events)}
                     </div>
                     <div style={{fontWeight:700,color:"#1E293B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginTop:4}}>{g.title}</div>
                     <div style={{fontSize:11,fontWeight:600,color:g.totalRemain>0?"#C2410C":"#0F766E",marginTop:2}}>{g.totalRemain>0?`잔량 ${g.totalRemain.toLocaleString()}장`:`입고 ${g.totalReceived.toLocaleString()}장`}</div>
@@ -1340,6 +1441,26 @@ function ScheduleTab(){
                     </tbody>
                   </table>
                 </div>);
+      // 조정입고일 date input — 바꾸면 이 블록 row_key 들만 저장(입력 멈춘 뒤 0.8초 또는 포커스 해제 시). 비우면 null(지움).
+      const etaInput=(g)=>{
+        const cur=g.rep.revisedEta||"";
+        const done=g.totalRemain<=0;
+        const commit=(v)=>{
+          clearTimeout(etaTimerRef.current);
+          const now=(calEventsRef.current.find(e=>e.id===g.rep.id)||{}).revisedEta||""; // 이미 반영된 값이면 중복 저장 방지
+          if(v===now)return;
+          if(v===""){changeRevisedEta(g.events,null);return;}
+          if(/^20\d\d-\d\d-\d\d$/.test(v))changeRevisedEta(g.events,v);
+        };
+        return(<label onClick={e=>e.stopPropagation()} title={done?ETA_LOCKED_MSG:"조정입고일 변경 (비우면 지움)"} style={{display:"inline-flex",alignItems:"center",gap:4,flexShrink:0,fontSize:11,fontWeight:600,color:"#64748B",whiteSpace:"nowrap"}}>
+          조정입고일
+          <input type="date" key={`${g.key}|${cur}|${etaInputRev}`} defaultValue={cur} disabled={done}
+            onChange={e=>{const v=e.target.value;clearTimeout(etaTimerRef.current);if(v)etaTimerRef.current=setTimeout(()=>commit(v),800);}}
+            onBlur={e=>{const v=e.target.value;if(v===""||/^20\d\d-\d\d-\d\d$/.test(v))commit(v);else{clearTimeout(etaTimerRef.current);e.target.value=cur;}}}
+            onKeyDown={e=>{if(e.key==="Enter")e.currentTarget.blur();}}
+            style={{padding:"3px 6px",borderRadius:6,border:"1px solid #CBD5E1",fontSize:12,color:"#1E293B",background:done?"#F1F5F9":"#FFF",cursor:done?"not-allowed":"pointer"}} />
+        </label>);
+      };
       const qtyText=(remain,received)=>remain>0?`잔량 ${remain.toLocaleString()}장`:`입고 ${received.toLocaleString()}장`;
       const miniBadge=(label,color,bg)=><span style={{flexShrink:0,fontSize:11,fontWeight:700,color,background:bg,borderRadius:4,padding:"1px 6px",whiteSpace:"nowrap"}}>{label}</span>;
       return(
@@ -1372,6 +1493,8 @@ function ScheduleTab(){
                       <span style={{flexShrink:0,fontSize:13,fontWeight:700,whiteSpace:"nowrap",color:g.totalRemain>0?"#C2410C":"#0F766E"}}>{qtyText(g.totalRemain,g.totalReceived)}</span>
                       {g.delayed&&miniBadge("지연","#FFF","#DC2626")}
                       {revised&&miniBadge("조정","#475569","#E2E8F0")}
+                      {queueBadge(g.events)}
+                      {etaInput(g)}
                       {statusPicker(g)}
                     </div>
                     {delayReason&&<div style={{padding:"0 12px 10px 58px",marginTop:-4,fontSize:12,color:"#94A3B8",lineHeight:1.5,overflowWrap:"anywhere"}}>{delayReason}</div>}
@@ -1391,7 +1514,11 @@ function ScheduleTab(){
                     {gSuppliers&&<div style={{fontSize:12,color:"#94A3B8",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ev.source==="print"?"🖨":"🏭"} {gSuppliers}</div>}
                     <div style={{fontSize:12,color:"#94A3B8",marginTop:2}}>총 {g.totalQty.toLocaleString()}장 · {g.events.length}옵션</div>
                   </div>
-                  {statusPicker(g)}
+                  <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+                    {queueBadge(g.events)}
+                    {etaInput(g)}
+                    {statusPicker(g)}
+                  </div>
                 </div>
                 {optTable(g)}
               </div>);
