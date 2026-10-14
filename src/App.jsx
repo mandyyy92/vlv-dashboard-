@@ -6674,6 +6674,12 @@ function HiworksImportPanel({candidates,onClose,onSaved}){
   const[openDoc,setOpenDoc]=useState(null); // 후보 목록이 열린 doc id
   const[cq,setCq]=useState("");
   const[rMsg,flashR]=useFlashMsg();
+  // 전체 초기화 — hiworks_docs 전체 건수(생산 + 생산 외) · 2단계 인라인 확인(3초)
+  const[allCount,setAllCount]=useState(0);
+  const[resetArmed,setResetArmed]=useState(false);
+  const[resetting,setResetting]=useState(false);
+  const resetTimer=useRef(null);
+  useEffect(()=>()=>clearTimeout(resetTimer.current),[]);
   const loadRecent=useCallback(async()=>{
     setRecentLoading(true);setRecentErr("");
     try{
@@ -6683,6 +6689,8 @@ function HiworksImportPanel({candidates,onClose,onSaved}){
       const[p,np]=await Promise.all([r1.json(),r2.json()]);
       const total=Number(String(r2.headers.get("content-range")||"").split("/")[1]);
       setRecentProd(p);setRecentNp(np);setNpCount(Number.isFinite(total)?total:np.length);
+      const prodTotal=Number(String(r1.headers.get("content-range")||"").split("/")[1]);
+      setAllCount((Number.isFinite(prodTotal)?prodTotal:p.length)+(Number.isFinite(total)?total:np.length));
     }catch(e){setRecentErr(e.message||String(e));}
     finally{setRecentLoading(false);}
   },[]);
@@ -6706,6 +6714,35 @@ function HiworksImportPanel({candidates,onClose,onSaved}){
       flashR(true,`연결됨: ${label(key)}`);
       onSaved();
     }catch(e){flashR(false,`연결 실패: ${e.message||e}`);}
+  };
+  // hiworks_docs 만 전체 삭제(연결 정보 포함). RLS 로 일부만 지워질 수 있어 삭제 후 남은 건수를 다시 확인한다.
+  const resetAll=async()=>{
+    setResetting(true);
+    try{
+      const r=await fetch(`${SUPABASE_URL}/rest/v1/hiworks_docs?id=not.is.null`,{method:"DELETE",headers:{...sbHeaders,Prefer:"return=minimal"}});
+      if(!r.ok){
+        const t=await r.text();
+        throw new Error(r.status===401||r.status===403||/permission denied/i.test(t)
+          ?"삭제 권한이 없습니다 (grant delete on public.hiworks_docs to anon, authenticated; 필요)":`${r.status} ${t}`);
+      }
+      const c=await fetch(`${SUPABASE_URL}/rest/v1/hiworks_docs?select=id&limit=1`,{headers:{...sbHeaders,Prefer:"count=exact"}});
+      const left=Number(String(c.headers.get("content-range")||"").split("/")[1]);
+      if(c.ok&&left>0)throw new Error(`${left}건이 삭제되지 않았습니다 (RLS delete 정책 확인)`);
+      setRecentProd([]);setRecentNp([]);setNpCount(0);setAllCount(0);setOpenDoc(null);
+      flashR(true,"초기화 완료");
+      onSaved();
+    }catch(e){flashR(false,`초기화 실패: ${e.message||e}`);loadRecent();}
+    finally{setResetting(false);}
+  };
+  const onReset=()=>{
+    clearTimeout(resetTimer.current);
+    if(resetArmed){setResetArmed(false);resetAll();return;}
+    setResetArmed(true);
+    resetTimer.current=setTimeout(()=>setResetArmed(false),3000);
+    // 확인 문구의 N 을 지금 시점 전체 건수로 갱신(북마클릿으로 그사이 들어온 건 반영)
+    fetch(`${SUPABASE_URL}/rest/v1/hiworks_docs?select=id&limit=1`,{headers:{...sbHeaders,Prefer:"count=exact"}})
+      .then(r=>{const n=Number(String(r.headers.get("content-range")||"").split("/")[1]);if(r.ok&&Number.isFinite(n))setAllCount(n);})
+      .catch(()=>{});
   };
 
   // 업체 목록 = sheet_orders.factory distinct (+ 오더 입고현황 생산공장 — order_key 업체명과 맞추기 위해)
@@ -6880,6 +6917,8 @@ function HiworksImportPanel({candidates,onClose,onSaved}){
             <input type="checkbox" checked={showNp} onChange={e=>setShowNp(e.target.checked)} style={{margin:0}} />생산 외 {npCount}건 보기
           </label>}
           <button onClick={loadRecent} disabled={recentLoading} style={hwBtn}>{recentLoading?"조회 중…":"새로고침"}</button>
+          {resetArmed&&<span style={{fontSize:11,color:"#94A3B8",whiteSpace:"nowrap"}}>연결 정보도 함께 삭제됩니다</span>}
+          <button onClick={onReset} disabled={resetting} style={{...hwBtn,...(resetArmed?{background:"#DC2626",borderColor:"#DC2626",color:"#FFF"}:{color:"#64748B",borderColor:"#CBD5E1"})}}>{resetting?"삭제 중…":resetArmed?`정말 삭제? (${allCount}건)`:"전체 초기화"}</button>
         </div>
         {recentErr?(
           <div style={{fontSize:12,color:"#DC2626",padding:"8px 0"}}>불러오기 실패: {recentErr}</div>
