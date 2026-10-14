@@ -6715,24 +6715,29 @@ function HiworksImportPanel({candidates,onClose,onSaved}){
       onSaved();
     }catch(e){flashR(false,`연결 실패: ${e.message||e}`);}
   };
-  // hiworks_docs 만 전체 삭제(연결 정보 포함). RLS 로 일부만 지워질 수 있어 삭제 후 남은 건수를 다시 확인한다.
+  // hiworks_docs 만 전체 삭제(연결 정보 포함). 전체 행 필터 id>=0 + count=exact 로 실제 삭제 건수를 받는다.
+  // RLS 에 delete 정책이 없으면 오류 없이 0건 삭제(204)로 끝나므로, 삭제 0건 / 남은 행 있음도 실패로 본다.
   const resetAll=async()=>{
     setResetting(true);
+    const countOf=r=>{const n=Number(String(r.headers.get("content-range")||"").split("/")[1]);return Number.isFinite(n)?n:null;};
     try{
-      const r=await fetch(`${SUPABASE_URL}/rest/v1/hiworks_docs?id=not.is.null`,{method:"DELETE",headers:{...sbHeaders,Prefer:"return=minimal"}});
+      const r=await fetch(`${SUPABASE_URL}/rest/v1/hiworks_docs?id=gte.0`,{method:"DELETE",headers:{...sbHeaders,Prefer:"return=minimal,count=exact"}});
       if(!r.ok){
+        // PostgREST 오류 본문 {message,...} 의 message 를 그대로 노출
         const t=await r.text();
-        throw new Error(r.status===401||r.status===403||/permission denied/i.test(t)
-          ?"삭제 권한이 없습니다 (grant delete on public.hiworks_docs to anon, authenticated; 필요)":`${r.status} ${t}`);
+        let m=t;try{m=JSON.parse(t).message||t;}catch{/* 본문이 JSON 이 아니면 원문 */}
+        throw new Error(m||`${r.status} ${r.statusText}`);
       }
+      const deleted=countOf(r);
       const c=await fetch(`${SUPABASE_URL}/rest/v1/hiworks_docs?select=id&limit=1`,{headers:{...sbHeaders,Prefer:"count=exact"}});
-      const left=Number(String(c.headers.get("content-range")||"").split("/")[1]);
-      if(c.ok&&left>0)throw new Error(`${left}건이 삭제되지 않았습니다 (RLS delete 정책 확인)`);
-      setRecentProd([]);setRecentNp([]);setNpCount(0);setAllCount(0);setOpenDoc(null);
-      flashR(true,"초기화 완료");
+      const left=c.ok?countOf(c):null;
+      if(left==null)throw new Error("삭제 후 남은 건수를 확인하지 못했습니다");
+      if(left>0)throw new Error(`${deleted??0}건 삭제, ${left}건 남음 — RLS delete 정책이 없거나 일부 행만 허용됩니다`);
+      setOpenDoc(null);
+      flashR(true,`초기화 완료 (${deleted??0}건 삭제)`);
       onSaved();
-    }catch(e){flashR(false,`초기화 실패: ${e.message||e}`);loadRecent();}
-    finally{setResetting(false);}
+    }catch(e){flashR(false,`초기화 실패: ${e.message||e}`);}
+    finally{setResetting(false);loadRecent();}
   };
   const onReset=()=>{
     clearTimeout(resetTimer.current);
