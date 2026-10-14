@@ -6927,7 +6927,7 @@ function HiworksImportPanel({candidates,onClose,onSaved}){
           </label>}
           <button onClick={loadRecent} disabled={recentLoading} style={hwBtn}>{recentLoading?"조회 중…":"새로고침"}</button>
           {resetArmed&&<span style={{fontSize:11,color:"#94A3B8",whiteSpace:"nowrap"}}>연결 정보도 함께 삭제됩니다</span>}
-          <button onClick={onReset} disabled={resetting} style={{...hwBtn,...(resetArmed?{background:"#DC2626",borderColor:"#DC2626",color:"#FFF"}:{color:"#64748B",borderColor:"#CBD5E1"})}}>{resetting?"삭제 중…":resetArmed?`정말 삭제? (${allCount}건)`:"전체 초기화"}</button>
+          <button onClick={onReset} disabled={resetting} style={{...hwBtn,...(resetArmed?{background:"#DC2626",borderColor:"#DC2626",color:"#FFF"}:{color:"#64748B",borderColor:"#CBD5E1"})}}>{resetting?"삭제 중…":resetArmed?`삭제 (${allCount}건)`:"전체 초기화"}</button>
         </div>
         {recentErr?(
           <div style={{fontSize:12,color:"#DC2626",padding:"8px 0"}}>불러오기 실패: {recentErr}</div>
