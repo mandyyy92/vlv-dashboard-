@@ -6110,10 +6110,16 @@ function ProductMasterTab(){
   );
 }
 
-// ─── 오더 입고현황 (orders_sheet 기반) ───
+// ─── 오더 입고현황 (sheet_orders 기반 — 입고 캘린더와 같은 Google Sheet 동기화 소스) ───
 // 기존 ProductionDashboard(별도 파일)는 그대로 보존하고, ordertrack 탭 렌더만 이 컴포넌트로 교체.
 // 조회 + 요약카드 4개 + 필터(연도/시즌/공장/검색) + 상품명별 묶음표(펼침·헤더정렬).
-const OS_COL={SEASON:"시즌",YEAR:"제품운영연도",CODE:"상품코드",NAME:"상품명",OPT:"색상사이즈",ORD_QTY:"발주수량",IN_QTY:"실입고총수량",AMT:"발주총액_krw",DEPOSIT:"계약금_krw",FACTORY:"생산공장",ORD_DATE:"발주일",IN_DATE:"실입고일",ETA:"입고예정일",ROUND:"발주차수"};
+const OS_COL={SEASON:"season",YEAR:"os_year",CODE:"product_code",NAME:"product_name",DISP:"display_name",OPT:"option_name",ORD_QTY:"order_qty",IN_QTY:"received_qty",AMT:"order_amount_krw",FACTORY:"factory",ORD_DATE:"order_date",IN_DATE:"received_date",ETA:"os_eta",ROUND:"order_round"};
+// 파생 필드 — os_eta: 조정입고일 우선(입고 캘린더와 동일 규칙) · os_year: 시즌 앞 2자리(26SS→2026), 없으면 발주일 연도
+const osNormRow=r=>{
+  const m=String(r.season??"").trim().match(/^(\d{2})/);
+  const d=String(r.order_date??"").trim();
+  return{...r,os_eta:r.revised_eta||r.eta||null,os_year:m?`20${m[1]}`:/^\d{4}/.test(d)?d.slice(0,4):""};
+};
 // 숫자 컬럼이 문자열("1,200" / "" / null)로 와도 안전하게 합산.
 const osNum=v=>{if(v==null)return 0;const n=Number(String(v).replace(/[^0-9.-]/g,""));return Number.isFinite(n)?n:0;};
 // 날짜 정렬 키(YYYY-MM-DD 문자열 비교) — 숫자 컬럼과 비교 방식이 달라 따로 구분.
@@ -7154,10 +7160,10 @@ function OrderSheetDashboard(){
         // PostgREST 기본 1000행 제한 → offset 페이징으로 전량 확보(합계 정확도).
         const all=[];const PAGE=1000;
         for(let off=0;;off+=PAGE){
-          const r=await fetch(`${SUPABASE_URL}/rest/v1/orders_sheet?select=*&order=id.asc&limit=${PAGE}&offset=${off}`,{headers:sbHeaders});
+          const r=await fetch(`${SUPABASE_URL}/rest/v1/sheet_orders?select=*&order=row_key.asc&limit=${PAGE}&offset=${off}`,{headers:sbHeaders});
           if(!r.ok)throw new Error(`${r.status} ${await r.text()}`);
           const chunk=await r.json();
-          all.push(...chunk);
+          all.push(...chunk.map(osNormRow));
           if(chunk.length<PAGE)break;
         }
         if(alive)setRows(all);
@@ -7249,7 +7255,7 @@ function OrderSheetDashboard(){
       if(fYear&&String(r[OS_COL.YEAR]??"").trim()!==fYear)return false;
       if(fSeason&&String(r[OS_COL.SEASON]??"").trim()!==fSeason)return false;
       if(fFactory&&String(r[OS_COL.FACTORY]??"").trim()!==fFactory)return false;
-      if(kw&&!`${r[OS_COL.NAME]??""} ${r[OS_COL.CODE]??""}`.toLowerCase().includes(kw))return false;
+      if(kw&&!`${r[OS_COL.NAME]??""} ${r[OS_COL.DISP]??""} ${r[OS_COL.CODE]??""}`.toLowerCase().includes(kw))return false;
       return true;
     });
   },[rows,fYear,fSeason,fFactory,q]);
@@ -7269,11 +7275,11 @@ function OrderSheetDashboard(){
       const round=String(r[OS_COL.ROUND]??"").trim();
       const key=`${name}␟${round}`; // 상품명에 없는 구분자로 조합키
       let g=m.get(key);
-      if(!g){g={key,name,round,roundN:osNum(round),season:String(r[OS_COL.SEASON]??"").trim(),factory:String(r[OS_COL.FACTORY]??"").trim(),code:String(r[OS_COL.CODE]??"").trim(),ord:0,inb:0,amt:0,deposit:0,ordDate:"",eta:"",inDate:"",items:[]};m.set(key,g);}
+      // disp = 화면 표시용 짧은 상품명(display_name, 없으면 "분류-" 접두어 제거). name 은 문서 연결 키(ocOrderKey)에 쓰므로 product_name 그대로.
+      if(!g){g={key,name,disp:String(r[OS_COL.DISP]??"").trim()||name.replace(/^[^-]+-/,""),round,roundN:osNum(round),season:String(r[OS_COL.SEASON]??"").trim(),factory:String(r[OS_COL.FACTORY]??"").trim(),code:String(r[OS_COL.CODE]??"").trim(),ord:0,inb:0,amt:0,ordDate:"",eta:"",inDate:"",items:[]};m.set(key,g);}
       g.ord+=osNum(r[OS_COL.ORD_QTY]);
       g.inb+=osNum(r[OS_COL.IN_QTY]);
       g.amt+=osNum(r[OS_COL.AMT]);
-      g.deposit+=osNum(r[OS_COL.DEPOSIT]);
       // 일정 3종은 그룹 대표값 = 처음 만난 값. 같은 (상품명+차수)면 보통 동일하고,
       // 첫 행이 비어 있을 때만 뒤 행 값으로 채워진다(비면 "-").
       for(const[f,c]of[["ordDate",OS_COL.ORD_DATE],["eta",OS_COL.ETA],["inDate",OS_COL.IN_DATE]]){
@@ -7378,9 +7384,8 @@ function OrderSheetDashboard(){
     {w:88, a:"right"},               // 6 발주수량    │ 덩어리2 수량
     {w:88, a:"right"},               // 7 입고수량    │
     {w:88, a:"right",div:true},      // 8 미입고      ┘
-    {w:124,a:"right"},               // 9 발주금액    ┐
-    {w:112,a:"right"},               // 10 계약금     │ 덩어리3 금액·업체
-    {w:104,a:"center"},              // 11 업체       ┘
+    {w:124,a:"right"},               // 9 발주금액    ┐ 덩어리3 금액·업체
+    {w:104,a:"center"},              // 10 업체       ┘
   ];
   const DIVC="#E2E8F0"; // 표 테두리와 같은 옅은 회색
   // 바디 셀에 헤더와 같은 정렬 + 같은 위치의 덩어리 구분선 적용
@@ -7460,9 +7465,9 @@ function OrderSheetDashboard(){
               hdr(0,"차수"),hdr(1,"상품명"),
               hdr(2,sortTh("ordDate","발주일")),hdr(3,sortTh("eta","입고예정일")),hdr(4,sortTh("inDate","실입고일")),
               hdr(5,sortTh("rate","입고율")),hdr(6,sortTh("ord","발주수량")),hdr(7,sortTh("inb","입고수량")),hdr(8,sortTh("short","미입고")),
-              hdr(9,sortTh("amt","발주금액")),hdr(10,sortTh("deposit","계약금")),hdr(11,"업체"),
+              hdr(9,sortTh("amt","발주금액")),hdr(10,"업체"),
             ]}
-            cols={OSC.map(c=>c.w)} aligns={OSC.map(c=>c.a)} minW={1260} maxH={560}>
+            cols={OSC.map(c=>c.w)} aligns={OSC.map(c=>c.a)} minW={1148} maxH={560}>
             {sortedGroups.map(g=>{
               const on=selKey===g.key;
               return(
@@ -7471,7 +7476,7 @@ function OrderSheetDashboard(){
                   <Td style={{...cellAt(1),fontWeight:600,color:"#0F172A"}}>
                     <span style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}>
                       {thumb(g.code,34)}
-                      <span style={{minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.name}</span>
+                      <span title={g.name} style={{minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.disp}</span>
                       {(()=>{const c=ocCounts[ocOrderKey(g)]||{};return OC_BADGES.filter(([t])=>c[t]>0).map(([t,ic,l])=><span key={t} title={l} style={{flexShrink:0,fontSize:12,fontWeight:700,color:"#2563EB"}}>{ic}{c[t]}</span>);})()}
                     </span>
                   </Td>
@@ -7491,8 +7496,7 @@ function OrderSheetDashboard(){
                   </Td>
                   {/* 덩어리3 금액·업체 */}
                   <Td style={{...cellAt(9),...numTd}}>₩{Math.round(g.amt).toLocaleString()}</Td>
-                  <Td style={{...cellAt(10),...numTd,color:g.deposit>0?"#334155":"#94A3B8"}}>{g.deposit>0?`₩${Math.round(g.deposit).toLocaleString()}`:"-"}</Td>
-                  <Td style={{...cellAt(11),color:g.factory?"#64748B":"#94A3B8",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.factory||"-"}</Td>
+                  <Td style={{...cellAt(10),color:g.factory?"#64748B":"#94A3B8",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.factory||"-"}</Td>
                 </tr>
               );
             })}
@@ -7510,7 +7514,7 @@ function OrderSheetDashboard(){
                 <div style={{fontSize:12,color:"#94A3B8",marginBottom:4}}>{[selGroup.season,selGroup.factory].filter(Boolean).join(" · ")||"-"}</div>
                 <div style={{display:"flex",alignItems:"center",gap:6,minWidth:0}}>
                   {selGroup.round&&<span style={{flexShrink:0,fontSize:12,fontWeight:700,color:"#2563EB",background:"#EFF6FF",border:"1px solid #BFDBFE",borderRadius:6,padding:"1px 7px"}}>{selGroup.round}차</span>}
-                  <span style={{minWidth:0,fontSize:17,fontWeight:700,color:"#0F172A",lineHeight:1.3,overflowWrap:"anywhere"}}>{selGroup.name}</span>
+                  <span title={selGroup.name} style={{minWidth:0,fontSize:17,fontWeight:700,color:"#0F172A",lineHeight:1.3,overflowWrap:"anywhere"}}>{selGroup.disp}</span>
                 </div>
                 <div style={{fontSize:12,color:"#94A3B8",marginTop:4,fontFamily:"monospace"}}>{selGroup.code||"-"}</div>
                 <div style={{fontSize:13,color:"#475569",marginTop:6}}>발주일 <b style={{color:"#0F172A"}}>{osDate(selGroup.ordDate)}</b> · 입고예정일 <b style={{color:"#0F172A"}}>{osDate(selGroup.eta)}</b></div>
@@ -7551,11 +7555,11 @@ function OrderSheetDashboard(){
                   <colgroup>{DRW.map(c=><col key={c.h} style={{width:c.w}} />)}</colgroup>
                   <thead><tr>{DRW.map(c=><th key={c.h} title={c.h} style={{...drwTh,textAlign:c.a}}>{c.h}</th>)}</tr></thead>
                   <tbody>
-                    {selGroup.items.map((it,i)=>{
+                    {selGroup.items.map(it=>{
                       const o=osNum(it[OS_COL.ORD_QTY]),n=osNum(it[OS_COL.IN_QTY]);
                       const rt=o>0?(n/o*100):0;
                       return(
-                        <tr key={i}>
+                        <tr key={it.row_key}>
                           <td title={it[OS_COL.OPT]||""} style={{...drwTd,textAlign:DRW[0].a,fontWeight:700,color:"#0F172A"}}>{it[OS_COL.OPT]||"-"}</td>
                           <td title={it[OS_COL.CODE]||""} style={{...drwTd,textAlign:DRW[1].a,fontSize:11,fontFamily:"monospace",color:"#64748B"}}>{it[OS_COL.CODE]||"-"}</td>
                           <td style={{...drwTd,textAlign:DRW[2].a,...numTd,color:"#334155"}}>{o.toLocaleString()}</td>
