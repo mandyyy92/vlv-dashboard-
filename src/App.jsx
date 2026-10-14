@@ -6614,7 +6614,7 @@ const hwLcs=(a,b)=>{let best=0;const prev=new Array(b.length+1).fill(0);for(let 
 function hwScore(doc,c){
   let s=0;
   if(doc.vendor&&hwCompact(doc.vendor)===hwCompact(c.factory))s+=3;
-  if(doc.order_round!=null&&c.round&&osNum(c.round)===doc.order_round)s+=3;
+  if(doc.order_round!=null&&doc.order_round!==""&&c.round&&osNum(c.round)===Number(doc.order_round))s+=3;
   const h=hwCompact(doc.product_hint),n=hwCompact(c.name);
   if(h&&n){if(n.includes(h)||h.includes(n))s+=2;else if(hwLcs(h,n)>=2)s+=1;}
   return s;
@@ -6646,6 +6646,54 @@ function HiworksImportPanel({candidates,onClose,onSaved}){
   const[pick,setPick]=useState({}); // doc_no → 수동 선택 key("" = 연결 안 함)
   const[saving,setSaving]=useState(false);
   const[msg,flash]=useFlashMsg();
+  // 북마클릿 — 가져오기 키를 window.__VLVD_KEY 로 넘기고 현재 배포 도메인의 /hiworks-import.js(public/) 를 주입.
+  // 키는 이 state 에만 둔다(localStorage·DB·코드에 저장하지 않음).
+  const[bmKey,setBmKey]=useState("");
+  const jsStr=s=>String(s).replace(/\\/g,"\\\\").replace(/'/g,"\\'").replace(/%/g,"\\x25"); // javascript: URL 은 %xx 를 디코딩하므로 % 도 이스케이프
+  const bookmarklet=bmKey?`javascript:(function(){window.__VLVD_KEY='${jsStr(bmKey)}';var s=document.createElement('script');s.src='${jsStr(window.location.origin)}/hiworks-import.js?'+Date.now();document.body.appendChild(s);})();`:"";
+  const bmRef=useRef(null);
+  const[bmMsg,flashBm]=useFlashMsg();
+  const copyBm=async()=>{
+    if(!bookmarklet)return;
+    try{await navigator.clipboard.writeText(bookmarklet);flashBm(true,"복사됨");}
+    catch{bmRef.current?.select();flashBm(false,"복사 실패 — 선택된 코드를 직접 복사하세요");}
+  };
+  // 최근 가져온 결과(imported_at 최신 20건) · '확인 필요' 행 수동 연결
+  const[recent,setRecent]=useState([]);
+  const[recentLoading,setRecentLoading]=useState(true);
+  const[recentErr,setRecentErr]=useState("");
+  const[openDoc,setOpenDoc]=useState(null); // 후보 목록이 열린 doc id
+  const[cq,setCq]=useState("");
+  const[rMsg,flashR]=useFlashMsg();
+  const loadRecent=useCallback(async()=>{
+    setRecentLoading(true);setRecentErr("");
+    try{
+      const r=await fetch(`${SUPABASE_URL}/rest/v1/hiworks_docs?select=*&order=imported_at.desc.nullslast&limit=20`,{headers:sbHeaders});
+      if(!r.ok)throw new Error(`${r.status} ${await r.text()}`);
+      setRecent(await r.json());
+    }catch(e){setRecentErr(e.message||String(e));}
+    finally{setRecentLoading(false);}
+  },[]);
+  useEffect(()=>{loadRecent();},[loadRecent]);
+  // 후보 = 점수순 상위 → 나머지 전체, 검색어(상품명·차수·업체)로 필터, 최대 50건
+  const candList=useMemo(()=>{
+    const d=recent.find(x=>x.id===openDoc);
+    if(!d)return[];
+    const ranked=hwMatch(d,candidates).ranked;
+    const score=new Map(ranked.map(x=>[x.key,x.score]));
+    const rest=candidates.filter(c=>!score.has(c.key)).map(c=>({key:c.key,score:null}));
+    const kw=hwCompact(cq).toLowerCase();
+    return[...ranked,...rest].filter(x=>!kw||hwCompact(hwKeyLabel(x.key)).toLowerCase().includes(kw)).slice(0,50);
+  },[openDoc,recent,candidates,cq]);
+  const linkRecent=async(d,key)=>{
+    try{
+      const row=await ocPatchRow("hiworks_docs",d.id,{linked_order_key:key,linked_at:new Date().toISOString()});
+      setRecent(p=>p.map(x=>x.id===d.id?{...x,...row}:x));
+      setOpenDoc(null);setCq("");
+      flashR(true,`연결됨: ${hwKeyLabel(key)}`);
+      onSaved();
+    }catch(e){flashR(false,`연결 실패: ${e.message||e}`);}
+  };
 
   // 업체 목록 = sheet_orders.factory distinct (+ 오더 입고현황 생산공장 — order_key 업체명과 맞추기 위해)
   useEffect(()=>{
@@ -6717,6 +6765,7 @@ function HiworksImportPanel({candidates,onClose,onSaved}){
       setPick({});
       flash(true,`저장됨: ${matched.length}건 (연결 ${linkedN}건)`);
       onSaved();
+      loadRecent();
     }catch(e){flash(false,`저장 실패: ${e.message||e}`);}
     finally{setSaving(false);}
   };
@@ -6730,6 +6779,28 @@ function HiworksImportPanel({candidates,onClose,onSaved}){
         <div style={{fontSize:14,fontWeight:800,color:"#0F172A"}}>하이웍스 기안 불러오기</div>
         <span style={{flex:1}} />
         <button onClick={onClose} style={hwBtn}>닫기</button>
+      </div>
+      {/* 북마클릿으로 가져오기 */}
+      <div style={{border:"1px solid #E2E8F0",background:"#FFF",borderRadius:10,padding:12,marginBottom:12}}>
+        <div style={{fontSize:13,fontWeight:800,color:"#0F172A",marginBottom:8}}>북마클릿으로 가져오기</div>
+        <label style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,fontSize:12,color:"#64748B"}}>가져오기 키
+          <input type="password" value={bmKey} onChange={e=>setBmKey(e.target.value)} placeholder="Supabase Secret 에 등록한 값" autoComplete="off" style={{...ocInput,flex:1,maxWidth:320}} />
+        </label>
+        {bookmarklet?(
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <input ref={bmRef} type="text" readOnly value={bookmarklet} onFocus={e=>e.target.select()} style={{...ocInput,flex:1,fontFamily:"monospace",color:"#475569",background:"#F8FAFC"}} />
+            <button onClick={copyBm} style={{...hwBtn,background:"#2563EB",borderColor:"#2563EB",color:"#FFF"}}>복사</button>
+            {hwMsgEl(bmMsg)}
+          </div>
+        ):(
+          <div style={{fontSize:12,color:"#94A3B8"}}>키를 입력하면 북마클릿 코드가 만들어집니다</div>
+        )}
+        <div style={{marginTop:8,fontSize:12,color:"#64748B"}}>키는 저장되지 않습니다. 북마클릿을 다시 만들 때마다 입력하세요.</div>
+        <ol style={{margin:"8px 0 0",paddingLeft:18,fontSize:12,color:"#64748B",lineHeight:1.7}}>
+          <li>위 코드를 복사해 브라우저 즐겨찾기로 등록 (이름: 하이웍스 가져오기)</li>
+          <li>하이웍스 전자결재 목록 화면을 열고</li>
+          <li>즐겨찾기를 클릭하면 화면의 목록이 자동으로 들어옵니다</li>
+        </ol>
       </div>
       <div style={{fontSize:12,color:"#64748B",marginBottom:8}}>하이웍스 전자결재 목록을 드래그해서 복사한 뒤 붙여넣으세요</div>
       <textarea value={text} onChange={e=>setText(e.target.value)} rows={8} placeholder="여기에 붙여넣기"
@@ -6780,6 +6851,61 @@ function HiworksImportPanel({candidates,onClose,onSaved}){
         </div>
       </>)}
       {!matched.length&&!parsed.failed&&msg&&<div style={{marginTop:8}}>{hwMsgEl(msg)}</div>}
+
+      {/* 최근 가져온 결과 */}
+      <div style={{marginTop:16}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+          <div style={{fontSize:13,fontWeight:800,color:"#0F172A"}}>최근 가져온 결과 <span style={{color:"#94A3B8",fontWeight:600}}>{recent.length}</span></div>
+          {hwMsgEl(rMsg)}
+          <span style={{flex:1}} />
+          <button onClick={loadRecent} disabled={recentLoading} style={hwBtn}>{recentLoading?"조회 중…":"새로고침"}</button>
+        </div>
+        {recentErr?(
+          <div style={{fontSize:12,color:"#DC2626",padding:"8px 0"}}>불러오기 실패: {recentErr}</div>
+        ):!recent.length?(
+          <div style={{fontSize:12,color:"#94A3B8",padding:"8px 0"}}>{recentLoading?"⏳ 불러오는 중...":"가져온 기안이 없습니다"}</div>
+        ):(
+          <div style={{overflowX:"auto",border:"1px solid #E2E8F0",borderRadius:10,background:"#FFF"}}>
+            <table style={{width:"100%",minWidth:900,tableLayout:"fixed",borderCollapse:"collapse"}}>
+              <colgroup>{[72,null,110,52,240,92].map((w,i)=><col key={i} style={w?{width:w}:undefined} />)}</colgroup>
+              <thead><tr>{["구분","제목","업체","차수","연결된 차수","기안일"].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
+              <tbody>
+                {recent.map(d=>{
+                  const need=!d.linked_order_key;
+                  const isOpen=openDoc===d.id;
+                  return[
+                    <tr key={d.id} onClick={need?()=>{setOpenDoc(isOpen?null:d.id);setCq("");}:undefined} style={{cursor:need?"pointer":"default",background:isOpen?"#FFFBEB":"transparent"}}>
+                      <td style={td}>{d.pay_kind?hwPayBadge(d.pay_kind):<span style={{color:"#94A3B8"}}>-</span>}</td>
+                      <td style={{...td,...ell}} title={d.title||""}>{d.title||"-"}</td>
+                      <td style={{...td,...ell,color:d.vendor?"#334155":"#94A3B8"}}>{d.vendor||"-"}</td>
+                      <td style={{...td,color:d.order_round!=null?"#334155":"#94A3B8"}}>{d.order_round??"-"}</td>
+                      <td style={{...td,...ell,fontWeight:600,color:need?"#D97706":"#16A34A"}} title={need?"":hwKeyLabel(d.linked_order_key)}>{need?`확인 필요 ${isOpen?"▴":"▾"}`:hwKeyLabel(d.linked_order_key)}</td>
+                      <td style={{...td,fontVariantNumeric:"tabular-nums"}}>{d.draft_date||"-"}</td>
+                    </tr>,
+                    isOpen&&(
+                      <tr key={`${d.id}-pick`}>
+                        <td colSpan={6} style={{...td,background:"#FFFBEB"}}>
+                          <input type="text" autoFocus value={cq} onChange={e=>setCq(e.target.value)} placeholder="차수 검색 (상품명·차수·업체)" style={{...ocInput,width:"100%"}} />
+                          <div style={{marginTop:6,maxHeight:220,overflowY:"auto",display:"flex",flexDirection:"column",gap:3}}>
+                            {!candList.length?(
+                              <div style={{fontSize:12,color:"#94A3B8",padding:"4px 2px"}}>일치하는 차수가 없습니다</div>
+                            ):candList.map(c=>(
+                              <button key={c.key} onClick={()=>linkRecent(d,c.key)} style={{...hwBtn,textAlign:"left",display:"flex",gap:8,overflow:"hidden"}}>
+                                <span style={{flex:1,minWidth:0,...ell}}>{hwKeyLabel(c.key)}</span>
+                                {c.score!=null&&<span style={{flexShrink:0,color:"#2563EB"}}>{c.score}점</span>}
+                              </button>
+                            ))}
+                          </div>
+                        </td>
+                      </tr>
+                    ),
+                  ];
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
