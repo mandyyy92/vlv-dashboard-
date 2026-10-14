@@ -6151,10 +6151,7 @@ const ocMsgStyle=m=>({fontSize:12,fontWeight:600,color:m.ok?"#16A34A":"#DC2626",
 const ocInput={height:30,padding:"0 8px",borderRadius:6,border:"1px solid #CBD5E1",fontSize:12,color:"#1E293B",background:"#FFF",boxSizing:"border-box",minWidth:0};
 
 // ─── 하이웍스 기안 (hiworks_docs) — 전자결재 목록 붙여넣기 → 제목 파싱 → 차수(order_key) 자동 연결 ───
-const HW_PAY_KINDS=["계약금","중도금","잔금"];
 const HW_PAY_COLOR={계약금:{bg:"#EFF6FF",color:"#2563EB",bd:"#BFDBFE"},중도금:{bg:"#FEF3C7",color:"#B45309",bd:"#FDE68A"},잔금:{bg:"#DCFCE7",color:"#16A34A",bd:"#BBF7D0"}};
-const HW_DOC_NO_RE=/OP-[^\s]+-지결-[\w-]+/;
-const HW_DATE_RE=/\d{4}-\d{2}-\d{2}/g;
 const hwCompact=s=>String(s??"").replace(/\s+/g,"");
 const hwKeyLabel=(k,disp)=>{
   const[n,r,f]=String(k||"").split("|").map(s=>String(s??"").trim());
@@ -6163,39 +6160,6 @@ const hwKeyLabel=(k,disp)=>{
 };
 // 상품명 → 표시명. map = sheet_orders product_name→display_name, 없으면 앞의 "분류-" 접두어 제거
 const hwDispName=(map,n)=>map[n]||String(n||"").replace(/^[^-]+-/,"");
-// 제목 → 업체·품명·차수·지급구분. vendors: 업체명 목록(가장 긴 일치 우선)
-function hwParseTitle(title,vendors){
-  let t=String(title||"").replace(/^\s*\[[^\]]*\]\s*/,"").replace(/비바라비다/g," ");
-  const pay_kind=HW_PAY_KINDS.find(k=>t.includes(k))||null;
-  const rm=t.match(/#\s*(\d+)/)||t.match(/(\d+)\s*차/);
-  const order_round=rm?Number(rm[1]):null;
-  const vendor=vendors.filter(v=>v&&t.includes(v)).sort((a,b)=>b.length-a.length)[0]||null;
-  let h=t;
-  if(vendor)h=h.split(vendor).join(" ");
-  h=h.replace(/지급\s*의\s*건/g," ").replace(/#\s*\d+/g," ").replace(/\d+\s*차/g," ").replace(/\(\s*\d+\s*\)/g," ")
-    .replace(/리오더|생산|계약금|중도금|잔금/g," ").replace(/\s+/g," ").trim();
-  return{vendor,product_hint:h||null,order_round,pay_kind};
-}
-// 붙여넣은 텍스트 → {docs, failed}. 열 구분은 탭 또는 2칸 이상 공백, 각 값은 패턴으로 판별.
-function hwParsePaste(text,vendors){
-  const docs=[];let failed=0;const seen=new Set();
-  for(const line of String(text||"").split(/\r?\n/)){
-    if(!line.trim())continue;
-    const toks=line.split(/\t|\s{2,}/).map(s=>s.trim()).filter(Boolean);
-    let doc_no=null;
-    for(const tk of toks){const m=tk.match(HW_DOC_NO_RE);if(m){doc_no=m[0];break;}}
-    const title=toks.filter(tk=>tk.startsWith("[")).sort((a,b)=>b.length-a.length)[0]||null;
-    if(!doc_no||!title){failed++;continue;}
-    const rest=toks.filter(tk=>tk!==title&&!tk.includes(doc_no));
-    const dates=rest.join(" ").match(HW_DATE_RE)||[];
-    const drafter=rest.find(tk=>/^[A-Za-z]+[가-힣]+$/.test(tk))||null;
-    const doc_kind=rest.find(tk=>tk.includes("지출결의서"))||null;
-    if(seen.has(doc_no))continue;
-    seen.add(doc_no);
-    docs.push({doc_no,title,drafter,draft_date:dates[0]||null,done_date:dates.length>=2?dates[1]:null,doc_kind,...hwParseTitle(title,vendors)});
-  }
-  return{docs,failed};
-}
 // 공백 제거 후 최장 공통 연속 문자열 길이
 const hwLcs=(a,b)=>{let best=0;const prev=new Array(b.length+1).fill(0);for(let i=1;i<=a.length;i++){let diag=0;for(let j=1;j<=b.length;j++){const tmp=prev[j];prev[j]=a[i-1]===b[j-1]?diag+1:0;if(prev[j]>best)best=prev[j];diag=tmp;}}return best;};
 // 차수 후보 점수: 업체 +3 / 차수 +3 / 품명 포함 +2 (아니면 2글자 이상 연속 일치 +1)
@@ -6226,17 +6190,11 @@ function useFlashMsg(){
 }
 const hwMsgEl=m=>m&&<span style={{fontSize:12,fontWeight:600,color:m.ok===null?"#64748B":m.ok?"#16A34A":"#DC2626"}}>{m.text}</span>;
 
-// 오더 입고현황 상단 — 붙여넣기 → 미리보기 → hiworks_docs upsert(doc_no 기준)
+// 오더 입고현황 상단 — 북마클릿 안내 + 최근 가져온 결과(수동 연결·초기화)
 function HiworksImportPanel({candidates,onClose,onSaved}){
-  const[text,setText]=useState("");
-  const[vendors,setVendors]=useState([]);
   const[dispMap,setDispMap]=useState({}); // sheet_orders product_name → display_name
   const disp=useCallback(n=>hwDispName(dispMap,n),[dispMap]);
   const label=useCallback(k=>hwKeyLabel(k,disp),[disp]);
-  const[existing,setExisting]=useState({}); // doc_no → 기존 linked_order_key
-  const[pick,setPick]=useState({}); // doc_no → 수동 선택 key("" = 연결 안 함)
-  const[saving,setSaving]=useState(false);
-  const[msg,flash]=useFlashMsg();
   // 북마클릿 — 현재 배포 도메인의 /hiworks-import.js(public/) 를 하이웍스 화면에 주입
   const bookmarklet=`javascript:(function(){var s=document.createElement('script');s.src='${window.location.origin}/hiworks-import.js?'+Date.now();document.body.appendChild(s);})();`;
   const bmRef=useRef(null);
@@ -6332,85 +6290,28 @@ function HiworksImportPanel({candidates,onClose,onSaved}){
       .catch(()=>{});
   };
 
-  // 업체 목록 = sheet_orders.factory distinct (+ 오더 입고현황 생산공장 — order_key 업체명과 맞추기 위해)
+  // 표시명 = sheet_orders product_name → display_name
   useEffect(()=>{
     let alive=true;
     (async()=>{
-      const set=new Set(candidates.map(c=>c.factory).filter(Boolean));
       const dm={};
       try{
         const PAGE=1000;
         for(let off=0;;off+=PAGE){
-          const r=await fetch(`${SUPABASE_URL}/rest/v1/sheet_orders?select=factory,product_name,display_name&limit=${PAGE}&offset=${off}`,{headers:sbHeaders});
+          const r=await fetch(`${SUPABASE_URL}/rest/v1/sheet_orders?select=product_name,display_name&limit=${PAGE}&offset=${off}`,{headers:sbHeaders});
           if(!r.ok)break;
           const chunk=await r.json();
           for(const it of chunk){
-            const f=String(it.factory??"").trim();if(f)set.add(f);
             const p=String(it.product_name??"").trim(),d=String(it.display_name??"").trim();
             if(p&&d&&!dm[p])dm[p]=d;
           }
           if(chunk.length<PAGE)break;
         }
-      }catch{/* 생산공장 목록만으로 진행 */}
-      if(alive){setVendors([...set]);setDispMap(dm);}
+      }catch{/* 표시명 없이 진행 */}
+      if(alive)setDispMap(dm);
     })();
     return()=>{alive=false;};
-  },[candidates]);
-
-  const parsed=useMemo(()=>hwParsePaste(text,vendors),[text,vendors]);
-  const matched=useMemo(()=>parsed.docs.map(d=>({...d,...hwMatch(d,candidates)})),[parsed,candidates]);
-
-  // 이미 저장된 문서는 기존 연결을 기본값으로 유지
-  useEffect(()=>{
-    const nos=parsed.docs.map(d=>d.doc_no).filter(n=>!(n in existing));
-    if(!nos.length)return;
-    let alive=true;
-    (async()=>{
-      try{
-        const r=await fetch(`${SUPABASE_URL}/rest/v1/hiworks_docs?select=doc_no,linked_order_key&doc_no=in.(${nos.map(n=>encodeURIComponent(`"${n}"`)).join(",")})`,{headers:sbHeaders});
-        if(!r.ok)return;
-        const m={};nos.forEach(n=>{m[n]=null;});
-        for(const it of await r.json())m[it.doc_no]=it.linked_order_key||null;
-        if(alive)setExisting(p=>({...p,...m}));
-      }catch{/* 무시 */}
-    })();
-    return()=>{alive=false;};
-  },[parsed,existing]);
-
-  // 최종 연결 key: 수동 선택 > 기존 연결 > 자동 매칭
-  const linkOf=d=>d.doc_no in pick?(pick[d.doc_no]||null):(existing[d.doc_no]||d.auto);
-  const linkedN=matched.filter(d=>linkOf(d)).length;
-
-  const save=async()=>{
-    if(!matched.length||saving)return;
-    setSaving(true);
-    try{
-      const now=new Date().toISOString();
-      const base=d=>({doc_no:d.doc_no,title:d.title,drafter:d.drafter,draft_date:d.draft_date,done_date:d.done_date,doc_kind:d.doc_kind,
-        vendor:d.vendor,product_hint:d.product_hint,order_round:d.order_round,pay_kind:d.pay_kind,imported_at:now});
-      // 연결 없는 문서는 linked_* 를 보내지 않아 기존 연결을 덮어쓰지 않는다. 선택으로 해제한 건만 null 로.
-      const linked=[],unlinked=[];
-      for(const d of matched){
-        const k=linkOf(d);
-        if(k)linked.push({...base(d),linked_order_key:k,linked_at:existing[d.doc_no]===k?undefined:now});
-        else if(d.doc_no in pick&&existing[d.doc_no])linked.push({...base(d),linked_order_key:null,linked_at:null});
-        else unlinked.push(base(d));
-      }
-      // 같은 요청 안에서는 키 구성이 같아야 하므로 linked_at 유무로 한 번 더 나눈다
-      const batches=[linked.filter(x=>x.linked_at!==undefined),linked.filter(x=>x.linked_at===undefined).map(({linked_at,...x})=>x),unlinked];
-      for(const body of batches){
-        if(!body.length)continue;
-        const r=await fetch(`${SUPABASE_URL}/rest/v1/hiworks_docs?on_conflict=doc_no`,{method:"POST",headers:{...sbHeaders,Prefer:"resolution=merge-duplicates,return=minimal"},body:JSON.stringify(body)});
-        if(!r.ok)throw new Error(`${r.status} ${await r.text()}`);
-      }
-      setExisting(p=>{const n={...p};matched.forEach(d=>{n[d.doc_no]=linkOf(d);});return n;});
-      setPick({});
-      flash(true,`저장됨: ${matched.length}건 (연결 ${linkedN}건)`);
-      onSaved();
-      loadRecent();
-    }catch(e){flash(false,`저장 실패: ${e.message||e}`);}
-    finally{setSaving(false);}
-  };
+  },[]);
 
   const th={padding:"8px 10px",background:"#F8FAFC",fontWeight:600,color:"#64748B",fontSize:11,textAlign:"left",borderBottom:"1px solid #E2E8F0",whiteSpace:"nowrap"};
   const td={padding:"7px 10px",fontSize:12,color:"#334155",borderBottom:"1px solid #F1F5F9",verticalAlign:"middle"};
@@ -6436,58 +6337,8 @@ function HiworksImportPanel({candidates,onClose,onSaved}){
           <li>즐겨찾기를 클릭하면 화면의 목록이 들어옵니다</li>
         </ol>
       </div>
-      <div style={{fontSize:12,color:"#64748B",marginBottom:8}}>하이웍스 전자결재 목록을 드래그해서 복사한 뒤 붙여넣으세요</div>
-      <textarea value={text} onChange={e=>setText(e.target.value)} rows={8} placeholder="여기에 붙여넣기"
-        style={{width:"100%",boxSizing:"border-box",padding:10,borderRadius:8,border:"1px solid #CBD5E1",fontSize:12,fontFamily:"monospace",resize:"vertical",background:"#FFF",color:"#1E293B"}} />
-      {(matched.length>0||parsed.failed>0)&&(<>
-        {matched.length>0&&(
-          <div style={{marginTop:10,overflowX:"auto",border:"1px solid #E2E8F0",borderRadius:10,background:"#FFF"}}>
-            <table style={{width:"100%",minWidth:1080,tableLayout:"fixed",borderCollapse:"collapse"}}>
-              <colgroup>{[150,null,110,150,52,64,92,250].map((w,i)=><col key={i} style={w?{width:w}:undefined} />)}</colgroup>
-              <thead><tr>{["문서번호","제목","업체","품명","차수","구분","기안일","매칭결과"].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
-              <tbody>
-                {matched.map(d=>{
-                  const k=linkOf(d);
-                  const src=d.doc_no in pick?"선택":existing[d.doc_no]&&existing[d.doc_no]===k?"기존":k?"자동":"";
-                  const opts=[...d.ranked];
-                  if(k&&!opts.some(o=>o.key===k))opts.unshift({key:k,score:null});
-                  return(
-                    <tr key={d.doc_no}>
-                      <td style={{...td,...ell,fontFamily:"monospace",fontSize:11}} title={d.doc_no}>{d.doc_no}</td>
-                      <td style={{...td,...ell}} title={d.title}>{d.title}</td>
-                      <td style={{...td,...ell,color:d.vendor?"#334155":"#94A3B8"}}>{d.vendor||"-"}</td>
-                      <td style={{...td,...ell,color:d.product_hint?"#334155":"#94A3B8"}} title={d.product_hint||""}>{d.product_hint||"-"}</td>
-                      <td style={{...td,color:d.order_round!=null?"#334155":"#94A3B8"}}>{d.order_round??"-"}</td>
-                      <td style={td}>{d.pay_kind?hwPayBadge(d.pay_kind):<span style={{color:"#94A3B8"}}>-</span>}</td>
-                      <td style={{...td,fontVariantNumeric:"tabular-nums"}}>{d.draft_date||"-"}</td>
-                      <td style={td}>
-                        <div style={{display:"flex",alignItems:"center",gap:6,minWidth:0}}>
-                          <span style={{flexShrink:0,fontSize:11,fontWeight:700,color:k?"#16A34A":"#D97706"}}>{k?src:"확인 필요"}</span>
-                          <select value={k||""} onChange={e=>{const v=e.target.value;setPick(p=>({...p,[d.doc_no]:v}));}} style={{...ocInput,flex:1,padding:"0 4px",height:26}}>
-                            <option value="">— 연결 안 함</option>
-                            {opts.map(o=><option key={o.key} value={o.key}>{label(o.key)}{o.score!=null?` (${o.score}점)`:""}</option>)}
-                          </select>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-        <div style={{display:"flex",alignItems:"center",gap:10,marginTop:10,flexWrap:"wrap"}}>
-          <span style={{fontSize:12,color:"#64748B"}}>인식 {matched.length}건 · 연결 {linkedN}건 · 확인 필요 {matched.length-linkedN}건</span>
-          {parsed.failed>0&&<span style={{fontSize:12,color:"#94A3B8"}}>인식 실패 {parsed.failed}줄</span>}
-          {hwMsgEl(msg)}
-          <span style={{flex:1}} />
-          <button disabled={!matched.length||saving} onClick={save} style={{...hwBtn,background:"#2563EB",borderColor:"#2563EB",color:"#FFF",padding:"6px 16px",fontSize:13,opacity:!matched.length||saving?0.6:1}}>{saving?"저장 중…":"저장"}</button>
-        </div>
-      </>)}
-      {!matched.length&&!parsed.failed&&msg&&<div style={{marginTop:8}}>{hwMsgEl(msg)}</div>}
-
       {/* 최근 가져온 결과 */}
-      <div style={{marginTop:16}}>
+      <div>
         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
           <div style={{fontSize:13,fontWeight:800,color:"#0F172A"}}>최근 가져온 결과 <span style={{color:"#94A3B8",fontWeight:600}}>{recent.length}</span></div>
           {hwMsgEl(rMsg)}
