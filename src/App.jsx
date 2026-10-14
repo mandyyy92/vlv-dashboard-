@@ -6574,7 +6574,11 @@ const HW_PAY_COLOR={계약금:{bg:"#EFF6FF",color:"#2563EB",bd:"#BFDBFE"},중도
 const HW_DOC_NO_RE=/OP-[^\s]+-지결-[\w-]+/;
 const HW_DATE_RE=/\d{4}-\d{2}-\d{2}/g;
 const hwCompact=s=>String(s??"").replace(/\s+/g,"");
-const hwKeyLabel=(k,disp)=>{const[n,r,f]=String(k||"").split("|");const nm=n?(disp?disp(n):n):"-";return`${nm}${r?` ${r}차`:""}${f?` · ${f}`:""}`;};
+const hwKeyLabel=(k,disp)=>{
+  const[n,r,f]=String(k||"").split("|").map(s=>String(s??"").trim());
+  const nm=n?String((disp?disp(n):n)||"").trim():"";
+  return[[nm,r?`${r}차`:""].filter(Boolean).join(" "),f].filter(Boolean).join(" · ");
+};
 // 상품명 → 표시명. map = sheet_orders product_name→display_name, 없으면 앞의 "분류-" 접두어 제거
 const hwDispName=(map,n)=>map[n]||String(n||"").replace(/^[^-]+-/,"");
 // 제목 → 업체·품명·차수·지급구분. vendors: 업체명 목록(가장 긴 일치 우선)
@@ -6703,7 +6707,7 @@ function HiworksImportPanel({candidates,onClose,onSaved}){
     const score=new Map(ranked.map(x=>[x.key,x.score]));
     const rest=candidates.filter(c=>!score.has(c.key)).map(c=>({key:c.key,score:null}));
     const kw=hwCompact(cq).toLowerCase();
-    return[...ranked,...rest].filter(x=>!kw||hwCompact(`${hwKeyLabel(x.key)} ${label(x.key)}`).toLowerCase().includes(kw)).slice(0,50);
+    return[...ranked,...rest].map(x=>({...x,label:label(x.key)})).filter(x=>x.label&&(!kw||hwCompact(`${hwKeyLabel(x.key)} ${x.label}`).toLowerCase().includes(kw))).slice(0,kw?50:20);
   },[openDoc,recent,candidates,cq,label]);
   const linkRecent=async(d,key)=>{
     try{
@@ -6942,6 +6946,7 @@ function HiworksImportPanel({candidates,onClose,onSaved}){
                   const hasRound=d.order_round!=null&&d.order_round!=="";
                   // Edge Function 이 넣어둔 추천 후보 [{order_key,label,score}] (최대 3)
                   const sugg=(Array.isArray(d.candidates)?d.candidates:[]).filter(c=>c&&c.order_key).slice(0,3);
+                  const tied=sugg.length>=2&&sugg[0].score!=null&&Number(sugg[0].score)===Number(sugg[1].score);
                   return[
                     <tr key={d.id} onClick={need?()=>{setOpenDoc(isOpen?null:d.id);setCq("");}:undefined} style={{cursor:need?"pointer":"default",background:isOpen?"#FFFBEB":"transparent"}}>
                       <td style={td}>{d.pay_kind?hwPayBadge(d.pay_kind):<span style={{color:"#94A3B8"}}>-</span>}</td>
@@ -6964,10 +6969,10 @@ function HiworksImportPanel({candidates,onClose,onSaved}){
                             <div style={{marginBottom:8}}>
                               <div style={{fontSize:11,fontWeight:700,color:"#64748B",marginBottom:4}}>추천 후보</div>
                               <div style={{display:"flex",flexDirection:"column",gap:3}}>
-                                {sugg.map(c=>(
-                                  <button key={c.order_key} onClick={()=>linkRecent(d,c.order_key)} style={{...hwBtn,textAlign:"left",display:"flex",gap:8,overflow:"hidden",borderColor:"#BFDBFE",background:"#EFF6FF"}}>
+                                {sugg.map((c,ci)=>(
+                                  <button key={c.order_key} onClick={()=>linkRecent(d,c.order_key)} style={{...hwBtn,flexShrink:0,textAlign:"left",display:"flex",gap:8,overflow:"hidden",borderColor:"#BFDBFE",background:"#EFF6FF"}}>
                                     <span style={{flex:1,minWidth:0,...ell}} title={c.label||label(c.order_key)}>{c.label||label(c.order_key)}</span>
-                                    {c.score!=null&&<span style={{flexShrink:0,fontSize:11,fontWeight:500,color:"#94A3B8"}}>{c.score}점</span>}
+                                    {c.score!=null&&<span style={{flexShrink:0,fontSize:11,fontWeight:500,color:"#94A3B8"}}>{c.score}점{ci===0&&tied?" · 동점이라 자동연결되지 않음":""}</span>}
                                   </button>
                                 ))}
                               </div>
@@ -6975,12 +6980,12 @@ function HiworksImportPanel({candidates,onClose,onSaved}){
                             </div>
                           )}
                           <input type="text" autoFocus value={cq} onChange={e=>setCq(e.target.value)} placeholder="차수 검색 (상품명·차수·업체)" style={{...ocInput,width:"100%"}} />
-                          <div style={{marginTop:6,maxHeight:220,overflowY:"auto",display:"flex",flexDirection:"column",gap:3}}>
+                          <div style={{marginTop:6,maxHeight:240,overflowY:"auto",display:"flex",flexDirection:"column",gap:3}}>
                             {!candList.length?(
                               <div style={{fontSize:12,color:"#94A3B8",padding:"4px 2px"}}>일치하는 차수가 없습니다</div>
                             ):candList.map(c=>(
-                              <button key={c.key} onClick={()=>linkRecent(d,c.key)} style={{...hwBtn,textAlign:"left",display:"flex",gap:8,overflow:"hidden"}}>
-                                <span style={{flex:1,minWidth:0,...ell}} title={label(c.key)}>{label(c.key)}</span>
+                              <button key={c.key} onClick={()=>linkRecent(d,c.key)} style={{...hwBtn,flexShrink:0,textAlign:"left",display:"flex",gap:8,overflow:"hidden"}}>
+                                <span style={{flex:1,minWidth:0,...ell}} title={c.label}>{c.label}</span>
                                 {c.score!=null&&<span style={{flexShrink:0,color:"#2563EB"}}>{c.score}점</span>}
                               </button>
                             ))}
