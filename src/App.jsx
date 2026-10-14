@@ -1152,9 +1152,6 @@ function ScheduleTab(){
           </div>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginTop:6}}>
             <span style={{fontSize:14,fontWeight:700,color:"#334155"}}>{delayMode?"지연 건 ":""}총 {waitCards.length}건 · {waitQty.toLocaleString()}장</span>
-            {(delayedCards.length>0||delayMode)&&<button onClick={()=>{setDelayMode(v=>!v);setWaitFilter(null);}}
-              title={delayMode?"다시 누르면 오늘 이후 목록으로 돌아갑니다":"지연 건 전체(지난 날짜 포함)만 보기 — 지연은 상태가 아니라 플래그입니다"}
-              style={{fontSize:12,fontWeight:700,color:delayMode?"#DC2626":"#FFF",background:delayMode?"#FFF":"#DC2626",border:"1.5px solid #DC2626",borderRadius:10,padding:"2px 9px",whiteSpace:"nowrap",cursor:"pointer"}}>{delayMode?"✕ ":""}지연 {delayedCards.length}건</button>}
           </div>
         </div>
         {/* 상태 칩 — 클릭 필터(다시 누르면 해제). 0건 상태는 숨김 */}
