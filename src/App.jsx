@@ -1010,7 +1010,9 @@ function ScheduleTab(){
   const weekCount=weekBySrc.reduce((s,w)=>s+w.cards.length,0);
   const weekQty=weekBySrc.reduce((s,w)=>s+w.qty,0);
   // 입고대기 현황 — 선택된 탭 기준. 기본 = show_date 오늘 이후, 지연 토글 = 지연 건 전체(과거 포함).
-  const trackCards=toCards(waitEvents,track);
+  // 상태 화이트리스트(생산중·부분입고)만 통과 — 총 건수·장수, 지연 뱃지, 상태 칩 모두 이 기준.
+  const WAIT_STATUSES=new Set(["생산중","부분입고"]);
+  const trackCards=toCards(waitEvents,track).filter(c=>WAIT_STATUSES.has(c.stLabel));
   const delayedCards=trackCards.filter(c=>c.delayed); // 지연은 플래그 — 뱃지 건수는 토글과 무관하게 전체
   const waitCards=delayMode?delayedCards:trackCards.filter(c=>c.date>=today);
   const waitQty=sumRemain(waitCards);
