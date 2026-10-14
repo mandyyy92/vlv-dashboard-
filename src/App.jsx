@@ -6574,7 +6574,9 @@ const HW_PAY_COLOR={계약금:{bg:"#EFF6FF",color:"#2563EB",bd:"#BFDBFE"},중도
 const HW_DOC_NO_RE=/OP-[^\s]+-지결-[\w-]+/;
 const HW_DATE_RE=/\d{4}-\d{2}-\d{2}/g;
 const hwCompact=s=>String(s??"").replace(/\s+/g,"");
-const hwKeyLabel=k=>{const[n,r,f]=String(k||"").split("|");return`${n||"-"}${r?` ${r}차`:""}${f?` · ${f}`:""}`;};
+const hwKeyLabel=(k,disp)=>{const[n,r,f]=String(k||"").split("|");const nm=n?(disp?disp(n):n):"-";return`${nm}${r?` ${r}차`:""}${f?` · ${f}`:""}`;};
+// 상품명 → 표시명. map = sheet_orders product_name→display_name, 없으면 앞의 "분류-" 접두어 제거
+const hwDispName=(map,n)=>map[n]||String(n||"").replace(/^[^-]+-/,"");
 // 제목 → 업체·품명·차수·지급구분. vendors: 업체명 목록(가장 긴 일치 우선)
 function hwParseTitle(title,vendors){
   let t=String(title||"").replace(/^\s*\[[^\]]*\]\s*/,"").replace(/비바라비다/g," ");
@@ -6642,6 +6644,9 @@ const hwMsgEl=m=>m&&<span style={{fontSize:12,fontWeight:600,color:m.ok===null?"
 function HiworksImportPanel({candidates,onClose,onSaved}){
   const[text,setText]=useState("");
   const[vendors,setVendors]=useState([]);
+  const[dispMap,setDispMap]=useState({}); // sheet_orders product_name → display_name
+  const disp=useCallback(n=>hwDispName(dispMap,n),[dispMap]);
+  const label=useCallback(k=>hwKeyLabel(k,disp),[disp]);
   const[existing,setExisting]=useState({}); // doc_no → 기존 linked_order_key
   const[pick,setPick]=useState({}); // doc_no → 수동 선택 key("" = 연결 안 함)
   const[saving,setSaving]=useState(false);
@@ -6659,7 +6664,11 @@ function HiworksImportPanel({candidates,onClose,onSaved}){
     catch{bmRef.current?.select();flashBm(false,"복사 실패 — 선택된 코드를 직접 복사하세요");}
   };
   // 최근 가져온 결과(imported_at 최신 20건) · '확인 필요' 행 수동 연결
-  const[recent,setRecent]=useState([]);
+  const[recentProd,setRecentProd]=useState([]);
+  const[recentNp,setRecentNp]=useState([]); // is_production = false (아르바이트 주급 등)
+  const[npCount,setNpCount]=useState(0);
+  const[showNp,setShowNp]=useState(false);
+  const recent=useMemo(()=>showNp?[...recentProd,...recentNp].sort((a,b)=>String(b.imported_at||"").localeCompare(String(a.imported_at||""))):recentProd,[recentProd,recentNp,showNp]);
   const[recentLoading,setRecentLoading]=useState(true);
   const[recentErr,setRecentErr]=useState("");
   const[openDoc,setOpenDoc]=useState(null); // 후보 목록이 열린 doc id
@@ -6668,9 +6677,12 @@ function HiworksImportPanel({candidates,onClose,onSaved}){
   const loadRecent=useCallback(async()=>{
     setRecentLoading(true);setRecentErr("");
     try{
-      const r=await fetch(`${SUPABASE_URL}/rest/v1/hiworks_docs?select=*&order=imported_at.desc.nullslast&limit=20`,{headers:sbHeaders});
-      if(!r.ok)throw new Error(`${r.status} ${await r.text()}`);
-      setRecent(await r.json());
+      const q=f=>fetch(`${SUPABASE_URL}/rest/v1/hiworks_docs?select=*${f}&order=imported_at.desc.nullslast&limit=20`,{headers:{...sbHeaders,Prefer:"count=exact"}});
+      const[r1,r2]=await Promise.all([q("&is_production=not.is.false"),q("&is_production=eq.false")]);
+      for(const r of[r1,r2])if(!r.ok)throw new Error(`${r.status} ${await r.text()}`);
+      const[p,np]=await Promise.all([r1.json(),r2.json()]);
+      const total=Number(String(r2.headers.get("content-range")||"").split("/")[1]);
+      setRecentProd(p);setRecentNp(np);setNpCount(Number.isFinite(total)?total:np.length);
     }catch(e){setRecentErr(e.message||String(e));}
     finally{setRecentLoading(false);}
   },[]);
@@ -6683,14 +6695,15 @@ function HiworksImportPanel({candidates,onClose,onSaved}){
     const score=new Map(ranked.map(x=>[x.key,x.score]));
     const rest=candidates.filter(c=>!score.has(c.key)).map(c=>({key:c.key,score:null}));
     const kw=hwCompact(cq).toLowerCase();
-    return[...ranked,...rest].filter(x=>!kw||hwCompact(hwKeyLabel(x.key)).toLowerCase().includes(kw)).slice(0,50);
-  },[openDoc,recent,candidates,cq]);
+    return[...ranked,...rest].filter(x=>!kw||hwCompact(`${hwKeyLabel(x.key)} ${label(x.key)}`).toLowerCase().includes(kw)).slice(0,50);
+  },[openDoc,recent,candidates,cq,label]);
   const linkRecent=async(d,key)=>{
     try{
       const row=await ocPatchRow("hiworks_docs",d.id,{linked_order_key:key,linked_at:new Date().toISOString()});
-      setRecent(p=>p.map(x=>x.id===d.id?{...x,...row}:x));
+      const upd=p=>p.map(x=>x.id===d.id?{...x,...row}:x);
+      setRecentProd(upd);setRecentNp(upd);
       setOpenDoc(null);setCq("");
-      flashR(true,`연결됨: ${hwKeyLabel(key)}`);
+      flashR(true,`연결됨: ${label(key)}`);
       onSaved();
     }catch(e){flashR(false,`연결 실패: ${e.message||e}`);}
   };
@@ -6700,17 +6713,22 @@ function HiworksImportPanel({candidates,onClose,onSaved}){
     let alive=true;
     (async()=>{
       const set=new Set(candidates.map(c=>c.factory).filter(Boolean));
+      const dm={};
       try{
         const PAGE=1000;
         for(let off=0;;off+=PAGE){
-          const r=await fetch(`${SUPABASE_URL}/rest/v1/sheet_orders?select=factory&factory=not.is.null&limit=${PAGE}&offset=${off}`,{headers:sbHeaders});
+          const r=await fetch(`${SUPABASE_URL}/rest/v1/sheet_orders?select=factory,product_name,display_name&limit=${PAGE}&offset=${off}`,{headers:sbHeaders});
           if(!r.ok)break;
           const chunk=await r.json();
-          for(const it of chunk){const f=String(it.factory??"").trim();if(f)set.add(f);}
+          for(const it of chunk){
+            const f=String(it.factory??"").trim();if(f)set.add(f);
+            const p=String(it.product_name??"").trim(),d=String(it.display_name??"").trim();
+            if(p&&d&&!dm[p])dm[p]=d;
+          }
           if(chunk.length<PAGE)break;
         }
       }catch{/* 생산공장 목록만으로 진행 */}
-      if(alive)setVendors([...set]);
+      if(alive){setVendors([...set]);setDispMap(dm);}
     })();
     return()=>{alive=false;};
   },[candidates]);
@@ -6831,7 +6849,7 @@ function HiworksImportPanel({candidates,onClose,onSaved}){
                           <span style={{flexShrink:0,fontSize:11,fontWeight:700,color:k?"#16A34A":"#D97706"}}>{k?src:"확인 필요"}</span>
                           <select value={k||""} onChange={e=>{const v=e.target.value;setPick(p=>({...p,[d.doc_no]:v}));}} style={{...ocInput,flex:1,padding:"0 4px",height:26}}>
                             <option value="">— 연결 안 함</option>
-                            {opts.map(o=><option key={o.key} value={o.key}>{hwKeyLabel(o.key)}{o.score!=null?` (${o.score}점)`:""}</option>)}
+                            {opts.map(o=><option key={o.key} value={o.key}>{label(o.key)}{o.score!=null?` (${o.score}점)`:""}</option>)}
                           </select>
                         </div>
                       </td>
@@ -6858,6 +6876,9 @@ function HiworksImportPanel({candidates,onClose,onSaved}){
           <div style={{fontSize:13,fontWeight:800,color:"#0F172A"}}>최근 가져온 결과 <span style={{color:"#94A3B8",fontWeight:600}}>{recent.length}</span></div>
           {hwMsgEl(rMsg)}
           <span style={{flex:1}} />
+          {npCount>0&&<label style={{display:"inline-flex",alignItems:"center",gap:5,fontSize:12,color:"#64748B",cursor:"pointer",userSelect:"none"}}>
+            <input type="checkbox" checked={showNp} onChange={e=>setShowNp(e.target.checked)} style={{margin:0}} />생산 외 {npCount}건 보기
+          </label>}
           <button onClick={loadRecent} disabled={recentLoading} style={hwBtn}>{recentLoading?"조회 중…":"새로고침"}</button>
         </div>
         {recentErr?(
@@ -6871,27 +6892,51 @@ function HiworksImportPanel({candidates,onClose,onSaved}){
               <thead><tr>{["구분","제목","업체","차수","연결된 차수","기안일"].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
               <tbody>
                 {recent.map(d=>{
-                  const need=!d.linked_order_key;
-                  const isOpen=openDoc===d.id;
+                  const nonProd=d.is_production===false;
+                  const need=!d.linked_order_key&&!nonProd;
+                  const isOpen=need&&openDoc===d.id;
+                  const hasRound=d.order_round!=null&&d.order_round!=="";
+                  // Edge Function 이 넣어둔 추천 후보 [{order_key,label,score}] (최대 3)
+                  const sugg=(Array.isArray(d.candidates)?d.candidates:[]).filter(c=>c&&c.order_key).slice(0,3);
                   return[
                     <tr key={d.id} onClick={need?()=>{setOpenDoc(isOpen?null:d.id);setCq("");}:undefined} style={{cursor:need?"pointer":"default",background:isOpen?"#FFFBEB":"transparent"}}>
                       <td style={td}>{d.pay_kind?hwPayBadge(d.pay_kind):<span style={{color:"#94A3B8"}}>-</span>}</td>
                       <td style={{...td,...ell}} title={d.title||""}>{d.title||"-"}</td>
                       <td style={{...td,...ell,color:d.vendor?"#334155":"#94A3B8"}}>{d.vendor||"-"}</td>
-                      <td style={{...td,color:d.order_round!=null?"#334155":"#94A3B8"}}>{d.order_round??"-"}</td>
-                      <td style={{...td,...ell,fontWeight:600,color:need?"#D97706":"#16A34A"}} title={need?"":hwKeyLabel(d.linked_order_key)}>{need?`확인 필요 ${isOpen?"▴":"▾"}`:hwKeyLabel(d.linked_order_key)}</td>
+                      <td style={{...td,color:hasRound?"#334155":"#CBD5E1"}}>{hasRound?d.order_round:"–"}</td>
+                      {d.linked_order_key?(
+                        <td style={{...td,...ell,fontWeight:600,color:"#16A34A"}} title={label(d.linked_order_key)}>{label(d.linked_order_key)}</td>
+                      ):nonProd?(
+                        <td style={{...td,color:"#94A3B8"}}>–</td>
+                      ):(
+                        <td style={{...td,fontWeight:600,color:"#D97706"}}>확인 필요 {isOpen?"▴":"▾"}</td>
+                      )}
                       <td style={{...td,fontVariantNumeric:"tabular-nums"}}>{d.draft_date||"-"}</td>
                     </tr>,
                     isOpen&&(
                       <tr key={`${d.id}-pick`}>
                         <td colSpan={6} style={{...td,background:"#FFFBEB"}}>
+                          {sugg.length>0&&(
+                            <div style={{marginBottom:8}}>
+                              <div style={{fontSize:11,fontWeight:700,color:"#64748B",marginBottom:4}}>추천 후보</div>
+                              <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                                {sugg.map(c=>(
+                                  <button key={c.order_key} onClick={()=>linkRecent(d,c.order_key)} style={{...hwBtn,textAlign:"left",display:"flex",gap:8,overflow:"hidden",borderColor:"#BFDBFE",background:"#EFF6FF"}}>
+                                    <span style={{flex:1,minWidth:0,...ell}} title={c.label||label(c.order_key)}>{c.label||label(c.order_key)}</span>
+                                    {c.score!=null&&<span style={{flexShrink:0,fontSize:11,fontWeight:500,color:"#94A3B8"}}>{c.score}점</span>}
+                                  </button>
+                                ))}
+                              </div>
+                              <div style={{fontSize:11,fontWeight:700,color:"#64748B",margin:"10px 0 4px"}}>전체 검색</div>
+                            </div>
+                          )}
                           <input type="text" autoFocus value={cq} onChange={e=>setCq(e.target.value)} placeholder="차수 검색 (상품명·차수·업체)" style={{...ocInput,width:"100%"}} />
                           <div style={{marginTop:6,maxHeight:220,overflowY:"auto",display:"flex",flexDirection:"column",gap:3}}>
                             {!candList.length?(
                               <div style={{fontSize:12,color:"#94A3B8",padding:"4px 2px"}}>일치하는 차수가 없습니다</div>
                             ):candList.map(c=>(
                               <button key={c.key} onClick={()=>linkRecent(d,c.key)} style={{...hwBtn,textAlign:"left",display:"flex",gap:8,overflow:"hidden"}}>
-                                <span style={{flex:1,minWidth:0,...ell}}>{hwKeyLabel(c.key)}</span>
+                                <span style={{flex:1,minWidth:0,...ell}} title={label(c.key)}>{label(c.key)}</span>
                                 {c.score!=null&&<span style={{flexShrink:0,color:"#2563EB"}}>{c.score}점</span>}
                               </button>
                             ))}
