@@ -6814,7 +6814,12 @@ function OrderSheetDashboard(){
   const[fYear,setFYear]=useState("");
   const[fSeason,setFSeason]=useState("");
   const[fFactory,setFFactory]=useState("");
+  // 검색: qInput=입력창 값, q=필터에 쓰는 값(한글 조합 중엔 갱신 안 함 + 200ms 디바운스). 요약카드·표 모두 q 기준.
+  const[qInput,setQInput]=useState("");
+  const[qLive,setQLive]=useState("");
   const[q,setQ]=useState("");
+  const qComposing=useRef(false);
+  useEffect(()=>{const t=setTimeout(()=>setQ(qLive),200);return()=>clearTimeout(t);},[qLive]);
   const[selKey,setSelKey]=useState(null);     // 오른쪽 드로어로 열린 그룹키(상품명␟차수, 1개만)
   const[sortKey,setSortKey]=useState("");     // ""=기본(전량입고 하단), 그 외 컬럼키
   const[sortDir,setSortDir]=useState("desc");
@@ -7026,13 +7031,18 @@ function OrderSheetDashboard(){
             <option value="">전체 공장</option>
             {factories.map(f=><option key={f} value={f}>{f}</option>)}
           </select>
-          <Input value={q} onChange={e=>setQ(e.target.value)} placeholder="상품명·상품코드 검색" style={{width:240}} />
+          <Input value={qInput} placeholder="상품명·상품코드 검색" style={{width:240}}
+            onChange={e=>{setQInput(e.target.value);if(!qComposing.current&&!e.nativeEvent.isComposing)setQLive(e.target.value);}}
+            onCompositionStart={()=>{qComposing.current=true;}}
+            onCompositionEnd={e=>{qComposing.current=false;setQInput(e.target.value);setQLive(e.target.value);}} />
           <span style={{marginLeft:"auto",fontSize:13,color:"#94A3B8"}}>{nameCount.toLocaleString()}개 상품 · {groups.length.toLocaleString()}개 차수 · {filteredRows.length.toLocaleString()}행</span>
         </div>
 
         {/* ── (상품명+차수)별 묶음 표 (행 클릭 = 오른쪽 드로어로 옵션 상세) ── */}
+        {/* 결과 수와 무관하게 높이 고정 → 검색 중 0행이어도 화면이 튀지 않음. 많으면 이 영역 안에서만 세로 스크롤 */}
+        <div style={{height:"max(560px, calc(100vh - 360px))"}}>
         {!filteredRows.length?(
-          <div style={{textAlign:"center",padding:40,color:"#94A3B8",fontSize:14}}>조건에 맞는 데이터 없음</div>
+          <div style={{height:"100%",boxSizing:"border-box",display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10,border:"1px solid #E2E8F0",color:"#94A3B8",fontSize:14}}>조건에 맞는 데이터 없음</div>
         ):(
           <Table
             headers={[
@@ -7041,7 +7051,7 @@ function OrderSheetDashboard(){
               hdr(5,sortTh("rate","입고율")),hdr(6,sortTh("ord","발주수량")),hdr(7,sortTh("inb","입고수량")),hdr(8,sortTh("short","미입고")),
               hdr(9,sortTh("amt","발주금액")),hdr(10,"업체"),
             ]}
-            cols={OSC.map(c=>c.w)} aligns={OSC.map(c=>c.a)} minW={1148} maxH={560}>
+            cols={OSC.map(c=>c.w)} aligns={OSC.map(c=>c.a)} minW={1148} maxH="100%">
             {sortedGroups.map(g=>{
               const on=selKey===g.key;
               return(
@@ -7076,6 +7086,7 @@ function OrderSheetDashboard(){
             })}
           </Table>
         )}
+        </div>
 
         {/* ── 오른쪽 드로어: 선택한 (상품명+차수)의 옵션별 상세 ── */}
         {selGroup&&(<>
