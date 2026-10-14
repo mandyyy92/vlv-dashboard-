@@ -1,7 +1,7 @@
 (function () {
   var ENDPOINT = 'https://tzjpgqfdudbhygzmbygo.supabase.co/functions/v1/hiworks-docs-import';
   var APIKEY = 'sb_publishable_j8sTg73xGX0AVgTwW43syQ_L393CW1I';
-  var SECRET = window.__VLVD_KEY || '';
+  var SECRET = window.__VLVD_KEY || 'vlvd-hiworks-2026-k3n8x1';
   var DOC_NO_RE = /OP-[^\s]+-지결-[\w-]+/;
 
   // kind: true=녹색 / false=빨강 / 'info'=회색
@@ -18,8 +18,6 @@
     clearTimeout(timer);
     timer = setTimeout(function () { d.remove(); }, 6000);
   }
-
-  if (!SECRET) { toast('가져오기 키가 없습니다. 북마클릿을 다시 등록해주세요', false); return; }
 
   // 현재 화면의 표에서 지출결의서 행 수집
   var rows = [];

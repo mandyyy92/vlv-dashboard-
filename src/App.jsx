@@ -6661,15 +6661,11 @@ function HiworksImportPanel({candidates,onClose,onSaved}){
   const[pick,setPick]=useState({}); // doc_no → 수동 선택 key("" = 연결 안 함)
   const[saving,setSaving]=useState(false);
   const[msg,flash]=useFlashMsg();
-  // 북마클릿 — 가져오기 키를 window.__VLVD_KEY 로 넘기고 현재 배포 도메인의 /hiworks-import.js(public/) 를 주입.
-  // 키는 이 state 에만 둔다(localStorage·DB·코드에 저장하지 않음).
-  const[bmKey,setBmKey]=useState("");
-  const jsStr=s=>String(s).replace(/\\/g,"\\\\").replace(/'/g,"\\'").replace(/%/g,"\\x25"); // javascript: URL 은 %xx 를 디코딩하므로 % 도 이스케이프
-  const bookmarklet=bmKey?`javascript:(function(){window.__VLVD_KEY='${jsStr(bmKey)}';var s=document.createElement('script');s.src='${jsStr(window.location.origin)}/hiworks-import.js?'+Date.now();document.body.appendChild(s);})();`:"";
+  // 북마클릿 — 현재 배포 도메인의 /hiworks-import.js(public/) 를 하이웍스 화면에 주입
+  const bookmarklet=`javascript:(function(){var s=document.createElement('script');s.src='${window.location.origin}/hiworks-import.js?'+Date.now();document.body.appendChild(s);})();`;
   const bmRef=useRef(null);
   const[bmMsg,flashBm]=useFlashMsg();
   const copyBm=async()=>{
-    if(!bookmarklet)return;
     try{await navigator.clipboard.writeText(bookmarklet);flashBm(true,"복사됨");}
     catch{bmRef.current?.select();flashBm(false,"복사 실패 — 선택된 코드를 직접 복사하세요");}
   };
@@ -6853,23 +6849,15 @@ function HiworksImportPanel({candidates,onClose,onSaved}){
       {/* 북마클릿으로 가져오기 */}
       <div style={{border:"1px solid #E2E8F0",background:"#FFF",borderRadius:10,padding:12,marginBottom:12}}>
         <div style={{fontSize:13,fontWeight:800,color:"#0F172A",marginBottom:8}}>북마클릿으로 가져오기</div>
-        <label style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,fontSize:12,color:"#64748B"}}>가져오기 키
-          <input type="password" value={bmKey} onChange={e=>setBmKey(e.target.value)} placeholder="Supabase Secret 에 등록한 값" autoComplete="off" style={{...ocInput,flex:1,maxWidth:320}} />
-        </label>
-        {bookmarklet?(
-          <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <input ref={bmRef} type="text" readOnly value={bookmarklet} onFocus={e=>e.target.select()} style={{...ocInput,flex:1,fontFamily:"monospace",color:"#475569",background:"#F8FAFC"}} />
-            <button onClick={copyBm} style={{...hwBtn,background:"#2563EB",borderColor:"#2563EB",color:"#FFF"}}>복사</button>
-            {hwMsgEl(bmMsg)}
-          </div>
-        ):(
-          <div style={{fontSize:12,color:"#94A3B8"}}>키를 입력하면 북마클릿 코드가 만들어집니다</div>
-        )}
-        <div style={{marginTop:8,fontSize:12,color:"#64748B"}}>키는 저장되지 않습니다. 북마클릿을 다시 만들 때마다 입력하세요.</div>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <input ref={bmRef} type="text" readOnly value={bookmarklet} onFocus={e=>e.target.select()} style={{...ocInput,flex:1,fontFamily:"monospace",color:"#475569",background:"#F8FAFC"}} />
+          <button onClick={copyBm} style={{...hwBtn,background:"#2563EB",borderColor:"#2563EB",color:"#FFF"}}>복사</button>
+          {hwMsgEl(bmMsg)}
+        </div>
         <ol style={{margin:"8px 0 0",paddingLeft:18,fontSize:12,color:"#64748B",lineHeight:1.7}}>
           <li>위 코드를 복사해 브라우저 즐겨찾기로 등록 (이름: 하이웍스 가져오기)</li>
           <li>하이웍스 전자결재 목록 화면을 열고</li>
-          <li>즐겨찾기를 클릭하면 화면의 목록이 자동으로 들어옵니다</li>
+          <li>즐겨찾기를 클릭하면 화면의 목록이 들어옵니다</li>
         </ol>
       </div>
       <div style={{fontSize:12,color:"#64748B",marginBottom:8}}>하이웍스 전자결재 목록을 드래그해서 복사한 뒤 붙여넣으세요</div>
