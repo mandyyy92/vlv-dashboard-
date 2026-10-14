@@ -6584,7 +6584,31 @@ const hwDocTypeOf=d=>{
   return/세금\s*계산서|계산서/.test(s)?"tax_invoice":/계약서/.test(s)?"contract":"expense";
 };
 // 하이웍스 문서 링크 → 문서번호(.../document/view/483512/...). 링크가 아니면 입력값 그대로를 문서번호로 본다.
-const HW_VIEW_RE=/\/document\/view\/(\d+)/;
+const HW_VIEW_RE=/\/view\/(\d+)/;
+// 숫자 문서 ID → 하이웍스 문서 주소
+const hwViewUrl=id=>`https://approval.office.hiworks.com/openhan.kr/approval/document/view/${id}/`;
+// 열 수 있는 주소만(javascript:void(0)·# 등은 null)
+const hwValidUrl=u=>{const s=String(u||"").trim();return/^https?:\/\/[^\s]+$/i.test(s)?s:null;};
+// '열기' 주소 — 저장된 링크 → 없으면 숫자 문서 ID 로 생성
+const hwDocUrl=d=>hwValidUrl(d?.hiworks_url)||(/^\d+$/.test(String(d?.hiworks_doc_id??""))?hwViewUrl(d.hiworks_doc_id):null);
+// 붙여넣은 하이웍스 링크 → {url, doc_id, err}
+function hwParseLink(v){
+  const s=String(v||"").trim();
+  if(!s)return{url:null,doc_id:null,err:""};
+  if(!/^https?:\/\//i.test(s))return{url:null,doc_id:null,err:"https:// 로 시작하는 하이웍스 주소를 붙여넣으세요"};
+  const m=s.match(HW_VIEW_RE);
+  if(!m)return{url:null,doc_id:null,err:"링크에서 문서 ID(/view/숫자/)를 찾지 못했습니다"};
+  return{url:s,doc_id:m[1],err:""};
+}
+// hiworks_doc_id 컬럼이 아직 없으면(SQL 미실행) 그 값만 빼고 다시 저장
+async function hwSaveWithDocId(fn,body){
+  try{return await fn(body);}
+  catch(e){
+    if(!("hiworks_doc_id" in body)||!/hiworks_doc_id/.test(String(e?.message||e)))throw e;
+    const{hiworks_doc_id,...rest}=body;
+    return await fn(rest);
+  }
+}
 function hwParseDocInput(v){
   const s=String(v||"").trim();
   if(!s)return{doc_no:"",url:null,err:""};
@@ -6612,8 +6636,11 @@ function HiworksDocsSection({group,onCountChange}){
   const[mType,setMType]=useState("expense");
   const[mInput,setMInput]=useState("");
   const[mTitle,setMTitle]=useState("");
+  const[mLink,setMLink]=useState("");
   const[mSaving,setMSaving]=useState(false);
-  const[urlSample,setUrlSample]=useState(null); // 기존에 가져온 기안의 링크 하나 — 문서번호만 입력했을 때 링크를 만드는 패턴
+  // 행별 '링크 입력' — {id, value}
+  const[linkEdit,setLinkEdit]=useState(null);
+  const[linkSaving,setLinkSaving]=useState(false);
   useEffect(()=>()=>clearTimeout(armTimer.current),[]);
 
   const load=useCallback(async()=>{
@@ -6631,18 +6658,6 @@ function HiworksDocsSection({group,onCountChange}){
     if(loading||loadErr)return;
     HW_DOC_TYPES.forEach(([t])=>onCountChange(orderKey,t,list.filter(d=>hwDocTypeOf(d)===t).length));
   },[list,loading,loadErr,orderKey,onCountChange]);
-
-  // 링크 패턴 샘플 — 직접 입력을 열 때 한 번
-  useEffect(()=>{
-    if(!manual||urlSample!==null)return;
-    (async()=>{
-      try{
-        const r=await fetch(`${SUPABASE_URL}/rest/v1/hiworks_docs?select=hiworks_url&hiworks_url=like.${encodeURIComponent("*/document/view/*")}&limit=1`,{headers:sbHeaders});
-        const rows=r.ok?await r.json():[];
-        setUrlSample(rows[0]?.hiworks_url||"");
-      }catch{setUrlSample("");}
-    })();
-  },[manual,urlSample]);
 
   // 아직 연결 안 된 기안 검색(제목·문서번호, 최근 기안일 순 100건)
   useEffect(()=>{
@@ -6688,39 +6703,62 @@ function HiworksDocsSection({group,onCountChange}){
     }catch(e){flash(false,`연결 실패: ${e.message||e}`);}
   };
 
-  // 직접 입력 미리보기 — 문서번호 추출 · 링크(입력 링크 > 기존 링크 패턴으로 생성)
+  // 링크 입력(행) 저장 — 링크 그대로 + 문서 ID 추출, 저장 즉시 '열기' 활성
+  const saveLink=async(d)=>{
+    if(linkSaving||!linkEdit)return;
+    const p=hwParseLink(linkEdit.value);
+    if(p.err||!p.url){flashRow(d.id,false,p.err||"하이웍스 주소를 붙여넣으세요");return;}
+    setLinkSaving(true);
+    try{
+      const row=await hwSaveWithDocId(b=>ocPatchRow("hiworks_docs",d.id,b),{hiworks_url:p.url,hiworks_doc_id:Number(p.doc_id)});
+      setList(prev=>prev.map(x=>x.id===d.id?{...x,...row}:x));
+      setLinkEdit(null);
+      flashRow(d.id,true,`링크 저장됨 (문서 ID ${p.doc_id})`);
+    }catch(e){flashRow(d.id,false,`링크 저장 실패: ${e.message||e}`);}
+    finally{setLinkSaving(false);}
+  };
+
+  // 직접 입력 미리보기 — 문서번호(입력값 > 링크의 문서 ID) · 링크(입력 링크 > 숫자 문서 ID 로 생성)
   const mParsed=hwParseDocInput(mInput);
-  const mUrl=mParsed.url||(mParsed.doc_no&&/^\d+$/.test(mParsed.doc_no)&&urlSample&&HW_VIEW_RE.test(urlSample)?urlSample.replace(HW_VIEW_RE,`/document/view/${mParsed.doc_no}`):null);
+  const mLinkP=hwParseLink(mLink);
+  const mDocId=mLinkP.doc_id||(/^\d{6,}$/.test(mParsed.doc_no)?mParsed.doc_no:null);
+  const mDocNo=mParsed.doc_no||mLinkP.doc_id||"";
+  const mUrl=mLinkP.url||mParsed.url||(mDocId?hwViewUrl(mDocId):null);
+  const mErr=mLinkP.err||mParsed.err;
   const addManual=async()=>{
     if(mSaving)return;
-    if(mParsed.err){flash(false,mParsed.err);return;}
-    if(!mParsed.doc_no){flash(false,"하이웍스 문서 링크 또는 문서번호를 입력하세요");return;}
+    if(mErr){flash(false,mErr);return;}
+    if(!mDocNo){flash(false,"문서번호 또는 하이웍스 링크를 입력하세요");return;}
     setMSaving(true);
     try{
       const now=new Date().toISOString();
       const title=mTitle.trim()||null;
       // 같은 문서번호가 이미 있으면(가져온 기안 등) 그 행을 이 차수에 연결, 없으면 새로 추가
-      const q=await fetch(`${SUPABASE_URL}/rest/v1/hiworks_docs?select=id,linked_order_key,hiworks_url,title&doc_no=eq.${encodeURIComponent(mParsed.doc_no)}`,{headers:sbHeaders});
+      const q=await fetch(`${SUPABASE_URL}/rest/v1/hiworks_docs?select=id,linked_order_key,hiworks_url,title&doc_no=eq.${encodeURIComponent(mDocNo)}`,{headers:sbHeaders});
       if(!q.ok)throw new Error(`${q.status} ${await q.text()}`);
       const ex=(await q.json())[0];
       let row;
       if(ex){
         if(ex.linked_order_key&&ex.linked_order_key!==orderKey)throw new Error(`이미 다른 차수에 연결된 문서입니다 (${hwKeyLabel(ex.linked_order_key)})`);
         const patch={doc_type:mType,linked_order_key:orderKey,linked_at:now};
-        if(mUrl&&!ex.hiworks_url)patch.hiworks_url=mUrl;
+        if(mUrl&&(mLinkP.url||!hwValidUrl(ex.hiworks_url)))patch.hiworks_url=mUrl;
+        if(mDocId)patch.hiworks_doc_id=Number(mDocId);
         if(title)patch.title=title;
-        row=await ocPatchRow("hiworks_docs",ex.id,patch);
+        row=await hwSaveWithDocId(b=>ocPatchRow("hiworks_docs",ex.id,b),patch);
       }else{
-        const r=await fetch(`${SUPABASE_URL}/rest/v1/hiworks_docs`,{method:"POST",headers:sbHeaders,body:JSON.stringify({
-          doc_no:mParsed.doc_no,title,hiworks_url:mUrl,doc_type:mType,linked_order_key:orderKey,linked_at:now,
-        })});
-        if(!r.ok)throw new Error(`${r.status} ${await r.text()}`);
-        row=(await r.json())[0];
-        if(!row)throw new Error("저장된 행 없음");
+        const body={doc_no:mDocNo,title,hiworks_url:mUrl,doc_type:mType,linked_order_key:orderKey,linked_at:now};
+        if(mDocId)body.hiworks_doc_id=Number(mDocId);
+        row=await hwSaveWithDocId(async b=>{
+          const r=await fetch(`${SUPABASE_URL}/rest/v1/hiworks_docs`,{method:"POST",headers:sbHeaders,body:JSON.stringify(b)});
+          if(!r.ok)throw new Error(`${r.status} ${await r.text()}`);
+          const x=(await r.json())[0];
+          if(!x)throw new Error("저장된 행 없음");
+          return x;
+        },body);
       }
       setList(p=>sortList([...p.filter(x=>x.id!==row.id),row]));
-      setMInput("");setMTitle("");
-      flash(true,`추가됨: ${mParsed.doc_no}`);
+      setMInput("");setMLink("");setMTitle("");
+      flash(true,`추가됨: ${mDocNo}`);
     }catch(e){flash(false,`추가 실패: ${e.message||e}`);}
     finally{setMSaving(false);}
   };
@@ -6762,10 +6800,21 @@ function HiworksDocsSection({group,onCountChange}){
                       {typeSelect(hwDocTypeOf(d),v=>setType(d,v))}
                       <span style={{flex:"1 1 160px",minWidth:0,fontWeight:600,color:d.title?"#0F172A":"#94A3B8",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={d.title||""}>{d.title||"(제목 없음)"}</span>
                       <span style={{flexShrink:0,fontFamily:"monospace",fontSize:12,color:"#64748B"}}>{d.doc_no}</span>
-                      {d.hiworks_url
-                        ?<button onClick={()=>openUrl(d.hiworks_url)} title="새 탭에서 열기" style={hwBtn}>열기</button>
-                        :<span style={{...hwBtn,color:"#CBD5E1",cursor:"default"}} title="링크 없음">열기</span>}
+                      {hwDocUrl(d)
+                        ?<button onClick={()=>openUrl(hwDocUrl(d))} title="새 탭에서 열기" style={hwBtn}>열기</button>
+                        :<>
+                          <span style={{...hwBtn,color:"#CBD5E1",background:"#F8FAFC",cursor:"default"}} title="링크 없음">열기</span>
+                          <button onClick={()=>setLinkEdit(linkEdit?.id===d.id?null:{id:d.id,value:""})} style={hwBtn}>{linkEdit?.id===d.id?"취소":"링크 입력"}</button>
+                        </>}
                       <button onClick={()=>confirmThen(d.id,()=>unlink(d))} style={{...hwBtn,width:84,...(armed===d.id?{background:"#DC2626",borderColor:"#DC2626",color:"#FFF"}:{color:"#DC2626"})}}>{armed===d.id?"정말 해제?":"연결 해제"}</button>
+                      {linkEdit?.id===d.id&&!hwDocUrl(d)&&(()=>{
+                        const p=hwParseLink(linkEdit.value);
+                        return <div style={{flexBasis:"100%",display:"flex",alignItems:"center",gap:6,minWidth:0}}>
+                          <input type="text" autoFocus value={linkEdit.value} onChange={e=>setLinkEdit({id:d.id,value:e.target.value})} onKeyDown={e=>{if(e.key==="Enter")saveLink(d);if(e.key==="Escape")setLinkEdit(null);}} placeholder="하이웍스 문서 주소 붙여넣기 (…/view/숫자/)" style={{...ocInput,flex:1}} />
+                          <span style={{flexShrink:0,fontSize:12,color:p.err?"#DC2626":"#64748B"}}>{p.err||(p.doc_id?<>문서 ID <b style={{fontFamily:"monospace",color:"#0F172A"}}>{p.doc_id}</b></>:"")}</span>
+                          <button disabled={linkSaving||!p.url} onClick={()=>saveLink(d)} style={{...primaryBtn,opacity:linkSaving||!p.url?0.6:1}}>{linkSaving?"저장 중…":"저장"}</button>
+                        </div>;
+                      })()}
                       {rowMsgs[d.id]&&<span style={{...ocMsgStyle(rowMsgs[d.id]),flexBasis:"100%"}}>{rowMsgs[d.id].text}</span>}
                     </div>
                   ))}
@@ -6786,14 +6835,15 @@ function HiworksDocsSection({group,onCountChange}){
         <div style={{marginTop:8,border:"1px solid #E2E8F0",borderRadius:10,padding:10,background:"#F8FAFC",display:"flex",flexDirection:"column",gap:6}}>
           <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
             {typeSelect(mType,setMType,{height:30,fontSize:12})}
-            <input type="text" value={mInput} onChange={e=>setMInput(e.target.value)} placeholder="하이웍스 문서 링크 또는 문서번호" style={{...ocInput,flex:"1 1 220px"}} />
+            <input type="text" value={mInput} onChange={e=>setMInput(e.target.value)} placeholder="문서번호 (비우면 링크의 문서 ID)" style={{...ocInput,flex:"1 1 220px"}} />
           </div>
+          <input type="text" value={mLink} onChange={e=>setMLink(e.target.value)} placeholder="하이웍스 링크 (https://…/view/숫자/)" style={{...ocInput,width:"100%"}} />
           <input type="text" value={mTitle} onChange={e=>setMTitle(e.target.value)} placeholder="제목" onKeyDown={e=>{if(e.key==="Enter")addManual();}} style={{...ocInput,width:"100%"}} />
           <div style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#64748B",minWidth:0}}>
-            <span style={{flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:mParsed.err?"#DC2626":"#64748B"}}>
-              {mParsed.err||(mParsed.doc_no?<>문서번호 <b style={{fontFamily:"monospace",color:"#0F172A"}}>{mParsed.doc_no}</b> · {mUrl?(mParsed.url?"입력한 링크 사용":"링크 자동 생성"):"링크 없이 저장"}</>:"링크를 붙여넣으면 문서번호를 자동으로 뽑습니다")}
+            <span style={{flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:mErr?"#DC2626":"#64748B"}}>
+              {mErr||(mDocNo?<>문서번호 <b style={{fontFamily:"monospace",color:"#0F172A"}}>{mDocNo}</b>{mDocId&&<> · 문서 ID <b style={{fontFamily:"monospace",color:"#0F172A"}}>{mDocId}</b></>} · {mUrl?(mLinkP.url||mParsed.url?"입력한 링크 사용":"링크 자동 생성"):"링크 없이 저장"}</>:"링크를 붙여넣으면 문서 ID를 자동으로 뽑습니다")}
             </span>
-            <button disabled={mSaving||!mParsed.doc_no} onClick={addManual} style={{...primaryBtn,opacity:mSaving||!mParsed.doc_no?0.6:1}}>{mSaving?"저장 중…":"추가"}</button>
+            <button disabled={mSaving||!mDocNo||!!mErr} onClick={addManual} style={{...primaryBtn,opacity:mSaving||!mDocNo||mErr?0.6:1}}>{mSaving?"저장 중…":"추가"}</button>
           </div>
         </div>
       )}

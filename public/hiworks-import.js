@@ -19,6 +19,45 @@
     timer = setTimeout(function () { d.remove(); }, 6000);
   }
 
+  var VIEW_URL = 'https://approval.office.hiworks.com/openhan.kr/approval/document/view/';
+  var VIEW_RE = /\/view\/(\d+)/;
+  // 6자리 이상 숫자 — 날짜(YYYYMMDD)·일시(YYYYMMDDhhmmss)는 제외
+  function pickId(str) {
+    var re = /(\d{6,})/g, m;
+    while ((m = re.exec(String(str || '')))) {
+      var n = m[1];
+      if (/^20\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(\d{6})?$/.test(n)) continue;
+      return n;
+    }
+    return null;
+  }
+  // 행에서 숫자 문서 ID 찾기 — onclick → data-* → 내부 요소 id/value 순. {id, src} (src = 찾은 속성)
+  function findDocId(tr) {
+    var els = [tr].concat([].slice.call(tr.querySelectorAll('*')));
+    var k, id, at;
+    for (k = 0; k < els.length; k++) {
+      id = pickId(els[k].getAttribute('onclick'));
+      if (id) return { id: id, src: 'onclick' };
+    }
+    for (k = 0; k < els.length; k++) {
+      at = els[k].attributes;
+      for (var x = 0; x < at.length; x++) {
+        if (at[x].name.indexOf('data-') !== 0) continue;
+        id = pickId(at[x].value);
+        if (id) return { id: id, src: at[x].name };
+      }
+    }
+    for (k = 1; k < els.length; k++) {
+      id = pickId(els[k].id);
+      if (id) return { id: id, src: 'id' };
+      id = typeof els[k].value === 'string' ? pickId(els[k].value) : null;
+      if (id) return { id: id, src: 'value' };
+    }
+    return null;
+  }
+  var srcCount = {};
+  var noId = 0;
+
   // 현재 화면의 표에서 지출결의서 행 수집
   var rows = [];
   var seen = {};
@@ -41,8 +80,15 @@
     var key = m ? m[0] : joined;
     if (seen[key]) continue;
     seen[key] = true;
+    // 하이웍스 목록은 JS 로 열려서 href 가 javascript:void(0)·# — 이런 href 는 URL 로 쓰지 않는다
     var a = trs[i].querySelector('a[href]');
-    rows.push({ cells: cells, url: a ? a.href : null });
+    var href = a ? (a.getAttribute('href') || '').trim() : '';
+    var url = href && !/^javascript:/i.test(href) && href.charAt(0) !== '#' ? a.href : null;
+    var found = findDocId(trs[i]);
+    if (!found && url) { var vm = url.match(VIEW_RE); if (vm) found = { id: vm[1], src: 'href' }; }
+    if (found) { url = VIEW_URL + found.id + '/'; srcCount[found.src] = (srcCount[found.src] || 0) + 1; }
+    else noId++;
+    rows.push({ cells: cells, url: url, hiworks_doc_id: found ? Number(found.id) : null, doc_id_source: found ? found.src : null });
   }
 
   if (!rows.length) { toast('이 화면에서 지출결의서 목록을 찾지 못했습니다', false); return; }
@@ -56,8 +102,10 @@
     .then(function (r) { return r.json(); })
     .then(function (d) {
       if (d.error) { toast('실패: ' + d.error, false); return; }
+      var srcs = Object.keys(srcCount).map(function (k) { return k + ' ' + srcCount[k]; }).join(', ');
       toast('가져오기 완료 ' + d.saved + '건 · 자동연결 ' + d.auto_linked + '건' +
-            (d.skipped ? ' · 인식실패 ' + d.skipped + '건' : ''), true);
+            (d.skipped ? ' · 인식실패 ' + d.skipped + '건' : '') +
+            ' · 문서ID ' + (srcs ? '(' + srcs + ')' : '없음') + (noId ? ' · ID 못 찾음 ' + noId + '건' : ''), true);
     })
     .catch(function (e) { toast('전송 실패: ' + e.message, false); });
 })();
