@@ -6204,7 +6204,7 @@ const OC_DOC={
   tax_invoice:{title:"세금계산서",icon:"🧾",empty:"첨부된 세금계산서가 없습니다",prefix:"tax/",filter:"&doc_type=eq.tax_invoice"},
 };
 // 표 차수 행의 보유 문서 아이콘
-const OC_BADGES=[["contract","📄","계약서"],["tax_invoice","🧾","세금계산서"],["expense","💳","지출결의서"]];
+const OC_BADGES=[["contract","📄","계약서"],["tax_invoice","🧾","세금계산서"],["expense","💳","지출결의서"],["hiworks","📋","하이웍스 기안"]];
 
 // 계약서 / 세금계산서 첨부 섹션 (order_contracts, docType 으로 구분). 세금계산서는 행마다 발행일·공급가액 입력 + 합계.
 function OrderContractsSection({group,docType="contract",onCountChange}){
@@ -6568,6 +6568,358 @@ function OrderExpenseSection({group,onCountChange}){
   );
 }
 
+// ─── 하이웍스 기안 (hiworks_docs) — 전자결재 목록 붙여넣기 → 제목 파싱 → 차수(order_key) 자동 연결 ───
+const HW_PAY_KINDS=["계약금","중도금","잔금"];
+const HW_PAY_COLOR={계약금:{bg:"#EFF6FF",color:"#2563EB",bd:"#BFDBFE"},중도금:{bg:"#FEF3C7",color:"#B45309",bd:"#FDE68A"},잔금:{bg:"#DCFCE7",color:"#16A34A",bd:"#BBF7D0"}};
+const HW_DOC_NO_RE=/OP-[^\s]+-지결-[\w-]+/;
+const HW_DATE_RE=/\d{4}-\d{2}-\d{2}/g;
+const hwCompact=s=>String(s??"").replace(/\s+/g,"");
+const hwKeyLabel=k=>{const[n,r,f]=String(k||"").split("|");return`${n||"-"}${r?` ${r}차`:""}${f?` · ${f}`:""}`;};
+// 제목 → 업체·품명·차수·지급구분. vendors: 업체명 목록(가장 긴 일치 우선)
+function hwParseTitle(title,vendors){
+  let t=String(title||"").replace(/^\s*\[[^\]]*\]\s*/,"").replace(/비바라비다/g," ");
+  const pay_kind=HW_PAY_KINDS.find(k=>t.includes(k))||null;
+  const rm=t.match(/#\s*(\d+)/)||t.match(/(\d+)\s*차/);
+  const order_round=rm?Number(rm[1]):null;
+  const vendor=vendors.filter(v=>v&&t.includes(v)).sort((a,b)=>b.length-a.length)[0]||null;
+  let h=t;
+  if(vendor)h=h.split(vendor).join(" ");
+  h=h.replace(/지급\s*의\s*건/g," ").replace(/#\s*\d+/g," ").replace(/\d+\s*차/g," ").replace(/\(\s*\d+\s*\)/g," ")
+    .replace(/리오더|생산|계약금|중도금|잔금/g," ").replace(/\s+/g," ").trim();
+  return{vendor,product_hint:h||null,order_round,pay_kind};
+}
+// 붙여넣은 텍스트 → {docs, failed}. 열 구분은 탭 또는 2칸 이상 공백, 각 값은 패턴으로 판별.
+function hwParsePaste(text,vendors){
+  const docs=[];let failed=0;const seen=new Set();
+  for(const line of String(text||"").split(/\r?\n/)){
+    if(!line.trim())continue;
+    const toks=line.split(/\t|\s{2,}/).map(s=>s.trim()).filter(Boolean);
+    let doc_no=null;
+    for(const tk of toks){const m=tk.match(HW_DOC_NO_RE);if(m){doc_no=m[0];break;}}
+    const title=toks.filter(tk=>tk.startsWith("[")).sort((a,b)=>b.length-a.length)[0]||null;
+    if(!doc_no||!title){failed++;continue;}
+    const rest=toks.filter(tk=>tk!==title&&!tk.includes(doc_no));
+    const dates=rest.join(" ").match(HW_DATE_RE)||[];
+    const drafter=rest.find(tk=>/^[A-Za-z]+[가-힣]+$/.test(tk))||null;
+    const doc_kind=rest.find(tk=>tk.includes("지출결의서"))||null;
+    if(seen.has(doc_no))continue;
+    seen.add(doc_no);
+    docs.push({doc_no,title,drafter,draft_date:dates[0]||null,done_date:dates.length>=2?dates[1]:null,doc_kind,...hwParseTitle(title,vendors)});
+  }
+  return{docs,failed};
+}
+// 공백 제거 후 최장 공통 연속 문자열 길이
+const hwLcs=(a,b)=>{let best=0;const prev=new Array(b.length+1).fill(0);for(let i=1;i<=a.length;i++){let diag=0;for(let j=1;j<=b.length;j++){const tmp=prev[j];prev[j]=a[i-1]===b[j-1]?diag+1:0;if(prev[j]>best)best=prev[j];diag=tmp;}}return best;};
+// 차수 후보 점수: 업체 +3 / 차수 +3 / 품명 포함 +2 (아니면 2글자 이상 연속 일치 +1)
+function hwScore(doc,c){
+  let s=0;
+  if(doc.vendor&&hwCompact(doc.vendor)===hwCompact(c.factory))s+=3;
+  if(doc.order_round!=null&&c.round&&osNum(c.round)===doc.order_round)s+=3;
+  const h=hwCompact(doc.product_hint),n=hwCompact(c.name);
+  if(h&&n){if(n.includes(h)||h.includes(n))s+=2;else if(hwLcs(h,n)>=2)s+=1;}
+  return s;
+}
+// → {auto: 자동 연결 key|null, ranked: 점수순 후보(상위 8)}
+function hwMatch(doc,candidates){
+  const ranked=candidates.map(c=>({key:c.key,score:hwScore(doc,c)})).filter(x=>x.score>0).sort((a,b)=>b.score-a.score);
+  const[b1,b2]=ranked;
+  const auto=b1&&b1.score>=5&&(!b2||b1.score-b2.score>=2)?b1.key:null;
+  return{auto,ranked:ranked.slice(0,8)};
+}
+const hwBtn={border:"1px solid #E2E8F0",background:"#FFF",borderRadius:6,padding:"4px 10px",fontSize:12,fontWeight:600,cursor:"pointer",color:"#334155",whiteSpace:"nowrap"};
+const hwPayBadge=k=>{const c=HW_PAY_COLOR[k]||{bg:"#F1F5F9",color:"#64748B",bd:"#E2E8F0"};return <span style={{flexShrink:0,fontSize:11,fontWeight:700,color:c.color,background:c.bg,border:`1px solid ${c.bd}`,borderRadius:6,padding:"1px 7px"}}>{k||"구분없음"}</span>;};
+// 인라인 메시지(3초 후 사라짐) — ok: true=녹색 / false=빨강 / null=회색
+function useFlashMsg(){
+  const[msg,setMsg]=useState(null);
+  const t=useRef(null);
+  useEffect(()=>()=>clearTimeout(t.current),[]);
+  const flash=useCallback((ok,text)=>{clearTimeout(t.current);setMsg({ok,text});t.current=setTimeout(()=>setMsg(null),3000);},[]);
+  return[msg,flash];
+}
+const hwMsgEl=m=>m&&<span style={{fontSize:12,fontWeight:600,color:m.ok===null?"#64748B":m.ok?"#16A34A":"#DC2626"}}>{m.text}</span>;
+
+// 오더 입고현황 상단 — 붙여넣기 → 미리보기 → hiworks_docs upsert(doc_no 기준)
+function HiworksImportPanel({candidates,onClose,onSaved}){
+  const[text,setText]=useState("");
+  const[vendors,setVendors]=useState([]);
+  const[existing,setExisting]=useState({}); // doc_no → 기존 linked_order_key
+  const[pick,setPick]=useState({}); // doc_no → 수동 선택 key("" = 연결 안 함)
+  const[saving,setSaving]=useState(false);
+  const[msg,flash]=useFlashMsg();
+
+  // 업체 목록 = sheet_orders.factory distinct (+ 오더 입고현황 생산공장 — order_key 업체명과 맞추기 위해)
+  useEffect(()=>{
+    let alive=true;
+    (async()=>{
+      const set=new Set(candidates.map(c=>c.factory).filter(Boolean));
+      try{
+        const PAGE=1000;
+        for(let off=0;;off+=PAGE){
+          const r=await fetch(`${SUPABASE_URL}/rest/v1/sheet_orders?select=factory&factory=not.is.null&limit=${PAGE}&offset=${off}`,{headers:sbHeaders});
+          if(!r.ok)break;
+          const chunk=await r.json();
+          for(const it of chunk){const f=String(it.factory??"").trim();if(f)set.add(f);}
+          if(chunk.length<PAGE)break;
+        }
+      }catch{/* 생산공장 목록만으로 진행 */}
+      if(alive)setVendors([...set]);
+    })();
+    return()=>{alive=false;};
+  },[candidates]);
+
+  const parsed=useMemo(()=>hwParsePaste(text,vendors),[text,vendors]);
+  const matched=useMemo(()=>parsed.docs.map(d=>({...d,...hwMatch(d,candidates)})),[parsed,candidates]);
+
+  // 이미 저장된 문서는 기존 연결을 기본값으로 유지
+  useEffect(()=>{
+    const nos=parsed.docs.map(d=>d.doc_no).filter(n=>!(n in existing));
+    if(!nos.length)return;
+    let alive=true;
+    (async()=>{
+      try{
+        const r=await fetch(`${SUPABASE_URL}/rest/v1/hiworks_docs?select=doc_no,linked_order_key&doc_no=in.(${nos.map(n=>encodeURIComponent(`"${n}"`)).join(",")})`,{headers:sbHeaders});
+        if(!r.ok)return;
+        const m={};nos.forEach(n=>{m[n]=null;});
+        for(const it of await r.json())m[it.doc_no]=it.linked_order_key||null;
+        if(alive)setExisting(p=>({...p,...m}));
+      }catch{/* 무시 */}
+    })();
+    return()=>{alive=false;};
+  },[parsed,existing]);
+
+  // 최종 연결 key: 수동 선택 > 기존 연결 > 자동 매칭
+  const linkOf=d=>d.doc_no in pick?(pick[d.doc_no]||null):(existing[d.doc_no]||d.auto);
+  const linkedN=matched.filter(d=>linkOf(d)).length;
+
+  const save=async()=>{
+    if(!matched.length||saving)return;
+    setSaving(true);
+    try{
+      const now=new Date().toISOString();
+      const base=d=>({doc_no:d.doc_no,title:d.title,drafter:d.drafter,draft_date:d.draft_date,done_date:d.done_date,doc_kind:d.doc_kind,
+        vendor:d.vendor,product_hint:d.product_hint,order_round:d.order_round,pay_kind:d.pay_kind,imported_at:now});
+      // 연결 없는 문서는 linked_* 를 보내지 않아 기존 연결을 덮어쓰지 않는다. 선택으로 해제한 건만 null 로.
+      const linked=[],unlinked=[];
+      for(const d of matched){
+        const k=linkOf(d);
+        if(k)linked.push({...base(d),linked_order_key:k,linked_at:existing[d.doc_no]===k?undefined:now});
+        else if(d.doc_no in pick&&existing[d.doc_no])linked.push({...base(d),linked_order_key:null,linked_at:null});
+        else unlinked.push(base(d));
+      }
+      // 같은 요청 안에서는 키 구성이 같아야 하므로 linked_at 유무로 한 번 더 나눈다
+      const batches=[linked.filter(x=>x.linked_at!==undefined),linked.filter(x=>x.linked_at===undefined).map(({linked_at,...x})=>x),unlinked];
+      for(const body of batches){
+        if(!body.length)continue;
+        const r=await fetch(`${SUPABASE_URL}/rest/v1/hiworks_docs?on_conflict=doc_no`,{method:"POST",headers:{...sbHeaders,Prefer:"resolution=merge-duplicates,return=minimal"},body:JSON.stringify(body)});
+        if(!r.ok)throw new Error(`${r.status} ${await r.text()}`);
+      }
+      setExisting(p=>{const n={...p};matched.forEach(d=>{n[d.doc_no]=linkOf(d);});return n;});
+      setPick({});
+      flash(true,`저장됨: ${matched.length}건 (연결 ${linkedN}건)`);
+      onSaved();
+    }catch(e){flash(false,`저장 실패: ${e.message||e}`);}
+    finally{setSaving(false);}
+  };
+
+  const th={padding:"8px 10px",background:"#F8FAFC",fontWeight:600,color:"#64748B",fontSize:11,textAlign:"left",borderBottom:"1px solid #E2E8F0",whiteSpace:"nowrap"};
+  const td={padding:"7px 10px",fontSize:12,color:"#334155",borderBottom:"1px solid #F1F5F9",verticalAlign:"middle"};
+  const ell={overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"};
+  return(
+    <div style={{border:"1px solid #BFDBFE",background:"#F8FBFF",borderRadius:12,padding:16,margin:"16px 0"}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+        <div style={{fontSize:14,fontWeight:800,color:"#0F172A"}}>하이웍스 기안 불러오기</div>
+        <span style={{flex:1}} />
+        <button onClick={onClose} style={hwBtn}>닫기</button>
+      </div>
+      <div style={{fontSize:12,color:"#64748B",marginBottom:8}}>하이웍스 전자결재 목록을 드래그해서 복사한 뒤 붙여넣으세요</div>
+      <textarea value={text} onChange={e=>setText(e.target.value)} rows={8} placeholder="여기에 붙여넣기"
+        style={{width:"100%",boxSizing:"border-box",padding:10,borderRadius:8,border:"1px solid #CBD5E1",fontSize:12,fontFamily:"monospace",resize:"vertical",background:"#FFF",color:"#1E293B"}} />
+      {(matched.length>0||parsed.failed>0)&&(<>
+        {matched.length>0&&(
+          <div style={{marginTop:10,overflowX:"auto",border:"1px solid #E2E8F0",borderRadius:10,background:"#FFF"}}>
+            <table style={{width:"100%",minWidth:1080,tableLayout:"fixed",borderCollapse:"collapse"}}>
+              <colgroup>{[150,null,110,150,52,64,92,250].map((w,i)=><col key={i} style={w?{width:w}:undefined} />)}</colgroup>
+              <thead><tr>{["문서번호","제목","업체","품명","차수","구분","기안일","매칭결과"].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
+              <tbody>
+                {matched.map(d=>{
+                  const k=linkOf(d);
+                  const src=d.doc_no in pick?"선택":existing[d.doc_no]&&existing[d.doc_no]===k?"기존":k?"자동":"";
+                  const opts=[...d.ranked];
+                  if(k&&!opts.some(o=>o.key===k))opts.unshift({key:k,score:null});
+                  return(
+                    <tr key={d.doc_no}>
+                      <td style={{...td,...ell,fontFamily:"monospace",fontSize:11}} title={d.doc_no}>{d.doc_no}</td>
+                      <td style={{...td,...ell}} title={d.title}>{d.title}</td>
+                      <td style={{...td,...ell,color:d.vendor?"#334155":"#94A3B8"}}>{d.vendor||"-"}</td>
+                      <td style={{...td,...ell,color:d.product_hint?"#334155":"#94A3B8"}} title={d.product_hint||""}>{d.product_hint||"-"}</td>
+                      <td style={{...td,color:d.order_round!=null?"#334155":"#94A3B8"}}>{d.order_round??"-"}</td>
+                      <td style={td}>{d.pay_kind?hwPayBadge(d.pay_kind):<span style={{color:"#94A3B8"}}>-</span>}</td>
+                      <td style={{...td,fontVariantNumeric:"tabular-nums"}}>{d.draft_date||"-"}</td>
+                      <td style={td}>
+                        <div style={{display:"flex",alignItems:"center",gap:6,minWidth:0}}>
+                          <span style={{flexShrink:0,fontSize:11,fontWeight:700,color:k?"#16A34A":"#D97706"}}>{k?src:"확인 필요"}</span>
+                          <select value={k||""} onChange={e=>{const v=e.target.value;setPick(p=>({...p,[d.doc_no]:v}));}} style={{...ocInput,flex:1,padding:"0 4px",height:26}}>
+                            <option value="">— 연결 안 함</option>
+                            {opts.map(o=><option key={o.key} value={o.key}>{hwKeyLabel(o.key)}{o.score!=null?` (${o.score}점)`:""}</option>)}
+                          </select>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div style={{display:"flex",alignItems:"center",gap:10,marginTop:10,flexWrap:"wrap"}}>
+          <span style={{fontSize:12,color:"#64748B"}}>인식 {matched.length}건 · 연결 {linkedN}건 · 확인 필요 {matched.length-linkedN}건</span>
+          {parsed.failed>0&&<span style={{fontSize:12,color:"#94A3B8"}}>인식 실패 {parsed.failed}줄</span>}
+          {hwMsgEl(msg)}
+          <span style={{flex:1}} />
+          <button disabled={!matched.length||saving} onClick={save} style={{...hwBtn,background:"#2563EB",borderColor:"#2563EB",color:"#FFF",padding:"6px 16px",fontSize:13,opacity:!matched.length||saving?0.6:1}}>{saving?"저장 중…":"저장"}</button>
+        </div>
+      </>)}
+      {!matched.length&&!parsed.failed&&msg&&<div style={{marginTop:8}}>{hwMsgEl(msg)}</div>}
+    </div>
+  );
+}
+
+// 서랍 — 이 차수에 연결된 하이웍스 기안(지출결의서) 목록 · 링크 입력 · 연결 해제 · 직접 연결
+function HiworksDocsSection({group,onCountChange}){
+  const orderKey=ocOrderKey(group);
+  const[list,setList]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[loadErr,setLoadErr]=useState("");
+  const[rowMsgs,flashRow]=useRowFlash();
+  const[msg,flash]=useFlashMsg();
+  const[armed,setArmed]=useState(null);
+  const armTimer=useRef(null);
+  const[picker,setPicker]=useState(false);
+  const[pq,setPq]=useState("");
+  const[cands,setCands]=useState([]);
+  const[candLoading,setCandLoading]=useState(false);
+  useEffect(()=>()=>clearTimeout(armTimer.current),[]);
+
+  const load=useCallback(async()=>{
+    setLoading(true);setLoadErr("");
+    try{
+      const r=await fetch(`${SUPABASE_URL}/rest/v1/hiworks_docs?select=*&linked_order_key=eq.${encodeURIComponent(orderKey)}&order=draft_date.asc.nullslast,doc_no.asc`,{headers:sbHeaders});
+      if(!r.ok)throw new Error(`${r.status} ${await r.text()}`);
+      setList(await r.json());
+    }catch(e){setLoadErr(e.message||String(e));}
+    finally{setLoading(false);}
+  },[orderKey]);
+  useEffect(()=>{load();},[load]);
+  useEffect(()=>{if(!loading&&!loadErr)onCountChange(orderKey,"hiworks",list.length);},[list.length,loading,loadErr,orderKey,onCountChange]);
+
+  // 아직 연결 안 된 기안 검색(제목·문서번호, 최근 기안일 순 100건)
+  useEffect(()=>{
+    if(!picker)return;
+    let alive=true;
+    const t=setTimeout(async()=>{
+      setCandLoading(true);
+      try{
+        const kw=pq.trim().replace(/[(),*]/g," ").trim();
+        const f=kw?`&or=(title.ilike.*${encodeURIComponent(kw)}*,doc_no.ilike.*${encodeURIComponent(kw)}*)`:"";
+        const r=await fetch(`${SUPABASE_URL}/rest/v1/hiworks_docs?select=*&linked_order_key=is.null${f}&order=draft_date.desc.nullslast&limit=100`,{headers:sbHeaders});
+        if(!r.ok)throw new Error(`${r.status} ${await r.text()}`);
+        const data=await r.json();
+        if(alive)setCands(data);
+      }catch(e){if(alive){setCands([]);flash(false,`검색 실패: ${e.message||e}`);}}
+      finally{if(alive)setCandLoading(false);}
+    },250);
+    return()=>{alive=false;clearTimeout(t);};
+  },[picker,pq,flash]);
+
+  const saveUrl=async(d,v)=>{
+    const val=v.trim()||null;
+    if((d.hiworks_url||null)===val)return;
+    try{
+      const row=await ocPatchRow("hiworks_docs",d.id,{hiworks_url:val});
+      setList(p=>p.map(x=>x.id===d.id?{...x,...row}:x));
+      flashRow(d.id,true,"저장됨");
+    }catch(e){flashRow(d.id,false,`저장 실패: ${e.message||e}`);}
+  };
+  const unlink=async(d)=>{
+    try{
+      await ocPatchRow("hiworks_docs",d.id,{linked_order_key:null,linked_at:null});
+      setList(p=>p.filter(x=>x.id!==d.id));
+      flash(true,`연결 해제됨: ${d.doc_no}`);
+    }catch(e){flashRow(d.id,false,`해제 실패: ${e.message||e}`);}
+  };
+  const link=async(d)=>{
+    try{
+      const row=await ocPatchRow("hiworks_docs",d.id,{linked_order_key:orderKey,linked_at:new Date().toISOString()});
+      setList(p=>[...p,row].sort((a,b)=>String(a.draft_date||"9999").localeCompare(String(b.draft_date||"9999"))));
+      setCands(p=>p.filter(x=>x.id!==d.id));
+      flash(true,`연결됨: ${d.doc_no}`);
+    }catch(e){flash(false,`연결 실패: ${e.message||e}`);}
+  };
+  const confirmThen=(id,fn)=>{
+    clearTimeout(armTimer.current);
+    if(armed===id){setArmed(null);fn();return;}
+    setArmed(id);
+    armTimer.current=setTimeout(()=>setArmed(null),3000);
+  };
+  const openUrl=u=>{const url=/^https?:\/\//i.test(u)?u:`https://${u}`;window.open(url,"_blank","noopener");};
+
+  return(
+    <div style={{marginBottom:24}}>
+      <div style={{fontSize:13,fontWeight:800,color:"#0F172A",marginBottom:10}}>지출결의서 · 하이웍스 기안 <span style={{color:"#94A3B8",fontWeight:600}}>{list.length}</span></div>
+      {loading?(
+        <div style={{fontSize:13,color:"#94A3B8",padding:"12px 0"}}>⏳ 불러오는 중...</div>
+      ):loadErr?(
+        <div style={{fontSize:13,color:"#DC2626",padding:"12px 0"}}>하이웍스 기안 불러오기 실패: {loadErr}</div>
+      ):!list.length?(
+        <div style={{fontSize:13,color:"#94A3B8",padding:"12px 0"}}>연결된 하이웍스 기안이 없습니다</div>
+      ):(
+        <div style={{border:"1px solid #E2E8F0",borderRadius:10,overflow:"hidden"}}>
+          {list.map((d,i)=>(
+            <div key={d.id} style={{padding:"9px 12px",borderTop:i?"1px solid #F1F5F9":"none"}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0,fontSize:13}}>
+                {hwPayBadge(d.pay_kind)}
+                <span style={{flex:1,minWidth:0,fontWeight:600,color:"#0F172A",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={d.title}>{d.title}</span>
+              </div>
+              <div style={{display:"flex",flexWrap:"wrap",alignItems:"center",gap:8,marginTop:6,fontSize:12,color:"#64748B"}}>
+                <span style={{fontFamily:"monospace"}}>{d.doc_no}</span>
+                <span style={{fontVariantNumeric:"tabular-nums"}}>기안 {d.draft_date||"-"}</span>
+                <input type="text" key={`${d.id}|${d.hiworks_url||""}`} defaultValue={d.hiworks_url||""} placeholder="하이웍스 링크"
+                  onBlur={e=>saveUrl(d,e.target.value)} style={{...ocInput,flex:"1 1 160px"}} />
+                {d.hiworks_url&&<button onClick={()=>openUrl(d.hiworks_url)} title="새 탭에서 열기" style={hwBtn}>🔗</button>}
+                <button onClick={()=>confirmThen(d.id,()=>unlink(d))} style={{...hwBtn,width:84,...(armed===d.id?{background:"#DC2626",borderColor:"#DC2626",color:"#FFF"}:{color:"#DC2626"})}}>{armed===d.id?"정말 해제?":"연결 해제"}</button>
+                {rowMsgs[d.id]&&<span style={ocMsgStyle(rowMsgs[d.id])}>{rowMsgs[d.id].text}</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{display:"flex",alignItems:"center",gap:8,marginTop:8}}>
+        {!loading&&!loadErr&&<button onClick={()=>setPicker(v=>!v)} style={picker?hwBtn:{...hwBtn,background:"#2563EB",borderColor:"#2563EB",color:"#FFF"}}>{picker?"닫기":"기안 직접 연결"}</button>}
+        {hwMsgEl(msg)}
+      </div>
+      {picker&&(
+        <div style={{marginTop:8,border:"1px solid #E2E8F0",borderRadius:10,padding:10,background:"#F8FAFC"}}>
+          <input type="text" value={pq} onChange={e=>setPq(e.target.value)} placeholder="제목·문서번호 검색 (연결 안 된 기안)" style={{...ocInput,width:"100%"}} />
+          <div style={{marginTop:8,maxHeight:260,overflowY:"auto",display:"flex",flexDirection:"column",gap:4}}>
+            {candLoading&&!cands.length?(
+              <div style={{fontSize:12,color:"#94A3B8",padding:"6px 2px"}}>⏳ 검색 중...</div>
+            ):!cands.length?(
+              <div style={{fontSize:12,color:"#94A3B8",padding:"6px 2px"}}>연결 안 된 기안이 없습니다</div>
+            ):cands.map(d=>(
+              <div key={d.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 8px",background:"#FFF",border:"1px solid #F1F5F9",borderRadius:8,fontSize:12,minWidth:0}}>
+                {hwPayBadge(d.pay_kind)}
+                <span style={{flex:1,minWidth:0,color:"#0F172A",fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={d.title}>{d.title}</span>
+                <span style={{flexShrink:0,color:"#94A3B8",fontVariantNumeric:"tabular-nums"}}>{d.draft_date||"-"}</span>
+                <button onClick={()=>link(d)} style={hwBtn}>연결</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OrderSheetDashboard(){
   const[rows,setRows]=useState([]);
   const[loading,setLoading]=useState(true);
@@ -6625,17 +6977,21 @@ function OrderSheetDashboard(){
   // order_expense_docs 는 order_key 로 각각 한 번씩 group by 조회(행별 쿼리 금지).
   // PostgREST 집계가 꺼져 있으면 키 컬럼만 페이징 조회해 클라이언트에서 센다. 실패해도 표는 정상 동작.
   const[ocCounts,setOcCounts]=useState({});
+  // 하이웍스 기안 불러오기 패널 · 저장 후 아이콘 개수/서랍 재조회용 tick
+  const[hwOpen,setHwOpen]=useState(false);
+  const[hwTick,setHwTick]=useState(0);
+  const onHwSaved=useCallback(()=>setHwTick(t=>t+1),[]);
   useEffect(()=>{
     let alive=true;
     (async()=>{
       const m={};
       const add=(k,t,n)=>{if(!k)return;(m[k]||(m[k]={}))[t]=(m[k][t]||0)+n;};
-      const countBy=async(table,cols,typeOf)=>{
-        const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=${cols},count()`,{headers:sbHeaders});
+      const countBy=async(table,cols,typeOf,f="")=>{
+        const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=${cols},count()${f}`,{headers:sbHeaders});
         if(r.ok){for(const it of await r.json())add(it.order_key,typeOf(it),Number(it.count)||0);return;}
         const PAGE=1000;
         for(let off=0;;off+=PAGE){
-          const r2=await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=${cols}&limit=${PAGE}&offset=${off}`,{headers:sbHeaders});
+          const r2=await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=${cols}${f}&limit=${PAGE}&offset=${off}`,{headers:sbHeaders});
           if(!r2.ok)break;
           const chunk=await r2.json();
           for(const it of chunk)add(it.order_key,typeOf(it),1);
@@ -6645,11 +7001,13 @@ function OrderSheetDashboard(){
       await Promise.all([
         countBy("order_contracts","order_key,doc_type",it=>it.doc_type||"contract").catch(()=>{}),
         countBy("order_expense_docs","order_key",()=>"expense").catch(()=>{}),
+        // 하이웍스 기안은 linked_order_key 로 group by (order_key 로 별칭)
+        countBy("hiworks_docs","order_key:linked_order_key",()=>"hiworks","&linked_order_key=not.is.null").catch(()=>{}),
       ]);
       if(alive)setOcCounts(m);
     })();
     return()=>{alive=false;};
-  },[]);
+  },[hwTick]);
   const onOcCount=useCallback((k,t,n)=>setOcCounts(p=>((p[k]&&p[k][t])||0)===n?p:{...p,[k]:{...p[k],[t]:n}}),[]);
 
   // ── 필터(연도·시즌·공장·검색) ── "" = 전체
@@ -6705,6 +7063,18 @@ function OrderSheetDashboard(){
     }
     return[...m.values()].map(g=>({...g,short:g.ord-g.inb,rate:g.ord>0?(g.inb/g.ord*100):0}));
   },[filteredRows]);
+
+  // 하이웍스 매칭 후보 — 필터와 무관한 전체 차수. order_key 규칙은 groups 와 동일(업체 = 그 차수 첫 행 값).
+  const hwCandidates=useMemo(()=>{
+    const m=new Map();
+    for(const r of rows){
+      const name=String(r[OS_COL.NAME]??"").trim()||"(상품명 없음)";
+      const round=String(r[OS_COL.ROUND]??"").trim();
+      const k=`${name}␟${round}`;
+      if(!m.has(k)){const g={name,round,factory:String(r[OS_COL.FACTORY]??"").trim()};m.set(k,{...g,key:ocOrderKey(g)});}
+    }
+    return[...m.values()];
+  },[rows]);
 
   // 그룹이 (상품명+차수)라 groups.length ≠ 상품 수 → 상품 수는 따로 센다.
   const nameCount=useMemo(()=>new Set(groups.map(g=>g.name)).size,[groups]);
@@ -6817,7 +7187,8 @@ function OrderSheetDashboard(){
   if(error)return <SectionCard title="📊 오더 입고현황"><div style={{textAlign:"center",padding:40,color:"#DC2626",fontSize:14}}>불러오기 실패: {error}</div></SectionCard>;
 
   return(
-    <SectionCard title="📊 오더 입고현황">
+    <SectionCard title="📊 오더 입고현황" actions={rows.length>0&&<button onClick={()=>setHwOpen(v=>!v)} style={{border:"1px solid #2563EB",background:hwOpen?"#EFF6FF":"#2563EB",color:hwOpen?"#2563EB":"#FFF",borderRadius:8,padding:"7px 14px",fontSize:13,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>📋 하이웍스 기안 불러오기</button>}>
+      {hwOpen&&rows.length>0&&<HiworksImportPanel candidates={hwCandidates} onClose={()=>setHwOpen(false)} onSaved={onHwSaved} />}
       {!rows.length?(
         <div style={{textAlign:"center",padding:40,color:"#94A3B8",fontSize:14}}>데이터 없음</div>
       ):(<>
@@ -6951,6 +7322,7 @@ function OrderSheetDashboard(){
               <OrderContractsSection key={ocOrderKey(selGroup)} group={selGroup} docType="contract" onCountChange={onOcCount} />
               <OrderContractsSection key={`tax|${ocOrderKey(selGroup)}`} group={selGroup} docType="tax_invoice" onCountChange={onOcCount} />
               <OrderExpenseSection key={`exp|${ocOrderKey(selGroup)}`} group={selGroup} onCountChange={onOcCount} />
+              <HiworksDocsSection key={`hw|${hwTick}|${ocOrderKey(selGroup)}`} group={selGroup} onCountChange={onOcCount} />
 
               {/* 옵션 리스트 — 옵션 1개 = 1행 표(썸네일 없음). 대표 썸네일은 드로어 헤더에만 둔다. */}
               <div style={{fontSize:13,fontWeight:800,color:"#0F172A",marginBottom:10}}>옵션별 상세 <span style={{color:"#94A3B8",fontWeight:600}}>{selGroup.items.length}</span></div>
