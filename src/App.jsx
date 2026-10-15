@@ -6721,6 +6721,148 @@ function HiworksDocsSection({group,onCountChange}){
   );
 }
 
+// ─── 서랍 — 수입 통관(order_import_docs). 차수(order_key)당 선적 회차별 여러 건 · 인라인 편집(포커스 아웃 시 저장) ───
+const OID_COLS=[
+  {k:"shipment_no",h:"회차",w:52,a:"center"},
+  {k:"bl_no",h:"BL 번호",w:130},
+  {k:"import_decl_no",h:"수입신고번호",w:140},
+  {k:"shipped_on",h:"선적일",w:124,type:"date"},
+  {k:"arrived_on",h:"입항일",w:124,type:"date"},
+  {k:"cleared_on",h:"통관일",w:124,type:"date"},
+  {k:"qty",h:"수량",w:80,a:"right",num:true},
+  {k:"note",h:"비고",w:150},
+  {k:"_del",h:"",w:52},
+];
+const oidTh={padding:"7px 6px",fontSize:11,fontWeight:700,color:"#64748B",background:"#F8FAFC",borderBottom:"1px solid #E2E8F0",whiteSpace:"nowrap"};
+// 셀 입력 — 포커스가 빠질 때 값이 바뀌었으면 저장. 실패하면 원래 값으로 되돌린다. Enter=저장, Esc=취소
+function OidCell({value,col,onSave}){
+  const orig=value==null?"":col.num?Number(value).toLocaleString():String(value);
+  const[v,setV]=useState(orig);
+  const skip=useRef(false);
+  useEffect(()=>{setV(orig);},[orig]);
+  const commit=async()=>{
+    if(skip.current){skip.current=false;return;}
+    if(v.trim()===orig)return;
+    const ok=await onSave(v.trim());
+    if(!ok)setV(orig);
+  };
+  return <input type={col.type||"text"} value={v} inputMode={col.num?"numeric":undefined}
+    onChange={e=>setV(e.target.value)} onBlur={commit}
+    onKeyDown={e=>{if(e.nativeEvent.isComposing)return;if(e.key==="Enter")e.currentTarget.blur();if(e.key==="Escape"){skip.current=true;setV(orig);e.currentTarget.blur();}}}
+    style={{...ocInput,width:"100%",height:28,padding:"0 6px",textAlign:col.a||"left",border:"1px solid transparent",background:"transparent",fontVariantNumeric:col.num?"tabular-nums":undefined}}
+    onFocus={e=>{e.currentTarget.style.borderColor="#93C5FD";e.currentTarget.style.background="#FFF";}}
+    onBlurCapture={e=>{e.currentTarget.style.borderColor="transparent";e.currentTarget.style.background="transparent";}} />;
+}
+
+function ImportDocsSection({group}){
+  const orderKey=ocOrderKey(group);
+  const orderQty=Math.round(group.ord||0);
+  const[list,setList]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[loadErr,setLoadErr]=useState("");
+  const[adding,setAdding]=useState(false);
+  const[msg,flash]=useFlashMsg();
+
+  const load=useCallback(async()=>{
+    setLoading(true);setLoadErr("");
+    try{
+      const r=await fetch(`${SUPABASE_URL}/rest/v1/order_import_docs?select=*&order_key=eq.${encodeURIComponent(orderKey)}&order=shipment_no.asc,id.asc`,{headers:sbHeaders});
+      if(!r.ok)throw new Error(`${r.status} ${await r.text()}`);
+      setList(await r.json());
+    }catch(e){setLoadErr(e.message||String(e));}
+    finally{setLoading(false);}
+  },[orderKey]);
+  useEffect(()=>{load();},[load]);
+
+  // 다음 회차 = 등록된 최대 회차 + 1
+  const add=async()=>{
+    if(adding)return;
+    setAdding(true);
+    try{
+      const next=list.reduce((m,d)=>Math.max(m,Number(d.shipment_no)||0),0)+1;
+      const r=await fetch(`${SUPABASE_URL}/rest/v1/order_import_docs`,{method:"POST",headers:sbHeaders,body:JSON.stringify({order_key:orderKey,shipment_no:next})});
+      if(!r.ok)throw new Error(`${r.status} ${await r.text()}`);
+      const row=(await r.json())[0];
+      if(!row)throw new Error("저장된 행 없음");
+      setList(p=>[...p,row]);
+      flash(true,`${next}차 선적 추가됨`);
+      // 새 행의 BL 번호 칸으로 바로 포커스
+      setTimeout(()=>document.querySelector(`[data-oid-first="${row.id}"] input`)?.focus(),0);
+    }catch(e){flash(false,`추가 실패: ${e.message||e}`);}
+    finally{setAdding(false);}
+  };
+  const save=async(d,col,raw)=>{
+    let val=raw===""?null:raw;
+    if(col.num&&val!=null){
+      const n=Math.round(osNum(val));
+      if(!/\d/.test(val)||!Number.isFinite(n)){flash(false,`${col.h}: 숫자를 입력하세요`);return false;}
+      val=n;
+    }
+    try{
+      const row=await ocPatchRow("order_import_docs",d.id,{[col.k]:val,updated_at:new Date().toISOString()});
+      setList(p=>p.map(x=>x.id===d.id?{...x,...row}:x));
+      flash(true,`${d.shipment_no}차 ${col.h} 저장됨`);
+      return true;
+    }catch(e){flash(false,`${col.h} 저장 실패: ${e.message||e}`);return false;}
+  };
+  const remove=async(d)=>{
+    try{
+      const r=await fetch(`${SUPABASE_URL}/rest/v1/order_import_docs?id=eq.${encodeURIComponent(d.id)}`,{method:"DELETE",headers:sbHeaders});
+      if(!r.ok)throw new Error(`${r.status} ${await r.text()}`);
+      setList(p=>p.filter(x=>x.id!==d.id));
+      flash(true,`${d.shipment_no}차 선적 삭제됨`);
+    }catch(e){flash(false,`삭제 실패: ${e.message||e}`);}
+  };
+
+  const total=list.reduce((s,d)=>s+osNum(d.qty),0);
+  const diff=total-orderQty;
+  const primaryBtn={...hwBtn,background:"#2563EB",borderColor:"#2563EB",color:"#FFF"};
+
+  return(
+    <div style={{marginBottom:24}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:10}}>
+        <div style={{fontSize:13,fontWeight:800,color:"#0F172A"}}>수입 통관{list.length>0&&<> <span style={{color:"#94A3B8",fontWeight:600}}>{list.length}</span></>}</div>
+        {list.length>0&&(
+          <span style={{fontSize:12,color:"#475569",fontVariantNumeric:"tabular-nums"}}>
+            합계 <b style={{color:"#0F172A"}}>{total.toLocaleString()}</b> / 발주 <b style={{color:"#0F172A"}}>{orderQty.toLocaleString()}</b>{" "}
+            {diff===0?<span style={{color:"#16A34A",fontWeight:700}}>✓</span>:<span style={{color:"#94A3B8"}}>({diff>0?"+":"−"}{Math.abs(diff).toLocaleString()})</span>}
+          </span>
+        )}
+        <span style={{flex:1}} />
+        {hwMsgEl(msg)}
+        {!loading&&!loadErr&&<button disabled={adding} onClick={add} style={{...primaryBtn,opacity:adding?0.6:1}}>{adding?"추가 중…":"+ 선적 추가"}</button>}
+      </div>
+      {loading?(
+        <div style={{fontSize:13,color:"#94A3B8",padding:"4px 0"}}>⏳ 불러오는 중...</div>
+      ):loadErr?(
+        <div style={{fontSize:13,color:"#DC2626",padding:"4px 0"}}>수입 통관 불러오기 실패: {loadErr}{/order_import_docs/.test(loadErr)&&" (supabase/order_import_docs.sql 실행 필요)"}</div>
+      ):list.length>0&&(
+        <div style={{width:"100%",overflowX:"auto",borderRadius:10,border:"1px solid #E2E8F0"}}>
+          <table style={{width:"100%",minWidth:OID_COLS.reduce((s,c)=>s+c.w,0),tableLayout:"fixed",borderCollapse:"collapse",fontSize:12}}>
+            <colgroup>{OID_COLS.map(c=><col key={c.k} style={{width:c.w}} />)}</colgroup>
+            <thead><tr>{OID_COLS.map(c=><th key={c.k} style={{...oidTh,textAlign:c.a||"left"}}>{c.h}</th>)}</tr></thead>
+            <tbody>
+              {list.map((d,i)=>(
+                <tr key={d.id} style={{borderTop:i?"1px solid #F1F5F9":"none"}}>
+                  {OID_COLS.map(c=>(
+                    <td key={c.k} data-oid-first={c.k==="bl_no"?d.id:undefined} style={{padding:"3px 4px",textAlign:c.a||"left"}}>
+                      {c.k==="shipment_no"
+                        ?<span style={{fontSize:12,fontWeight:700,color:"#2563EB"}}>{d.shipment_no}차</span>
+                        :c.k==="_del"
+                          ?<button onClick={()=>remove(d)} title="삭제" style={{...hwBtn,padding:"4px 8px",color:"#DC2626"}}>삭제</button>
+                          :<OidCell value={d[c.k]} col={c} onSave={v=>save(d,c,v)} />}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OrderSheetDashboard(){
   const[rows,setRows]=useState([]);
   const[loading,setLoading]=useState(true);
@@ -7129,6 +7271,9 @@ function OrderSheetDashboard(){
 
               {/* 차수에 연결된 하이웍스 기안 — key 로 차수 전환 시 상태 초기화 */}
               <HiworksDocsSection key={`hw|${hwTick}|${ocOrderKey(selGroup)}`} group={selGroup} onCountChange={onOcCount} />
+
+              {/* 수입 통관 — 선적 회차별 BL·수입신고 */}
+              <ImportDocsSection key={`oid|${ocOrderKey(selGroup)}`} group={selGroup} />
 
               {/* 옵션 리스트 — 옵션 1개 = 1행 표(썸네일 없음). 대표 썸네일은 드로어 헤더에만 둔다. */}
               <div style={{fontSize:13,fontWeight:800,color:"#0F172A",marginBottom:10}}>옵션별 상세 <span style={{color:"#94A3B8",fontWeight:600}}>{selGroup.items.length}</span></div>
