@@ -6530,14 +6530,6 @@ function HiworksDocsSection({group,onCountChange}){
   },[picker,pq,flash]);
 
   const sortList=arr=>[...arr].sort((a,b)=>String(a.draft_date||"9999").localeCompare(String(b.draft_date||"9999"))||String(a.doc_no).localeCompare(String(b.doc_no)));
-  const setType=async(d,t)=>{
-    if(hwDocTypeOf(d)===t&&d.doc_type===t)return;
-    try{
-      const row=await ocPatchRow("hiworks_docs",d.id,{doc_type:t});
-      setList(p=>p.map(x=>x.id===d.id?{...x,...row}:x));
-      flashRow(d.id,true,"종류 저장됨");
-    }catch(e){flashRow(d.id,false,`종류 저장 실패: ${e.message||e}`);}
-  };
   const unlink=async(d)=>{
     try{
       await ocPatchRow("hiworks_docs",d.id,{linked_order_key:null,linked_at:null});
@@ -6648,8 +6640,7 @@ function HiworksDocsSection({group,onCountChange}){
                 <div style={{border:"1px solid #E2E8F0",borderRadius:10,overflow:"hidden"}}>
                   {items.map((d,i)=>(
                     <div key={d.id} style={{display:"flex",flexWrap:"wrap",alignItems:"center",columnGap:8,rowGap:4,padding:"8px 12px",borderTop:i?"1px solid #F1F5F9":"none",fontSize:13}}>
-                      {typeSelect(hwDocTypeOf(d),v=>setType(d,v))}
-                      <span style={{flex:"1 1 160px",minWidth:0,fontWeight:600,color:d.title?"#0F172A":"#94A3B8",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={d.title||""}>{d.title||"(제목 없음)"}</span>
+                      <span style={{flex:"1 1 280px",minWidth:0,fontWeight:600,color:d.title?"#0F172A":"#94A3B8",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={d.title||""}>{d.title||"(제목 없음)"}</span>
                       <span style={{flexShrink:0,fontFamily:"monospace",fontSize:12,color:"#64748B"}}>{d.doc_no}</span>
                       {hwDocUrl(d)
                         ?<button onClick={()=>openUrl(hwDocUrl(d))} title="새 탭에서 열기" style={hwBtn}>열기</button>
@@ -6731,8 +6722,51 @@ const OID_COLS=[
   {k:"cleared_on",h:"통관일",w:124,type:"date"},
   {k:"qty",h:"수량",w:80,a:"right",num:true},
   {k:"note",h:"비고",w:150},
+  {k:"_files",h:"첨부",w:240},
   {k:"_del",h:"",w:52},
 ];
+// 첨부 — Storage 버킷 import-docs, 경로 `${선적 id}/${시각}_${파일명}`. 메타는 order_import_files.
+const OID_BUCKET="import-docs";
+const OID_EXT=new Set(["pdf","jpg","jpeg","png","webp","xlsx","xls","docx","hwp"]);
+const OID_MAX=20*1024*1024;
+const oidAuth={"apikey":SUPABASE_KEY,"Authorization":`Bearer ${SUPABASE_KEY}`};
+const oidExtOf=name=>{const i=name.lastIndexOf(".");return i>0?name.slice(i+1).toLowerCase():"";};
+// 한글·공백·특수문자 → 하이픈(Storage 키 안전). 원래 파일명은 order_import_files.file_name 에 보관
+const oidSlug=s=>String(s??"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
+const oidSafeName=name=>{const i=name.lastIndexOf(".");const base=oidSlug(i>0?name.slice(0,i):name)||"file";const ext=oidSlug(oidExtOf(name));return ext?`${base}.${ext}`:base;};
+const oidObjPath=path=>path.split("/").map(encodeURIComponent).join("/");
+const oidValidate=file=>{
+  const ext=oidExtOf(file.name);
+  if(!OID_EXT.has(ext))return`허용되지 않는 형식(.${ext||"없음"})`;
+  if(file.size>OID_MAX)return`20MB 초과(${(file.size/1048576).toFixed(1)}MB)`;
+  return"";
+};
+async function oidStorageUpload(path,file){
+  const s=await fetch(`${SUPABASE_URL}/storage/v1/object/${OID_BUCKET}/${oidObjPath(path)}`,{method:"POST",headers:{...oidAuth,"Content-Type":file.type||"application/octet-stream","x-upsert":"false"},body:file});
+  if(!s.ok)throw new Error(`저장소 업로드 실패 ${s.status} ${await s.text()}`);
+}
+async function oidStorageRemove(paths){
+  if(!paths.length)return;
+  const s=await fetch(`${SUPABASE_URL}/storage/v1/object/${OID_BUCKET}`,{method:"DELETE",headers:{...oidAuth,"Content-Type":"application/json"},body:JSON.stringify({prefixes:paths})});
+  if(!s.ok)throw new Error(`저장소 삭제 실패 ${s.status} ${await s.text()}`);
+}
+// 서명 URL(1시간)로 새 탭. await 뒤 window.open 은 팝업 차단될 수 있어 빈 탭을 먼저 연 뒤 주소를 넣는다. 실패 시 메시지 반환.
+async function oidOpenFile(path){
+  const w=window.open("","_blank");
+  try{
+    const r=await fetch(`${SUPABASE_URL}/storage/v1/object/sign/${OID_BUCKET}/${oidObjPath(path)}`,{method:"POST",headers:{...oidAuth,"Content-Type":"application/json"},body:JSON.stringify({expiresIn:3600})});
+    if(!r.ok)throw new Error(`${r.status} ${await r.text()}`);
+    const j=await r.json();
+    const signed=j.signedURL||j.signedUrl;
+    if(!signed)throw new Error("임시 링크 없음");
+    const url=/^https?:/.test(signed)?signed:`${SUPABASE_URL}/storage/v1${signed}`;
+    if(w)w.location.href=url;else window.open(url,"_blank","noopener");
+    return"";
+  }catch(e){
+    if(w)w.close();
+    return`열기 실패: ${e.message||e}`;
+  }
+}
 const oidTh={padding:"7px 6px",fontSize:11,fontWeight:700,color:"#64748B",background:"#F8FAFC",borderBottom:"1px solid #E2E8F0",whiteSpace:"nowrap"};
 // 셀 입력 — 포커스가 빠질 때 값이 바뀌었으면 저장. 실패하면 원래 값으로 되돌린다. Enter=저장, Esc=취소
 function OidCell({value,col,onSave}){
@@ -6762,16 +6796,30 @@ function ImportDocsSection({group}){
   const[loadErr,setLoadErr]=useState("");
   const[adding,setAdding]=useState(false);
   const[msg,flash]=useFlashMsg();
+  const[files,setFiles]=useState({}); // { 선적 id: [order_import_files 행] }
+  const[busy,setBusy]=useState({}); // { 선적 id: 업로드 중 개수 }
+  const[dragId,setDragId]=useState(null);
+  const fileRef=useRef(null);
+  const fileTarget=useRef(null);
 
   const load=useCallback(async()=>{
     setLoading(true);setLoadErr("");
     try{
       const r=await fetch(`${SUPABASE_URL}/rest/v1/order_import_docs?select=*&order_key=eq.${encodeURIComponent(orderKey)}&order=shipment_no.asc,id.asc`,{headers:sbHeaders});
       if(!r.ok)throw new Error(`${r.status} ${await r.text()}`);
-      setList(await r.json());
+      const data=await r.json();
+      setList(data);
+      // 첨부는 선적 id 목록으로 한 번에 조회
+      const map={};
+      if(data.length){
+        const f=await fetch(`${SUPABASE_URL}/rest/v1/order_import_files?select=*&import_doc_id=in.(${data.map(x=>x.id).join(",")})&order=uploaded_at.asc`,{headers:sbHeaders});
+        if(f.ok)(await f.json()).forEach(x=>{(map[x.import_doc_id]=map[x.import_doc_id]||[]).push(x);});
+        else flash(false,`첨부 불러오기 실패: ${f.status} ${await f.text()}`);
+      }
+      setFiles(map);
     }catch(e){setLoadErr(e.message||String(e));}
     finally{setLoading(false);}
-  },[orderKey]);
+  },[orderKey,flash]);
   useEffect(()=>{load();},[load]);
 
   // 다음 회차 = 등록된 최대 회차 + 1
@@ -6807,12 +6855,56 @@ function ImportDocsSection({group}){
   };
   const remove=async(d)=>{
     try{
+      // 첨부 파일 먼저 정리(실패하면 행도 지우지 않음) → 행 삭제 시 order_import_files 는 cascade 로 삭제
+      await oidStorageRemove((files[d.id]||[]).map(f=>f.file_path));
       const r=await fetch(`${SUPABASE_URL}/rest/v1/order_import_docs?id=eq.${encodeURIComponent(d.id)}`,{method:"DELETE",headers:sbHeaders});
       if(!r.ok)throw new Error(`${r.status} ${await r.text()}`);
       setList(p=>p.filter(x=>x.id!==d.id));
+      setFiles(p=>{const n={...p};delete n[d.id];return n;});
       flash(true,`${d.shipment_no}차 선적 삭제됨`);
     }catch(e){flash(false,`삭제 실패: ${e.message||e}`);}
   };
+
+  const uploadOne=async(d,file)=>{
+    const err=oidValidate(file);
+    if(err)return`${file.name}: ${err}`;
+    const path=`${d.id}/${Date.now()}_${oidSafeName(file.name)}`;
+    try{
+      await oidStorageUpload(path,file);
+      const r=await fetch(`${SUPABASE_URL}/rest/v1/order_import_files`,{method:"POST",headers:sbHeaders,body:JSON.stringify({
+        import_doc_id:d.id,file_path:path,file_name:file.name,file_type:file.type||null,file_size:file.size,uploaded_at:new Date().toISOString(),
+      })});
+      if(!r.ok){
+        // 메타 저장 실패 → 고아 파일이 남지 않게 방금 올린 객체 정리(실패해도 무시)
+        oidStorageRemove([path]).catch(()=>{});
+        throw new Error(`목록 저장 실패 ${r.status} ${await r.text()}`);
+      }
+      const row=(await r.json())[0];
+      if(row)setFiles(p=>({...p,[d.id]:[...(p[d.id]||[]),row]}));
+      return"";
+    }catch(e){return`${file.name}: ${e.message||e}`;}
+  };
+  const handleFiles=async(d,fileList)=>{
+    const arr=[...(fileList||[])];
+    if(!d||!arr.length)return;
+    setBusy(p=>({...p,[d.id]:(p[d.id]||0)+arr.length}));
+    const errs=(await Promise.all(arr.map(f=>uploadOne(d,f)))).filter(Boolean);
+    setBusy(p=>{const n={...p};n[d.id]=(n[d.id]||0)-arr.length;if(n[d.id]<=0)delete n[d.id];return n;});
+    const ok=arr.length-errs.length;
+    if(errs.length)flash(false,ok?`${ok}개 첨부 · 실패 ${errs.join(" / ")}`:`첨부 실패 ${errs.join(" / ")}`);
+    else flash(true,`${d.shipment_no}차 ${ok}개 첨부됨`);
+  };
+  const removeFile=async(d,f)=>{
+    try{
+      await oidStorageRemove([f.file_path]);
+      const r=await fetch(`${SUPABASE_URL}/rest/v1/order_import_files?id=eq.${encodeURIComponent(f.id)}`,{method:"DELETE",headers:sbHeaders});
+      if(!r.ok)throw new Error(`목록 삭제 실패 ${r.status} ${await r.text()}`);
+      setFiles(p=>({...p,[d.id]:(p[d.id]||[]).filter(x=>x.id!==f.id)}));
+      flash(true,`삭제됨: ${f.file_name}`);
+    }catch(e){flash(false,`첨부 삭제 실패: ${e.message||e}`);}
+  };
+  const openFile=async f=>{const err=await oidOpenFile(f.file_path);if(err)flash(false,err);};
+  const pickFiles=d=>{fileTarget.current=d;fileRef.current?.click();};
 
   const total=list.reduce((s,d)=>s+osNum(d.qty),0);
   const diff=total-orderQty;
@@ -6838,6 +6930,8 @@ function ImportDocsSection({group}){
         <div style={{fontSize:13,color:"#DC2626",padding:"4px 0"}}>수입 통관 불러오기 실패: {loadErr}{/order_import_docs/.test(loadErr)&&" (supabase/order_import_docs.sql 실행 필요)"}</div>
       ):list.length>0&&(
         <div style={{width:"100%",overflowX:"auto",borderRadius:10,border:"1px solid #E2E8F0"}}>
+          <input ref={fileRef} type="file" multiple accept={[...OID_EXT].map(x=>"."+x).join(",")} style={{display:"none"}}
+            onChange={e=>{handleFiles(fileTarget.current,e.target.files);e.target.value="";}} />
           <table style={{width:"100%",minWidth:OID_COLS.reduce((s,c)=>s+c.w,0),tableLayout:"fixed",borderCollapse:"collapse",fontSize:12}}>
             <colgroup>{OID_COLS.map(c=><col key={c.k} style={{width:c.w}} />)}</colgroup>
             <thead><tr>{OID_COLS.map(c=><th key={c.k} style={{...oidTh,textAlign:c.a||"left"}}>{c.h}</th>)}</tr></thead>
@@ -6845,9 +6939,27 @@ function ImportDocsSection({group}){
               {list.map((d,i)=>(
                 <tr key={d.id} style={{borderTop:i?"1px solid #F1F5F9":"none"}}>
                   {OID_COLS.map(c=>(
-                    <td key={c.k} data-oid-first={c.k==="bl_no"?d.id:undefined} style={{padding:"3px 4px",textAlign:c.a||"left"}}>
+                    <td key={c.k} data-oid-first={c.k==="bl_no"?d.id:undefined} style={{padding:"3px 4px",textAlign:c.a||"left",...(c.k==="_files"&&dragId===d.id?{background:"#EFF6FF",outline:"1.5px dashed #2563EB",outlineOffset:-2}:null)}}
+                      {...(c.k==="_files"?{
+                        onDragOver:e=>{e.preventDefault();if(dragId!==d.id)setDragId(d.id);},
+                        onDragLeave:e=>{if(!e.currentTarget.contains(e.relatedTarget))setDragId(null);},
+                        onDrop:e=>{e.preventDefault();setDragId(null);handleFiles(d,e.dataTransfer.files);},
+                      }:null)}>
                       {c.k==="shipment_no"
                         ?<span style={{fontSize:12,fontWeight:700,color:"#2563EB"}}>{d.shipment_no}차</span>
+                        :c.k==="_files"
+                          ?<div style={{display:"flex",flexDirection:"column",gap:3,padding:"2px 0"}}>
+                            {(files[d.id]||[]).map(f=>(
+                              <div key={f.id} style={{display:"flex",alignItems:"center",gap:4,minWidth:0}}>
+                                <button onClick={()=>openFile(f)} title={`${f.file_name} — 새 탭에서 열기`} style={{flex:1,minWidth:0,border:"none",background:"none",padding:0,textAlign:"left",fontSize:12,color:"#2563EB",textDecoration:"underline",cursor:"pointer",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{f.file_name}</button>
+                                <button onClick={()=>removeFile(d,f)} title="첨부 삭제" aria-label="첨부 삭제" style={{flexShrink:0,border:"none",background:"none",padding:"0 2px",fontSize:12,color:"#DC2626",cursor:"pointer"}}>✕</button>
+                              </div>
+                            ))}
+                            <div style={{display:"flex",alignItems:"center",gap:6}}>
+                              <button onClick={()=>pickFiles(d)} style={{...hwBtn,padding:"2px 8px",fontSize:11}}>파일 선택</button>
+                              <span style={{fontSize:11,color:busy[d.id]?"#64748B":"#CBD5E1",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{busy[d.id]?"업로드 중…":"또는 끌어다 놓기"}</span>
+                            </div>
+                          </div>
                         :c.k==="_del"
                           ?<button onClick={()=>remove(d)} title="삭제" style={{...hwBtn,padding:"4px 8px",color:"#DC2626"}}>삭제</button>
                           :<OidCell value={d[c.k]} col={c} onSave={v=>save(d,c,v)} />}
