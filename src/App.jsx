@@ -43,6 +43,31 @@ const isGroupDelayed=(g)=>g.events.some(e=>e.isDelayed)&&!(g.rep.statusManual&&D
 const statusColor=(s)=>ORDER_STATUS_COLOR[s]||(s==="지연"?{bg:"#FEE2E2",color:"#DC2626"}:null);
 // 옵션명 표기 정규화: "[버건디-M]" → "버건디/M"
 const fmtOption=(v)=>String(v||"").trim().replace(/^\[|\]$/g,"").trim().replace(/-/g,"/");
+// 옵션 표 정렬(입고 캘린더 차수 상세 · 오더 입고현황 옵션별 상세 공통). 옵션값 = '색상/사이즈'.
+//  1차 색상: 상품코드 오름차순에서 그 색상이 처음 나온 순서 / 2차 사이즈: XS~4XL(XXL=2XL, XXXL=3XL) → 숫자 오름차순 → FREE·F·ONE SIZE → 그 외(원래 순서).
+const SIZE_RANK={XS:0,S:1,M:2,L:3,XL:4,"2XL":5,XXL:5,"3XL":6,XXXL:6,"4XL":7,XXXXL:7};
+const FREE_SIZES=new Set(["FREE","F","ONE SIZE","ONESIZE"]);
+const sizeKey=(s)=>{
+  const v=String(s||"").trim().toUpperCase().replace(/\s+/g," ");
+  if(v in SIZE_RANK)return[0,SIZE_RANK[v]];
+  if(/^\d+(\.\d+)?$/.test(v))return[1,Number(v)];
+  if(FREE_SIZES.has(v))return[2,0];
+  return[3,0];
+};
+const sortOptionRows=(rows,getOpt,getCode)=>{
+  const parsed=(rows||[]).map((r,i)=>{
+    const parts=String(getOpt(r)||"").split("/").map(x=>x.trim());
+    let color,size;
+    if(parts.length>1){size=parts.pop();color=parts.join("/");}
+    else if(sizeKey(parts[0])[0]<3){color="";size=parts[0];}
+    else{color=parts[0];size="";}
+    return{r,i,code:String(getCode(r)||""),color:color.toUpperCase(),sk:sizeKey(size)};
+  });
+  const byCode=[...parsed].sort((a,b)=>(a.code<b.code?-1:a.code>b.code?1:0)||a.i-b.i);
+  const colorIdx=new Map();
+  byCode.forEach(x=>{if(!colorIdx.has(x.color))colorIdx.set(x.color,colorIdx.size);});
+  return byCode.sort((a,b)=>colorIdx.get(a.color)-colorIdx.get(b.color)||a.sk[0]-b.sk[0]||a.sk[1]-b.sk[1]||0).map(x=>x.r);
+};
 
 // 두 뷰를 공통 이벤트 형태로 통일 — 프린팅 외주는 조회 직후 req_qty→order_qty, vendor→factory 로 정규화돼 들어온다.
 // date = show_date (뷰 계산: 전량 입고=실입고일, 잔량 있음=조정입고일→입고예정일).
@@ -1415,7 +1440,7 @@ function ScheduleTab(){
                       {isPrint&&<th style={colTh}>베이스 업체</th>}
                     </tr></thead>
                     <tbody>
-                      {g.events.map((o,oi)=>{
+                      {sortOptionRows(g.events,o=>fmtOption(o.option),o=>o.code).map((o,oi)=>{
                         const recNum=has(o.received)&&Number.isFinite(Number(o.received))?Number(o.received):null;
                         const opt=fmtOption(o.option);
                         const remain=Number(o.remain)||0;
@@ -7394,7 +7419,7 @@ function OrderSheetDashboard(){
                   <colgroup>{DRW.map(c=><col key={c.h} style={{width:c.w}} />)}</colgroup>
                   <thead><tr>{DRW.map(c=><th key={c.h} title={c.h} style={{...drwTh,textAlign:c.a}}>{c.h}</th>)}</tr></thead>
                   <tbody>
-                    {selGroup.items.map(it=>{
+                    {sortOptionRows(selGroup.items,it=>it[OS_COL.OPT],it=>it[OS_COL.CODE]).map(it=>{
                       const o=osNum(it[OS_COL.ORD_QTY]),n=osNum(it[OS_COL.IN_QTY]);
                       const rt=o>0?(n/o*100):0;
                       return(
