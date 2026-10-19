@@ -163,6 +163,18 @@ async function saveRevisedEta(source,rowKeys,newValue,prevByKey){
     throw new Error(`시트 반영 요청 실패 (${q.status})`);
   }
 }
+// 실입고 수량·일자 → sheet_edit_queue insert 만(시트·sheet_* 테이블 직접 수정 없음). Apps Script 가 시트 '실입고_N' / '실입고일_N' 칸에 반영.
+// entries: [{rowKey,qty}] · round: 1~6 · date: 'YYYY-MM-DD'. 같은 회차 재반영 시 시트 값 덮어씀.
+async function enqueueRecvQty(source,entries,round,date){
+  const rows=entries.flatMap(({rowKey,qty})=>[
+    {target:source,row_key:rowKey,field:`recv_qty_${round}`,new_value:String(qty),requested_by:"dashboard"},
+    {target:source,row_key:rowKey,field:`recv_date_${round}`,new_value:date,requested_by:"dashboard"},
+  ]);
+  const q=await fetch(`${SUPABASE_URL}/rest/v1/sheet_edit_queue`,{
+    method:"POST",headers:{...sbHeaders,Prefer:"return=minimal"},body:JSON.stringify(rows),
+  });
+  if(!q.ok)throw new Error(`시트 반영 요청 실패 (${q.status})`);
+}
 // sheet_edit_queue 의 pending / error 행 → {row_key:{status,message}} (같은 row_key 는 error 우선). 실패해도 빈 객체.
 async function fetchSheetQueue(source){
   try{
@@ -853,6 +865,10 @@ function ScheduleTab(){
   const[etaMsg,setEtaMsg]=useState(null); // 조정입고일 변경 결과 {ok,text} — 상단 인라인, 3초 후 사라짐
   const[etaInputRev,setEtaInputRev]=useState(0); // 서랍 date input 리마운트 키 — 저장 실패 시 원래 값으로 복원
   const etaTimerRef=useRef(null); // 서랍 date input 입력 debounce
+  const[recvRound,setRecvRound]=useState(1); // 서랍 실입고 회차(1~6) → sheet_edit_queue field recv_qty_N / recv_date_N
+  const[recvDate,setRecvDate]=useState(()=>{const t=new Date();return`${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,"0")}-${String(t.getDate()).padStart(2,"0")}`;}); // 서랍 실입고일 — 기본 오늘
+  const[recvInputs,setRecvInputs]=useState({}); // 서랍 입고수량 입력 {event id: string} — 초기값 비움
+  const[recvBusy,setRecvBusy]=useState(null); // 시트 반영 중인 블록 key
   const calEventsRef=useRef([]);
   calEventsRef.current=calEvents;
   useEffect(()=>{if(!etaMsg)return;const t=setTimeout(()=>setEtaMsg(null),3000);return()=>clearTimeout(t);},[etaMsg]);
@@ -1071,6 +1087,22 @@ function ScheduleTab(){
     }finally{setStatusBusy(null);}
   };
 
+  // 서랍 '시트 반영' — 입력값 > 0 인 행만 큐에 recv_qty_N · recv_date_N 2건씩 insert. 화면 수량은 시트 동기화 후 갱신.
+  const submitRecvQty=async(g)=>{
+    const entries=g.events.map(o=>({o,qty:Number(recvInputs[o.id])})).filter(x=>Number.isFinite(x.qty)&&x.qty>0&&x.o.rowKey!=null&&x.o.rowKey!=="");
+    if(entries.length===0){setEtaMsg({ok:false,text:"입고수량을 입력한 옵션이 없습니다"});return;}
+    if(!/^20\d\d-\d\d-\d\d$/.test(recvDate)){setEtaMsg({ok:false,text:"입고일을 확인해주세요"});return;}
+    setRecvBusy(g.key);
+    try{
+      await enqueueRecvQty(g.events[0].source,entries.map(x=>({rowKey:x.o.rowKey,qty:x.qty})),recvRound,recvDate);
+      setSheetQueue(p=>{const n={...p};entries.forEach(x=>{n[String(x.o.rowKey)]={status:"pending",message:""};});return n;});
+      setRecvInputs(p=>{const n={...p};entries.forEach(x=>{delete n[x.o.id];});return n;});
+      setEtaMsg({ok:true,text:`${recvRound}회차 입고수량 ${entries.length}건 · 시트 반영 대기`});
+    }catch(e){
+      console.error("[recv_qty] 큐 등록 실패",e);
+      setEtaMsg({ok:false,text:"시트 반영 요청 실패 — 다시 시도해주세요"});
+    }finally{setRecvBusy(null);}
+  };
   // 조정입고일 변경(캘린더 드래그 · 서랍 date input 공통) — 낙관적 반영 후 저장, 실패 시 원래 날짜로 되돌림.
   const changeRevisedEta=async(events,newValue)=>{
     const source=events[0]?.source;
@@ -1380,7 +1412,8 @@ function ScheduleTab(){
       const colTh={padding:"5px 4px",textAlign:"left",fontSize:10,fontWeight:700,color:"#94A3B8",borderBottom:"1px solid #E2E8F0",whiteSpace:"nowrap"};
       const colTd={padding:"5px 4px",fontSize:11,color:"#334155",borderBottom:"1px solid #F1F5F9",verticalAlign:"top"};
       const oneLine={whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"};
-      const closePanel=()=>{setStatusMenu(null);setSelectedDay(null);setSelectedCard(null);};
+      const closePanel=()=>{setStatusMenu(null);setSelectedDay(null);setSelectedCard(null);setRecvInputs({});};
+      const recvVal=(o)=>{const n=Number(recvInputs[o.id]);return Number.isFinite(n)&&n>0?n:0;}; // 입력 중 잔량 재계산용
       const isPrint=track==="print"; // 프린팅 외주 전용: 업체·차수 카드 → 상품 블록(접힘), 옵션표 '베이스 업체' 열, 지연 사유
       // 프린팅 외주: 클릭한 카드(업체·차수)만. 셀 클릭이면 그 날짜 카드 전체.
       const dayCards=isPrint?groupPrintCards(dayEvents):[];
@@ -1426,10 +1459,10 @@ function ScheduleTab(){
       // 옵션별 표 (생산·프린팅 외주 공통, 프린팅 외주는 맨 뒤 '베이스 업체' 열)
       const optTable=(g)=>(
                 <div style={{overflowX:"auto",borderRadius:8,border:"1px solid #EEF2F6"}}>
-                  <table style={{width:"100%",minWidth:isPrint?1090:980,tableLayout:"fixed",borderCollapse:"collapse"}}>
+                  <table style={{width:"100%",minWidth:isPrint?1110:1000,tableLayout:"fixed",borderCollapse:"collapse"}}>
                     <colgroup>
                       <col style={{width:56}} /><col style={{width:90}} /><col /><col style={{width:110}} />
-                      <col style={{width:80}} /><col style={{width:80}} /><col style={{width:80}} />
+                      <col style={{width:80}} /><col style={{width:100}} /><col style={{width:80}} />
                       <col style={{width:110}} /><col style={{width:110}} /><col style={{width:110}} />
                       {isPrint&&<col style={{width:110}} />}
                     </colgroup>
@@ -1443,7 +1476,7 @@ function ScheduleTab(){
                       {sortOptionRows(g.events,o=>fmtOption(o.option),o=>o.code).map((o,oi)=>{
                         const recNum=has(o.received)&&Number.isFinite(Number(o.received))?Number(o.received):null;
                         const opt=fmtOption(o.option);
-                        const remain=Number(o.remain)||0;
+                        const remain=(Number(o.remain)||0)-recvVal(o); // 입력 중이면 입력값만큼 차감해 표시
                         const revisedDiff=has(o.revisedEta)&&o.revisedEta!==o.eta;
                         return(
                         <tr key={o.id||oi} style={has(o.receivedDate)?{background:"#F0FDF4"}:undefined}>
@@ -1452,7 +1485,12 @@ function ScheduleTab(){
                           <td style={{...colTd,...oneLine}} title={o.displayName||o.item||""}>{o.displayName||o.item||"-"}</td>
                           <td style={{...colTd,...oneLine}} title={opt||""}>{opt||"-"}</td>
                           <td style={{...colTd,textAlign:"right",fontWeight:700,color:"#0F172A",whiteSpace:"nowrap"}}>{(Number(o.qty)||0).toLocaleString()}</td>
-                          <td style={{...colTd,textAlign:"right",fontWeight:700,color:recNum!==null?"#0F766E":"#94A3B8",whiteSpace:"nowrap"}}>{recNum!==null?recNum.toLocaleString():"-"}</td>
+                          <td style={{...colTd,textAlign:"right",whiteSpace:"nowrap"}}>
+                            <input type="number" min={0} step={1} inputMode="numeric" value={recvInputs[o.id]??""} placeholder="0"
+                              onChange={e=>{const v=e.target.value;setRecvInputs(p=>({...p,[o.id]:v}));}}
+                              style={{width:"100%",boxSizing:"border-box",padding:"3px 5px",borderRadius:5,border:"1px solid #CBD5E1",fontSize:11,fontWeight:700,textAlign:"right",color:"#0F766E",background:"#FFF"}} />
+                            <div title="시트 실입고 총수량" style={{marginTop:2,fontSize:10,color:"#94A3B8"}}>누적 {recNum!==null?recNum.toLocaleString():"-"}</div>
+                          </td>
                           <td style={{...colTd,textAlign:"right",whiteSpace:"nowrap",...(remain>0?{fontWeight:800,color:"#EA580C"}:{color:"#94A3B8"})}}>{remain.toLocaleString()}</td>
                           <td style={{...colTd,whiteSpace:"nowrap",textAlign:"center"}}>{has(o.eta)?o.eta:"-"}</td>
                           <td style={{...colTd,whiteSpace:"nowrap",textAlign:"center",...(revisedDiff?{color:"#2563EB",fontWeight:700}:{})}}>{has(o.revisedEta)?o.revisedEta:"-"}</td>
@@ -1464,11 +1502,20 @@ function ScheduleTab(){
                         <td style={{...colTd,fontWeight:700,color:"#475569",borderBottom:"none"}} colSpan={4}>합계</td>
                         <td style={{...colTd,textAlign:"right",fontWeight:800,color:"#0F172A",borderBottom:"none",whiteSpace:"nowrap"}}>{g.totalQty.toLocaleString()}</td>
                         <td style={{...colTd,textAlign:"right",fontWeight:800,color:"#0F766E",borderBottom:"none",whiteSpace:"nowrap"}}>{g.events.reduce((s,o)=>s+(has(o.received)&&Number.isFinite(Number(o.received))?Number(o.received):0),0).toLocaleString()}</td>
-                        <td style={{...colTd,textAlign:"right",fontWeight:800,color:g.totalRemain>0?"#EA580C":"#94A3B8",borderBottom:"none",whiteSpace:"nowrap"}}>{g.totalRemain.toLocaleString()}</td>
+                        {(()=>{const r=g.totalRemain-g.events.reduce((s,o)=>s+recvVal(o),0);return(
+                        <td style={{...colTd,textAlign:"right",fontWeight:800,color:r>0?"#EA580C":"#94A3B8",borderBottom:"none",whiteSpace:"nowrap"}}>{r.toLocaleString()}</td>);})()}
                         <td style={{...colTd,borderBottom:"none"}} colSpan={isPrint?4:3}></td>
                       </tr>
                     </tbody>
                   </table>
+                  {(()=>{const n=g.events.filter(o=>recvVal(o)>0).length;const busy=recvBusy===g.key;return(
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:10,padding:"8px 10px",borderTop:"1px solid #EEF2F6",background:"#FAFAF9"}}>
+                    <span style={{fontSize:11,color:"#94A3B8"}}>{recvRound}회차 · {recvDate||"-"} · 입력 {n}건</span>
+                    <button onClick={()=>submitRecvQty(g)} disabled={busy||n===0}
+                      style={{padding:"5px 14px",borderRadius:6,border:"none",fontSize:12,fontWeight:700,color:"#FFF",background:n===0?"#CBD5E1":"#0F766E",cursor:busy?"wait":n===0?"not-allowed":"pointer",opacity:busy?0.6:1}}>
+                      {busy?"반영 중…":"시트 반영"}
+                    </button>
+                  </div>);})()}
                 </div>);
       // 조정입고일 date input — 바꾸면 이 블록 row_key 들만 저장(입력 멈춘 뒤 0.8초 또는 포커스 해제 시). 비우면 null(지움).
       const etaInput=(g)=>{
@@ -1497,6 +1544,21 @@ function ScheduleTab(){
           <div onClick={e=>{e.stopPropagation();setStatusMenu(null);}} style={{background:"#FFF",width:"min(1100px, 92vw)",height:"100%",overflowY:"auto",boxShadow:"-8px 0 30px rgba(0,0,0,0.2)",padding:24,boxSizing:"border-box"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
               <div style={{fontSize:18,fontWeight:700,color:"#0F172A"}}>📅 {selectedDay}</div>
+              <div style={{display:"flex",alignItems:"center",gap:10,marginLeft:"auto",marginRight:12,flexWrap:"wrap",justifyContent:"flex-end"}}>
+                <label style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:12,fontWeight:600,color:"#64748B",whiteSpace:"nowrap"}}>
+                  입고 회차
+                  <select value={recvRound} onChange={e=>setRecvRound(Number(e.target.value))}
+                    style={{padding:"3px 6px",borderRadius:6,border:"1px solid #CBD5E1",fontSize:12,color:"#1E293B",background:"#FFF",cursor:"pointer"}}>
+                    {[1,2,3,4,5,6].map(n=><option key={n} value={n}>{n}회차</option>)}
+                  </select>
+                </label>
+                <label style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:12,fontWeight:600,color:"#64748B",whiteSpace:"nowrap"}}>
+                  입고일
+                  <input type="date" value={recvDate} onChange={e=>setRecvDate(e.target.value)}
+                    style={{padding:"3px 6px",borderRadius:6,border:"1px solid #CBD5E1",fontSize:12,color:"#1E293B",background:"#FFF",cursor:"pointer"}} />
+                </label>
+                <span style={{fontSize:10,color:"#94A3B8",whiteSpace:"nowrap"}}>같은 회차에 다시 반영하면 시트 값이 덮어써집니다</span>
+              </div>
               <button onClick={closePanel} style={{border:"none",background:"#F1F5F9",borderRadius:8,width:32,height:32,fontSize:18,cursor:"pointer",color:"#475569"}}>✕</button>
             </div>
             <div style={{fontSize:14,color:"#64748B",marginBottom:16}}>
