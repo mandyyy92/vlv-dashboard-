@@ -985,7 +985,7 @@ function ScheduleTab(){
   const groupEvents=(list)=>{
     const m=new Map();
     list.forEach(ev=>{
-      const key=ev.groupKey||`${ev.displayName||""}__${ev.round||""}`;
+      const key=ev.groupKey||`${ev.supplier||""}__${ev.displayName||""}__${ev.round||""}__${ev.orderDate||""}`; // group_key 없을 때도 업체+상품명+차수+발주일 단위
       if(!m.has(key))m.set(key,{key,rep:ev,events:[]});
       m.get(key).events.push(ev);
     });
@@ -1116,6 +1116,7 @@ function ScheduleTab(){
     setCalEvents(patch);setUpcomingEvents(patch);setWaitEvents(patch);
     try{
       await saveRevisedEta(source,rowKeys,newValue,prevByKey);
+      console.log(`[revised_eta] sheet_edit_queue 등록 ${rowKeys.length}건 (카드 옵션 ${events.length}개) → ${newValue??"(지움)"}`,rowKeys);
       setSheetQueue(p=>{const n={...p};keySet.forEach(k=>{n[k]={status:"pending",message:""};});return n;});
       setEtaMsg({ok:true,text:"조정입고일 변경됨 · 시트 반영 대기"});
       reloadCalendar();reloadUpcoming();reloadWait();
