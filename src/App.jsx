@@ -35,12 +35,25 @@ const ORDER_STATUS_COLOR={
   "입고 완료":{bg:"#DCFCE7",color:"#16A34A"},
 };
 const ORDER_STATUS_OPTIONS=Object.keys(ORDER_STATUS_COLOR);
+// 프린팅 외주 전용 단계 — 드롭다운·뱃지·범례·필터 칩 모두 이 5개. 생산(v_inbound_calendar)은 위 7단계 유지.
+const PRINT_STATUS_COLOR={
+  "발송 예정":{bg:"#F1F5F9",color:"#64748B"},
+  "발송 완료":{bg:"#DBEAFE",color:"#3B82F6"},
+  "입고 일정 확인중":{bg:"#D1FAE5",color:"#10B981"},
+  "입고 확정":{bg:"#F3E8FF",color:"#A855F7"},
+  "입고 완료":{bg:"#DCFCE7",color:"#15803D"},
+};
+const PRINT_STATUS_OPTIONS=Object.keys(PRINT_STATUS_COLOR);
+// v_print_calendar status(공통 7단계 라벨) → 프린팅 외주 5단계 (화면 표시용, 뷰는 그대로). 공백 무시 매칭, 그 외 값(지연 등)은 그대로.
+const PRINT_STATUS_MAP={"발주중":"발송 예정","생산중":"발송 완료","선적완료":"발송 완료","부분입고":"입고 확정","입고일정확인중":"입고 일정 확인중","입고확정":"입고 확정","입고완료":"입고 완료","발송예정":"발송 예정","발송완료":"발송 완료"};
+const toPrintStatus=(s)=>PRINT_STATUS_MAP[String(s||"").replace(/\s/g,"")]||s||"";
+const statusOptionsFor=(src)=>src==="print"?PRINT_STATUS_OPTIONS:ORDER_STATUS_OPTIONS;
 const toYmd=(d)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 // 입고 지연 판정은 뷰(is_delayed)가 전담. 단 '입고 완료'·'입고 확정'으로 수동 지정된 건은 담당자 종결로 보고 제외.
 const DELAY_EXCLUDED_MANUAL_ST=new Set(["입고완료","입고확정"]);
 const isGroupDelayed=(g)=>g.events.some(e=>e.isDelayed)&&!(g.rep.statusManual&&DELAY_EXCLUDED_MANUAL_ST.has(String(g.rep.status||"").replace(/\s/g,"")));
 // 뷰 자동 판정 상태 중 수동 선택지(ORDER_STATUS_OPTIONS)에 없는 값의 색상
-const statusColor=(s)=>ORDER_STATUS_COLOR[s]||(s==="지연"?{bg:"#FEE2E2",color:"#DC2626"}:null);
+const statusColor=(s,src)=>(src==="print"?PRINT_STATUS_COLOR:ORDER_STATUS_COLOR)[s]||(s==="지연"?{bg:"#FEE2E2",color:"#DC2626"}:null);
 // 옵션명 표기 정규화: "[버건디-M]" → "버건디/M"
 const fmtOption=(v)=>String(v||"").trim().replace(/^\[|\]$/g,"").trim().replace(/-/g,"/");
 // 옵션 표 정렬(입고 캘린더 차수 상세 · 오더 입고현황 옵션별 상세 공통). 옵션값 = '색상/사이즈'.
@@ -91,7 +104,7 @@ const mapCalendarRow=(r,source)=>({
   supplier:r.factory||"",
   baseFactory:r.base_factory||"",  // 프린팅 외주 전용
   delayReason:r.delay_reason||"",  // 프린팅 외주 전용
-  status:r.status||"",
+  status:source==="print"?toPrintStatus(r.status):(r.status||""),
   statusManual:!!r.status_manual,
   code:r.product_code||"",
   option:r.option_name||"",
@@ -1052,7 +1065,7 @@ function ScheduleTab(){
   const weekQty=weekBySrc.reduce((s,w)=>s+w.qty,0);
   // 입고대기 현황 — 선택된 탭 기준. 기본 = show_date 오늘 이후, 지연 토글 = 지연 건 전체(과거 포함).
   // 상태 화이트리스트(생산중·부분입고)만 통과 — 총 건수·장수, 지연 뱃지, 상태 칩 모두 이 기준.
-  const WAIT_STATUSES=new Set(["생산중","부분입고"]);
+  const WAIT_STATUSES=new Set(track==="print"?["발송 완료","입고 확정"]:["생산중","부분입고"]);
   const trackCards=toCards(waitEvents,track).filter(c=>WAIT_STATUSES.has(c.stLabel));
   const delayedCards=trackCards.filter(c=>c.delayed); // 지연은 플래그 — 뱃지 건수는 토글과 무관하게 전체
   const waitCards=delayMode?delayedCards:trackCards.filter(c=>c.date>=today);
@@ -1061,7 +1074,8 @@ function ScheduleTab(){
   const waitStatusCounts=(()=>{
     const m=new Map();
     waitCards.forEach(c=>m.set(c.stLabel,(m.get(c.stLabel)||0)+1));
-    const order=s=>{const i=ORDER_STATUS_OPTIONS.indexOf(s);return i<0?ORDER_STATUS_OPTIONS.length:i;};
+    const opts=statusOptionsFor(track);
+    const order=s=>{const i=opts.indexOf(s);return i<0?opts.length:i;};
     return[...m.entries()].sort((a,b)=>order(a[0])-order(b[0]));
   })();
   const activeWaitFilter=waitStatusCounts.some(([s])=>s===waitFilter)?waitFilter:null;
@@ -1215,7 +1229,7 @@ function ScheduleTab(){
         {/* 상태 칩 — 클릭 필터(다시 누르면 해제). 0건 상태는 숨김 */}
         <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14,paddingTop:10,borderTop:"1px dashed #FDE68A"}}>
           {waitStatusCounts.map(([st,n])=>{
-            const c=statusColor(st)||{bg:"#F1F5F9",color:"#64748B"};
+            const c=statusColor(st,track)||{bg:"#F1F5F9",color:"#64748B"};
             const sel=activeWaitFilter===st;
             return(<div key={st} onClick={()=>setWaitFilter(sel?null:st)}
               title={st==="지연"?"뷰 판정 상태: 예정일이 지났고 입고 수량 0":undefined}
@@ -1228,7 +1242,7 @@ function ScheduleTab(){
             <div style={{padding:20,textAlign:"center",color:"#94A3B8",fontSize:14}}>{activeWaitFilter?`'${activeWaitFilter}' 상태 건이 없습니다`:delayMode?"지연 건이 없습니다":"오늘 이후 입고대기 건이 없습니다"}</div>
           ):(
             shownWaitCards.map(c=>{
-              const sc=statusColor(c.stLabel)||{bg:"#EDE9FE",color:"#6D28D9"};
+              const sc=statusColor(c.stLabel,track)||{bg:"#EDE9FE",color:"#6D28D9"};
               return(<div key={c.cardKey} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"9px 12px",borderRadius:8,marginBottom:6,background:"#F8FAFC",border:"1px solid #E2E8F0",...(c.delayed?{borderLeft:"3px solid #DC2626"}:{})}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0,flex:1}}>
                   <span style={{flexShrink:0,width:8,height:8,borderRadius:"50%",background:sc.color}} />
@@ -1285,7 +1299,7 @@ function ScheduleTab(){
     <SectionCard title={`${year}년 ${month+1}월 · ${track==="print"?"프린팅 외주":"생산"}`} actions={
       <div style={{display:"flex",alignItems:"center",gap:14}}>
         <div style={{display:"flex",alignItems:"center",gap:10,fontSize:12,fontWeight:600,color:"#475569",flexWrap:"wrap"}}>
-          {Object.entries(ORDER_STATUS_COLOR).map(([label,c])=>(
+          {Object.entries(track==="print"?PRINT_STATUS_COLOR:ORDER_STATUS_COLOR).map(([label,c])=>(
             <span key={label} style={{display:"inline-flex",alignItems:"center",gap:4}}>
               <span style={{display:"inline-block",width:9,height:9,borderRadius:"50%",background:c.color}} />{label}
             </span>
@@ -1308,7 +1322,7 @@ function ScheduleTab(){
             {calSearchResults.length===0&&<div style={{padding:"14px 12px",fontSize:13,color:"#94A3B8"}}>검색 결과가 없습니다 (입고 완료 제외)</div>}
             {calSearchResults.slice(0,20).map(g=>{
               const ev=g.rep;
-              const nc=statusColor(ev.status)||{bg:"#EDE9FE",color:"#6D28D9"};
+              const nc=statusColor(ev.status,ev.source)||{bg:"#EDE9FE",color:"#6D28D9"};
               return(
                 <div key={g.key} onClick={()=>gotoSearchResult(ev)}
                   style={{display:"flex",gap:10,alignItems:"center",padding:"9px 12px",borderBottom:"1px solid #F1F5F9",cursor:"pointer"}}
@@ -1356,7 +1370,7 @@ function ScheduleTab(){
             {groups.slice(0,3).map(g=>{
               // 프린팅 외주 카드(업체·차수) — 상태 뱃지는 읽기 전용, 클릭 시 해당 카드만 상세 패널
               if(track==="print"){
-                const pc=g.mixed?{bg:"#F1F5F9",color:"#64748B"}:(statusColor(g.status)||{bg:"#EDE9FE",color:"#6D28D9"});
+                const pc=g.mixed?{bg:"#F1F5F9",color:"#64748B"}:(statusColor(g.status,"print")||{bg:"#EDE9FE",color:"#6D28D9"});
                 return(
                 <div key={g.key} onClick={e=>{e.stopPropagation();setSelectedCard(g.key);setSelectedDay(dayStr);}} {...cardDragProps(g,dayStr)}
                   title={g.totalRemain<=0?ETA_LOCKED_MSG:`${g.status||"발주"}${g.delayed?" · 지연":""}${g.revised?" · 조정":""} · ${[...new Set(g.events.map(e=>e.displayName||e.item||""))].join(", ")}`}
@@ -1379,7 +1393,7 @@ function ScheduleTab(){
                 </div>);
               }
               const ev=g.rep;
-              const nc=statusColor(ev.status)||{bg:"#EDE9FE",color:"#6D28D9"};
+              const nc=statusColor(ev.status,ev.source)||{bg:"#EDE9FE",color:"#6D28D9"};
               const delayed=g.delayed;
               const revised=!!ev.revisedEta&&ev.date===ev.revisedEta&&ev.revisedEta!==ev.eta; // 조정입고일로 떠 있는 카드
               return(
@@ -1425,7 +1439,7 @@ function ScheduleTab(){
       // 상태 뱃지 클릭 → 드롭다운. 수동 지정(status_manual)이면 뱃지 안에 작은 점(•). order_status 는 group_key 단위 저장.
       const statusPicker=(g)=>{
         const ev=g.rep;
-        const nc=statusColor(ev.status)||{bg:"#EDE9FE",color:"#6D28D9"};
+        const nc=statusColor(ev.status,ev.source)||{bg:"#EDE9FE",color:"#6D28D9"};
         const menuOpen=statusMenu===g.key;
         const busy=statusBusy===g.key;
         return(
@@ -1444,8 +1458,8 @@ function ScheduleTab(){
                     )}
                     {menuOpen&&(
                       <div style={{position:"absolute",top:"calc(100% + 4px)",right:0,minWidth:160,background:"#FFF",border:"1px solid #E2E8F0",borderRadius:10,boxShadow:"0 12px 32px rgba(15,23,42,0.16)",zIndex:60,overflow:"hidden"}}>
-                        {ORDER_STATUS_OPTIONS.map(st=>{
-                          const c=ORDER_STATUS_COLOR[st];
+                        {statusOptionsFor(ev.source).map(st=>{
+                          const c=statusColor(st,ev.source);
                           const sel=ev.status===st;
                           return(<div key={st} onClick={()=>changeStatus(g,st)}
                             style={{display:"flex",alignItems:"center",gap:8,padding:"8px 12px",fontSize:13,fontWeight:sel?700:500,color:"#334155",background:sel?"#F8FAFC":"#FFF",cursor:"pointer",whiteSpace:"nowrap"}}
