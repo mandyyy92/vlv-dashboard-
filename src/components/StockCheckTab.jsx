@@ -90,6 +90,7 @@ export default function StockCheckTab() {
     try { return localStorage.getItem(FIXED_BY_KEY) || ''; } catch { return ''; }
   });
   const [toast, setToast] = useState(null); // {kind, text}
+  const [snapInfo, setSnapInfo] = useState(null); // v_inventory_snapshot_info {snapshot_date, collected_at}
   const toastTimer = useRef(null);
 
   const today = kstDate();
@@ -106,12 +107,15 @@ export default function StockCheckTab() {
     setError('');
     try {
       const since = kstStartIso(addDays(kstDate(), -6));
-      const [neg, log] = await Promise.all([
+      const [neg, log, info] = await Promise.all([
         sbFetch('v_negative_stock?select=*&order=stock_qty.asc&limit=5000'),
         sbFetch(`stock_fix_log?select=*&fixed_at=gte.${encodeURIComponent(since)}&order=fixed_at.desc&limit=5000`),
+        // 수집 시각 뷰는 선택 사항 — 없거나 실패해도 나머지 화면은 그대로 보여준다
+        sbFetch('v_inventory_snapshot_info?select=*&limit=1').catch(() => null),
       ]);
       setRows((neg || []).map((r) => ({ ...r, stock_qty: Number(r.stock_qty) || 0 })));
       setLogs(log || []);
+      setSnapInfo(info?.[0] || null);
       setChecked(new Set());
     } catch (e) {
       setError(e.message || String(e));
@@ -129,6 +133,16 @@ export default function StockCheckTab() {
 
   const snapshotDate = rows[0]?.snapshot_date || '';
   const negSum = rows.reduce((s, r) => s + Math.abs(r.stock_qty), 0);
+  // 수집 시각(KST). 스냅샷 일자와 날짜가 같으면 시:분만, 다르면 MM/DD 시:분
+  const collectedLabel = useMemo(() => {
+    if (!snapInfo?.collected_at) return '';
+    const t = new Date(snapInfo.collected_at);
+    if (Number.isNaN(t.getTime())) return '';
+    const k = new Date(t.getTime() + 9 * 3600 * 1000).toISOString();
+    const hm = k.slice(11, 16);
+    const day = k.slice(0, 10);
+    return day === (snapshotDate || snapInfo.snapshot_date) ? hm : `${day.slice(5).replace('-', '/')} ${hm}`;
+  }, [snapInfo, snapshotDate]);
 
   const filtered = useMemo(() => {
     const k = q.trim().toLowerCase();
@@ -245,7 +259,12 @@ export default function StockCheckTab() {
       <div style={S.stats}>
         <div style={S.stat}>
           <div style={S.statLabel}>기준 스냅샷 일자</div>
-          <div style={S.statValue()}>{loading ? '…' : snapshotDate || '-'}</div>
+          <div style={S.statValue()}>{loading ? '…' : snapshotDate || snapInfo?.snapshot_date || '-'}</div>
+          {!loading && collectedLabel && (
+            <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
+              <b style={{ color: '#334155' }}>{collectedLabel} 수집</b> · 이후 변동은 다음 스냅샷에 반영
+            </div>
+          )}
         </div>
         <div style={S.stat}>
           <div style={S.statLabel}>마이너스 옵션 수</div>
