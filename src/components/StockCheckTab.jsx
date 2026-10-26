@@ -30,6 +30,20 @@ const rowKey = (r) => r.barcode || `${r.product_code}|${r.option_name}`;
 
 const FIXED_BY_KEY = 'stockcheck.fixedBy';
 
+// SheetJS(XLSX) CDN 동적 로드 — App.jsx loadWorkorderXLSX 와 같은 방식(의존성 추가 없음)
+async function loadXLSX() {
+  if (typeof window.XLSX === 'undefined') {
+    await new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+      s.onload = res;
+      s.onerror = () => rej(new Error('XLSX 로드 실패'));
+      document.head.appendChild(s);
+    });
+  }
+  return window.XLSX;
+}
+
 const S = {
   card: { background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: 16, marginBottom: 16 },
   title: { fontSize: 15, fontWeight: 700, color: '#0f172a', margin: 0 },
@@ -163,6 +177,24 @@ export default function StockCheckTab() {
     showToast('ok', `CSV ${filtered.length}건 저장`);
   };
 
+  // 이지어드민 재고일괄조정 업로드용: 상품코드 / 작업수량(마이너스 수량의 절대값 → 0으로 맞춤) / 메모(YYMMDD_마이너스재고조정)
+  const downloadAdjustXlsx = async () => {
+    try {
+      const X = await loadXLSX();
+      const memo = `${today.slice(2).replace(/-/g, '')}_마이너스재고조정`;
+      const aoa = [['상품코드', '작업수량', '메모']]
+        .concat(filtered.map((r) => [r.product_code, Math.abs(r.stock_qty), memo]));
+      const ws = X.utils.aoa_to_sheet(aoa);
+      ws['!cols'] = [{ wch: 12 }, { wch: 10 }, { wch: 24 }];
+      const wb = X.utils.book_new();
+      X.utils.book_append_sheet(wb, ws, '재고일괄조정');
+      X.writeFile(wb, `stock_adjust_${today.replace(/-/g, '')}.xlsx`);
+      showToast('ok', `엑셀 ${filtered.length}건 저장`);
+    } catch (e) {
+      showToast('err', `엑셀 저장 실패: ${e.message || e}`);
+    }
+  };
+
   const recordFixed = async () => {
     const targets = rows.filter((r) => checked.has(rowKey(r)) && !fixedToday.has(rowKey(r)));
     if (!targets.length) return;
@@ -244,6 +276,7 @@ export default function StockCheckTab() {
             onChange={(e) => setQ(e.target.value)}
           />
           <button style={S.btn(false, !filtered.length)} disabled={!filtered.length} onClick={downloadCsv}>CSV 다운로드</button>
+          <button style={S.btn(false, !filtered.length)} disabled={!filtered.length} onClick={downloadAdjustXlsx}>재고일괄조정 엑셀</button>
           <input
             style={{ ...S.input, width: 110 }}
             placeholder="처리자 (선택)"
