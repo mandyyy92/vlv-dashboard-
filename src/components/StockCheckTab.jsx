@@ -181,14 +181,16 @@ export default function StockCheckTab() {
   const downloadAdjustXlsx = async () => {
     try {
       const X = await loadXLSX();
-      const memo = `${today.slice(2).replace(/-/g, '')}_마이너스재고조정`;
+      // 화면을 밤새 켜둬도 누른 시점의 날짜(KST)가 들어가도록 클릭 때 다시 계산
+      const day = kstDate();
+      const memo = `${day.slice(2).replace(/-/g, '')}_마이너스재고조정`;
       const aoa = [['상품코드', '작업수량', '메모']]
         .concat(filtered.map((r) => [r.product_code, 0, memo]));
       const ws = X.utils.aoa_to_sheet(aoa);
       ws['!cols'] = [{ wch: 12 }, { wch: 10 }, { wch: 24 }];
       const wb = X.utils.book_new();
       X.utils.book_append_sheet(wb, ws, '재고일괄조정');
-      X.writeFile(wb, `stock_adjust_${today.replace(/-/g, '')}.xlsx`);
+      X.writeFile(wb, `stock_adjust_${day.replace(/-/g, '')}.xlsx`);
       showToast('ok', `엑셀 ${filtered.length}건 저장`);
     } catch (e) {
       showToast('err', `엑셀 저장 실패: ${e.message || e}`);
