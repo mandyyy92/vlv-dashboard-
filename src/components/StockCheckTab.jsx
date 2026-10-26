@@ -131,7 +131,8 @@ export default function StockCheckTab() {
   );
   const fixedToday = useMemo(() => new Set(todayLogs.map(rowKey)), [todayLogs]);
 
-  const snapshotDate = rows[0]?.snapshot_date || '';
+  // 여러 재고 테이블을 합쳐 보므로 기준일은 수집 시각 뷰(가장 최신 스냅샷) 우선
+  const snapshotDate = snapInfo?.snapshot_date || rows[0]?.snapshot_date || '';
   const negSum = rows.reduce((s, r) => s + Math.abs(r.stock_qty), 0);
   // 수집 시각(KST). 스냅샷 일자와 날짜가 같으면 시:분만, 다르면 MM/DD 시:분
   const collectedLabel = useMemo(() => {
