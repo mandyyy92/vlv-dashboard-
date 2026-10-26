@@ -192,7 +192,8 @@ export default function StockCheckTab() {
     showToast('ok', `CSV ${filtered.length}건 저장`);
   };
 
-  // 이지어드민 재고일괄조정 업로드용: 상품코드 / 작업수량(항상 0) / 메모(YYMMDD_마이너스재고조정)
+  // 이지어드민 재고일괄조정 업로드용: 상품코드 / 작업수량 / 메모(YYMMDD_마이너스재고조정)
+  // 이지어드민은 재고를 0으로 맞출 때 작업수량에 숫자 0 대신 'zero' 를 넣어야 한다(0은 무시됨)
   const downloadAdjustXlsx = async () => {
     try {
       const X = await loadXLSX();
@@ -200,7 +201,7 @@ export default function StockCheckTab() {
       const day = kstDate();
       const memo = `${day.slice(2).replace(/-/g, '')}_마이너스재고조정`;
       const aoa = [['상품코드', '작업수량', '메모']]
-        .concat(filtered.map((r) => [r.product_code, 0, memo]));
+        .concat(filtered.map((r) => [r.product_code, 'zero', memo]));
       const ws = X.utils.aoa_to_sheet(aoa);
       ws['!cols'] = [{ wch: 12 }, { wch: 10 }, { wch: 24 }];
       const wb = X.utils.book_new();
