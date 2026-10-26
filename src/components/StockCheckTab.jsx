@@ -82,7 +82,6 @@ export default function StockCheckTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [q, setQ] = useState('');
-  const [checked, setChecked] = useState(() => new Set());
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null); // {kind, text}
   const [snapInfo, setSnapInfo] = useState(null); // v_inventory_snapshot_info {snapshot_date, collected_at}
@@ -111,7 +110,6 @@ export default function StockCheckTab() {
       setRows((neg || []).map((r) => ({ ...r, stock_qty: Number(r.stock_qty) || 0 })));
       setLogs(log || []);
       setSnapInfo(info?.[0] || null);
-      setChecked(new Set());
     } catch (e) {
       setError(e.message || String(e));
     } finally {
@@ -147,25 +145,6 @@ export default function StockCheckTab() {
       [r.product_name, r.product_code, r.barcode].some((v) => String(v || '').toLowerCase().includes(k)),
     );
   }, [rows, q]);
-
-  // 전체 선택은 '보이는 행 중 아직 처리 안 된 행' 기준
-  const selectable = filtered.filter((r) => !fixedToday.has(rowKey(r)));
-  const allChecked = selectable.length > 0 && selectable.every((r) => checked.has(rowKey(r)));
-  const toggleAll = () => {
-    setChecked((prev) => {
-      const next = new Set(prev);
-      if (allChecked) selectable.forEach((r) => next.delete(rowKey(r)));
-      else selectable.forEach((r) => next.add(rowKey(r)));
-      return next;
-    });
-  };
-  const toggle = (key) => {
-    setChecked((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
-    });
-  };
 
   // 이지어드민 재고일괄조정 업로드용: 상품코드 / 작업수량 / 메모(YYMMDD_마이너스재고조정)
   // 이지어드민은 재고를 0으로 맞출 때 작업수량에 숫자 0 대신 'zero' 를 넣어야 한다(0은 무시됨)
@@ -213,20 +192,8 @@ export default function StockCheckTab() {
       }));
       const inserted = await sbFetch('stock_fix_log', { method: 'POST', body: JSON.stringify(payload) });
       setLogs((prev) => [...(inserted || payload), ...prev]);
-      setChecked(new Set());
     } finally {
       setSaving(false);
-    }
-  };
-
-  const recordFixed = async () => {
-    const targets = rows.filter((r) => checked.has(rowKey(r)) && !fixedToday.has(rowKey(r)));
-    if (!targets.length) return;
-    try {
-      await insertLogs(targets);
-      showToast('ok', `${targets.length}건 기록됨`);
-    } catch (e) {
-      showToast('err', `기록 실패: ${e.message || e}`);
     }
   };
 
@@ -237,8 +204,6 @@ export default function StockCheckTab() {
     return Array.from({ length: 7 }, (_, i) => { const d = addDays(today, -i); return { date: d, count: cnt[d] || 0 }; });
   }, [logs, today]);
   const histMax = Math.max(1, ...history.map((h) => h.count));
-
-  const checkedCount = rows.filter((r) => checked.has(rowKey(r)) && !fixedToday.has(rowKey(r))).length;
 
   return (
     <div>
@@ -267,7 +232,7 @@ export default function StockCheckTab() {
         </div>
       </div>
 
-      {/* 2) 목록 · 3) 재고일괄조정 엑셀 · 4) 처리 완료 기록 */}
+      {/* 2) 목록 · 3) 재고일괄조정 엑셀(다운로드 시 자동 처리 기록) */}
       <div style={S.card}>
         <div style={S.bar}>
           <h3 style={S.title}>🔻 마이너스 재고 옵션</h3>
@@ -279,9 +244,8 @@ export default function StockCheckTab() {
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
-          <button style={S.btn(false, !filtered.length || saving)} disabled={!filtered.length || saving} onClick={downloadAdjustXlsx}>재고일괄조정 엑셀</button>
-          <button style={S.btn(true, !checkedCount || saving)} disabled={!checkedCount || saving} onClick={recordFixed}>
-            {saving ? '기록 중…' : `처리 완료로 기록${checkedCount ? ` (${checkedCount})` : ''}`}
+          <button style={S.btn(true, !filtered.length || saving)} disabled={!filtered.length || saving} onClick={downloadAdjustXlsx}>
+            {saving ? '기록 중…' : '재고일괄조정 엑셀'}
           </button>
           <button style={S.btn(false, loading)} disabled={loading} onClick={load}>새로고침</button>
         </div>
@@ -299,9 +263,6 @@ export default function StockCheckTab() {
             <table style={S.table}>
               <thead>
                 <tr>
-                  <th style={{ ...S.th, width: 36 }}>
-                    <input type="checkbox" checked={allChecked} disabled={!selectable.length} onChange={toggleAll} aria-label="전체 선택" />
-                  </th>
                   <th style={S.th}>상품코드</th>
                   <th style={S.th}>상품명</th>
                   <th style={S.th}>옵션</th>
@@ -315,10 +276,7 @@ export default function StockCheckTab() {
                   const key = rowKey(r);
                   const done = fixedToday.has(key);
                   return (
-                    <tr key={key} style={{ opacity: done ? 0.45 : 1, background: checked.has(key) && !done ? '#eef2ff' : undefined }}>
-                      <td style={S.td}>
-                        <input type="checkbox" checked={!done && checked.has(key)} disabled={done} onChange={() => toggle(key)} aria-label="선택" />
-                      </td>
+                    <tr key={key} style={{ opacity: done ? 0.45 : 1 }}>
                       <td style={{ ...S.td, ...S.mono }}>{r.product_code}</td>
                       <td style={S.td}>
                         {r.product_name}
