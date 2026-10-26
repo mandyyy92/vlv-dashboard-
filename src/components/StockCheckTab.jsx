@@ -286,7 +286,6 @@ export default function StockCheckTab() {
         <div style={{ ...S.bar, justifyContent: 'space-between' }}>
           <div>
             <h3 style={S.title}>🔻 마이너스 재고 옵션</h3>
-            <div style={S.sub}>이지어드민 최신 스냅샷 기준 · 실제 보정은 이지어드민에서 진행하고, 끝나면 처리 완료로 기록하세요</div>
           </div>
           <button style={S.btn(false, loading)} disabled={loading} onClick={load}>새로고침</button>
         </div>
@@ -369,8 +368,7 @@ export default function StockCheckTab() {
 
       {/* 5) 최근 7일 처리 이력 */}
       <div style={S.card}>
-        <h3 style={S.title}>🗓 최근 7일 처리 이력</h3>
-        <div style={{ ...S.sub, marginBottom: 12 }}>stock_fix_log 기준 · 날짜별 기록 건수</div>
+        <h3 style={{ ...S.title, marginBottom: 12 }}>🗓 최근 7일 처리 이력</h3>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {history.map((h) => (
             <div key={h.date} style={{ display: 'grid', gridTemplateColumns: '96px minmax(0,1fr) 48px', gap: 10, alignItems: 'center', fontSize: 13 }}>
