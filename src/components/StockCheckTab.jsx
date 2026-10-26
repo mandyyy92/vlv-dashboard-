@@ -28,8 +28,6 @@ const addDays = (ymd, n) => {
 // 처리됨 판정 키: 바코드 우선, 없으면 상품코드+옵션
 const rowKey = (r) => r.barcode || `${r.product_code}|${r.option_name}`;
 
-const FIXED_BY_KEY = 'stockcheck.fixedBy';
-
 // SheetJS(XLSX) CDN 동적 로드 — App.jsx loadWorkorderXLSX 와 같은 방식(의존성 추가 없음)
 async function loadXLSX() {
   if (typeof window.XLSX === 'undefined') {
@@ -86,9 +84,6 @@ export default function StockCheckTab() {
   const [q, setQ] = useState('');
   const [checked, setChecked] = useState(() => new Set());
   const [saving, setSaving] = useState(false);
-  const [fixedBy, setFixedBy] = useState(() => {
-    try { return localStorage.getItem(FIXED_BY_KEY) || ''; } catch { return ''; }
-  });
   const [toast, setToast] = useState(null); // {kind, text}
   const [snapInfo, setSnapInfo] = useState(null); // v_inventory_snapshot_info {snapshot_date, collected_at}
   const toastTimer = useRef(null);
@@ -172,26 +167,6 @@ export default function StockCheckTab() {
     });
   };
 
-  const downloadCsv = () => {
-    const cell = (v) => {
-      const s = String(v ?? '');
-      return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-    };
-    const lines = [['바코드', '상품코드', '옵션', '현재재고', '변경재고']]
-      .concat(filtered.map((r) => [r.barcode, r.product_code, r.option_name, r.stock_qty, 0]))
-      .map((a) => a.map(cell).join(','));
-    const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `negative_stock_${(snapshotDate || today).replace(/-/g, '')}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-    showToast('ok', `CSV ${filtered.length}건 저장`);
-  };
-
   // 이지어드민 재고일괄조정 업로드용: 상품코드 / 작업수량 / 메모(YYMMDD_마이너스재고조정)
   // 이지어드민은 재고를 0으로 맞출 때 작업수량에 숫자 0 대신 'zero' 를 넣어야 한다(0은 무시됨)
   const downloadAdjustXlsx = async () => {
@@ -227,7 +202,6 @@ export default function StockCheckTab() {
         before_qty: r.stock_qty,
         after_qty: 0,
         fixed_at: now,
-        fixed_by: fixedBy.trim() || null,
       }));
       const inserted = await sbFetch('stock_fix_log', { method: 'POST', body: JSON.stringify(payload) });
       setLogs((prev) => [...(inserted || payload), ...prev]);
@@ -238,11 +212,6 @@ export default function StockCheckTab() {
     } finally {
       setSaving(false);
     }
-  };
-
-  const onFixedBy = (v) => {
-    setFixedBy(v);
-    try { localStorage.setItem(FIXED_BY_KEY, v); } catch { /* 저장 불가 환경은 무시 */ }
   };
 
   // 최근 7일(오늘 포함) 날짜별 처리 건수
@@ -282,13 +251,10 @@ export default function StockCheckTab() {
         </div>
       </div>
 
-      {/* 2) 목록 · 3) CSV · 4) 처리 완료 기록 */}
+      {/* 2) 목록 · 3) 재고일괄조정 엑셀 · 4) 처리 완료 기록 */}
       <div style={S.card}>
-        <div style={{ ...S.bar, justifyContent: 'space-between' }}>
-          <div>
-            <h3 style={S.title}>🔻 마이너스 재고 옵션</h3>
-          </div>
-          <button style={S.btn(false, loading)} disabled={loading} onClick={load}>새로고침</button>
+        <div style={S.bar}>
+          <h3 style={S.title}>🔻 마이너스 재고 옵션</h3>
         </div>
         <div style={S.bar}>
           <input
@@ -297,18 +263,11 @@ export default function StockCheckTab() {
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
-          <button style={S.btn(false, !filtered.length)} disabled={!filtered.length} onClick={downloadCsv}>CSV 다운로드</button>
           <button style={S.btn(false, !filtered.length)} disabled={!filtered.length} onClick={downloadAdjustXlsx}>재고일괄조정 엑셀</button>
-          <input
-            style={{ ...S.input, width: 110 }}
-            placeholder="처리자 (선택)"
-            value={fixedBy}
-            onChange={(e) => onFixedBy(e.target.value)}
-            aria-label="처리자"
-          />
           <button style={S.btn(true, !checkedCount || saving)} disabled={!checkedCount || saving} onClick={recordFixed}>
             {saving ? '기록 중…' : `처리 완료로 기록${checkedCount ? ` (${checkedCount})` : ''}`}
           </button>
+          <button style={S.btn(false, loading)} disabled={loading} onClick={load}>새로고침</button>
         </div>
 
         {error ? (
