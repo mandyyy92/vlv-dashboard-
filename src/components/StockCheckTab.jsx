@@ -182,15 +182,23 @@ export default function StockCheckTab() {
       const wb = X.utils.book_new();
       X.utils.book_append_sheet(wb, ws, '재고일괄조정');
       X.writeFile(wb, `stock_adjust_${day.replace(/-/g, '')}.xlsx`);
-      showToast('ok', `엑셀 ${filtered.length}건 저장`);
     } catch (e) {
       showToast('err', `엑셀 저장 실패: ${e.message || e}`);
+      return;
+    }
+    // 내려받은 목록은 자동으로 처리 완료 기록 (오늘 이미 기록된 행은 제외)
+    const targets = filtered.filter((r) => !fixedToday.has(rowKey(r)));
+    if (!targets.length) { showToast('ok', `엑셀 ${filtered.length}건 저장 · 모두 이미 처리됨`); return; }
+    try {
+      await insertLogs(targets);
+      showToast('ok', `엑셀 ${filtered.length}건 저장 · ${targets.length}건 기록됨`);
+    } catch (e) {
+      showToast('err', `엑셀은 저장됐지만 기록 실패: ${e.message || e}`);
     }
   };
 
-  const recordFixed = async () => {
-    const targets = rows.filter((r) => checked.has(rowKey(r)) && !fixedToday.has(rowKey(r)));
-    if (!targets.length) return;
+  // stock_fix_log insert (before_qty = 현재재고, after_qty = 0)
+  const insertLogs = async (targets) => {
     setSaving(true);
     try {
       const now = new Date().toISOString();
@@ -206,11 +214,19 @@ export default function StockCheckTab() {
       const inserted = await sbFetch('stock_fix_log', { method: 'POST', body: JSON.stringify(payload) });
       setLogs((prev) => [...(inserted || payload), ...prev]);
       setChecked(new Set());
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const recordFixed = async () => {
+    const targets = rows.filter((r) => checked.has(rowKey(r)) && !fixedToday.has(rowKey(r)));
+    if (!targets.length) return;
+    try {
+      await insertLogs(targets);
       showToast('ok', `${targets.length}건 기록됨`);
     } catch (e) {
       showToast('err', `기록 실패: ${e.message || e}`);
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -263,7 +279,7 @@ export default function StockCheckTab() {
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
-          <button style={S.btn(false, !filtered.length)} disabled={!filtered.length} onClick={downloadAdjustXlsx}>재고일괄조정 엑셀</button>
+          <button style={S.btn(false, !filtered.length || saving)} disabled={!filtered.length || saving} onClick={downloadAdjustXlsx}>재고일괄조정 엑셀</button>
           <button style={S.btn(true, !checkedCount || saving)} disabled={!checkedCount || saving} onClick={recordFixed}>
             {saving ? '기록 중…' : `처리 완료로 기록${checkedCount ? ` (${checkedCount})` : ''}`}
           </button>
