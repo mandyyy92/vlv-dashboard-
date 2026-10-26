@@ -7537,7 +7537,7 @@ export default function Dashboard(){
     {id:"print",label:"MFS 출고 및 프린팅 외주",icon:"🖨️"},
     {id:"productdb",label:"제품 DB",icon:"🗃"},
     {id:"planning",label:"아이템 기획",icon:"💡",hidden:true},
-    {id:"sample",label:"작업지시서",icon:"📝"},
+    {id:"sample",label:"작업지시서",icon:"📝",hidden:true}, // 메뉴에서만 숨김(컴포넌트·데이터 유지)
     {id:"vendorchat",label:"업체 소통 요약",icon:"💬"},
     {id:"stockcheck",label:"재고 점검",icon:"🔻"},
     {id:"measure",label:"실측 사이즈",icon:"📐",hidden:true},
