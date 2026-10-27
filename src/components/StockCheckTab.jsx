@@ -303,9 +303,9 @@ export default function StockCheckTab() {
       {/* 5) 최근 7일 처리 이력 */}
       <div style={S.card}>
         <h3 style={{ ...S.title, marginBottom: 12 }}>🗓 최근 7일 처리 이력</h3>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 480 }}>
           {history.map((h) => (
-            <div key={h.date} style={{ display: 'grid', gridTemplateColumns: '96px minmax(0,1fr) 48px', gap: 10, alignItems: 'center', fontSize: 13 }}>
+            <div key={h.date} style={{ display: 'grid', gridTemplateColumns: '84px minmax(0,1fr) 44px', gap: 10, alignItems: 'center', fontSize: 13 }}>
               <span style={{ color: h.date === today ? '#0f172a' : '#64748b', fontWeight: h.date === today ? 700 : 500 }}>
                 {h.date.slice(5).replace('-', '/')}{h.date === today ? ' (오늘)' : ''}
               </span>
