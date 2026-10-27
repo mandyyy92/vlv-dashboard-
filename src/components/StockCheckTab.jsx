@@ -85,6 +85,7 @@ export default function StockCheckTab() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null); // {kind, text}
   const [snapInfo, setSnapInfo] = useState(null); // v_inventory_snapshot_info {snapshot_date, collected_at}
+  const [openDate, setOpenDate] = useState(null); // 처리 이력에서 펼친 날짜
   const toastTimer = useRef(null);
 
   const today = kstDate();
@@ -199,9 +200,9 @@ export default function StockCheckTab() {
 
   // 최근 7일(오늘 포함) 날짜별 처리 건수
   const history = useMemo(() => {
-    const cnt = {};
-    logs.forEach((l) => { if (l.fixed_at) { const d = kstDate(new Date(l.fixed_at)); cnt[d] = (cnt[d] || 0) + 1; } });
-    return Array.from({ length: 7 }, (_, i) => { const d = addDays(today, -i); return { date: d, count: cnt[d] || 0 }; });
+    const byDate = {};
+    logs.forEach((l) => { if (l.fixed_at) { const d = kstDate(new Date(l.fixed_at)); (byDate[d] = byDate[d] || []).push(l); } });
+    return Array.from({ length: 7 }, (_, i) => { const d = addDays(today, -i); const items = byDate[d] || []; return { date: d, count: items.length, items }; });
   }, [logs, today]);
   const histMax = Math.max(1, ...history.map((h) => h.count));
 
@@ -303,18 +304,51 @@ export default function StockCheckTab() {
       {/* 5) 최근 7일 처리 이력 */}
       <div style={S.card}>
         <h3 style={{ ...S.title, marginBottom: 12 }}>🗓 최근 7일 처리 이력</h3>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 480 }}>
-          {history.map((h) => (
-            <div key={h.date} style={{ display: 'grid', gridTemplateColumns: '84px minmax(0,1fr) 44px', gap: 10, alignItems: 'center', fontSize: 13 }}>
-              <span style={{ color: h.date === today ? '#0f172a' : '#64748b', fontWeight: h.date === today ? 700 : 500 }}>
-                {h.date.slice(5).replace('-', '/')}{h.date === today ? ' (오늘)' : ''}
-              </span>
-              <div style={{ height: 10, background: '#f1f5f9', borderRadius: 99, overflow: 'hidden' }}>
-                <div style={{ width: `${(h.count / histMax) * 100}%`, height: '100%', background: '#4f46e5', borderRadius: 99 }} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {history.map((h) => {
+            const open = openDate === h.date;
+            return (
+            <div key={h.date}>
+              <div onClick={() => h.count && setOpenDate(open ? null : h.date)}
+                style={{ display: 'grid', gridTemplateColumns: '14px 84px minmax(0,1fr) 44px', gap: 10, maxWidth: 504, alignItems: 'center', fontSize: 13, cursor: h.count ? 'pointer' : 'default' }}>
+                <span style={{ fontSize: 10, color: '#94a3b8' }}>{h.count ? (open ? '▾' : '▸') : ''}</span>
+                <span style={{ color: h.date === today ? '#0f172a' : '#64748b', fontWeight: h.date === today ? 700 : 500 }}>
+                  {h.date.slice(5).replace('-', '/')}{h.date === today ? ' (오늘)' : ''}
+                </span>
+                <div style={{ height: 10, background: '#f1f5f9', borderRadius: 99, overflow: 'hidden' }}>
+                  <div style={{ width: `${(h.count / histMax) * 100}%`, height: '100%', background: '#4f46e5', borderRadius: 99 }} />
+                </div>
+                <span style={{ textAlign: 'right', fontWeight: 600, color: h.count ? '#0f172a' : '#94a3b8' }}>{h.count}건</span>
               </div>
-              <span style={{ textAlign: 'right', fontWeight: 600, color: h.count ? '#0f172a' : '#94a3b8' }}>{h.count}건</span>
+              {open && (
+                <div style={{ ...S.tableWrap, margin: '8px 0 6px 24px', maxHeight: 320, overflowY: 'auto', width: 'max-content', maxWidth: 'calc(100% - 24px)' }}>
+                  <table style={S.table}>
+                    <thead>
+                      <tr>
+                        <th style={S.th}>상품코드</th><th style={S.th}>옵션</th><th style={S.th}>바코드</th>
+                        <th style={{ ...S.th, textAlign: 'right' }}>조정 전</th><th style={{ ...S.th, textAlign: 'right' }}>조정 후</th><th style={S.th}>시각</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...h.items].sort((a, b) => String(a.product_code).localeCompare(String(b.product_code))).map((l) => (
+                        <tr key={l.id}>
+                          <td style={{ ...S.td, ...S.mono }}>{l.product_code}</td>
+                          <td style={S.td}>{l.option_name || '-'}</td>
+                          <td style={{ ...S.td, ...S.mono, color: '#64748b' }}>{l.barcode || '-'}</td>
+                          <td style={{ ...S.td, textAlign: 'right', color: '#dc2626', fontWeight: 600 }}>{l.before_qty}</td>
+                          <td style={{ ...S.td, textAlign: 'right' }}>{l.after_qty}</td>
+                          <td style={{ ...S.td, color: '#64748b', whiteSpace: 'nowrap' }}>
+                            {new Date(l.fixed_at).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false })}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
