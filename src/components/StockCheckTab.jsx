@@ -233,8 +233,10 @@ export default function StockCheckTab() {
         </div>
       </div>
 
+      {/* 2단 — 왼쪽: 마이너스 목록 / 오른쪽: 처리 이력 (좁은 화면에서는 위아래로) */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-start', marginBottom: 16 }}>
       {/* 2) 목록 · 3) 재고일괄조정 엑셀(다운로드 시 자동 처리 기록) */}
-      <div style={S.card}>
+      <div style={{ ...S.card, flex: '3 1 560px', minWidth: 0, marginBottom: 0 }}>
         <div style={S.bar}>
           <h3 style={S.title}>🔻 마이너스 재고 옵션</h3>
         </div>
@@ -302,7 +304,7 @@ export default function StockCheckTab() {
       </div>
 
       {/* 5) 최근 7일 처리 이력 */}
-      <div style={S.card}>
+      <div style={{ ...S.card, flex: '2 1 380px', minWidth: 0, marginBottom: 0 }}>
         <h3 style={{ ...S.title, marginBottom: 12 }}>🗓 최근 7일 처리 이력</h3>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {history.map((h) => {
@@ -310,7 +312,7 @@ export default function StockCheckTab() {
             return (
             <div key={h.date}>
               <div onClick={() => h.count && setOpenDate(open ? null : h.date)}
-                style={{ display: 'grid', gridTemplateColumns: '14px 84px minmax(0,1fr) 44px', gap: 10, maxWidth: 504, alignItems: 'center', fontSize: 13, cursor: h.count ? 'pointer' : 'default' }}>
+                style={{ display: 'grid', gridTemplateColumns: '14px 84px minmax(0,1fr) 44px', gap: 10, alignItems: 'center', fontSize: 13, cursor: h.count ? 'pointer' : 'default' }}>
                 <span style={{ fontSize: 10, color: '#94a3b8' }}>{h.count ? (open ? '▾' : '▸') : ''}</span>
                 <span style={{ color: h.date === today ? '#0f172a' : '#64748b', fontWeight: h.date === today ? 700 : 500 }}>
                   {h.date.slice(5).replace('-', '/')}{h.date === today ? ' (오늘)' : ''}
@@ -321,7 +323,7 @@ export default function StockCheckTab() {
                 <span style={{ textAlign: 'right', fontWeight: 600, color: h.count ? '#0f172a' : '#94a3b8' }}>{h.count}건</span>
               </div>
               {open && (
-                <div style={{ ...S.tableWrap, margin: '8px 0 6px 24px', maxHeight: 320, overflowY: 'auto', width: 'max-content', maxWidth: 'calc(100% - 24px)' }}>
+                <div style={{ ...S.tableWrap, margin: '8px 0 6px 24px', maxHeight: 320, overflowY: 'auto', maxWidth: 'calc(100% - 24px)' }}>
                   <table style={S.table}>
                     <thead>
                       <tr>
@@ -350,6 +352,8 @@ export default function StockCheckTab() {
             );
           })}
         </div>
+      </div>
+
       </div>
 
       {toast && <div role="status" style={S.toast(toast.kind)}>{toast.text}</div>}
