@@ -167,7 +167,7 @@ function BarcodeCheckSection() {
             <thead>
               <tr>
                 <th style={S.th}>상품코드</th><th style={S.th}>상품명</th><th style={S.th}>옵션</th>
-                <th style={S.th}>바코드</th><th style={S.th}>자릿수</th><th style={S.th}>사유</th><th style={S.th}>출처</th>
+                <th style={S.th}>바코드</th><th style={S.th}>자릿수</th><th style={S.th}>사유</th>
               </tr>
             </thead>
             <tbody>
@@ -186,7 +186,6 @@ function BarcodeCheckSection() {
                     </td>
                     <td style={{ ...S.td, textAlign: 'right', color: bc.length === 17 ? '#64748b' : '#dc2626', fontWeight: 600 }}>{bc.length}</td>
                     <td style={{ ...S.td, color: r.level === 'error' ? '#b91c1c' : '#64748b' }}>{r.issue}</td>
-                    <td style={{ ...S.td, color: '#64748b', whiteSpace: 'nowrap' }}>{r.source === 'inventory_artwork' ? '아트웍' : '기본'}</td>
                   </tr>
                 );
               })}

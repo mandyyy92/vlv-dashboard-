@@ -1,5 +1,5 @@
 -- 재고 점검 탭 · 바코드 검수
--- inventory · inventory_artwork 최신 스냅샷의 바코드를 17자리 규칙으로 검사한다. (두 테이블은 읽기만, 뷰만 생성)
+-- inventory 최신 스냅샷의 바코드를 17자리 규칙으로 검사한다. (읽기만, 뷰만 생성 · 아트웍 테이블은 검사하지 않음)
 -- 스냅샷이 매일 갱신되면 뷰 결과도 자동으로 그날 기준이 된다. Supabase SQL Editor 에서 실행.
 --
 -- 17자리 규칙 (변경 후)
@@ -12,21 +12,16 @@
 
 create or replace view public.v_barcode_check as
 with src as (
-  select 'inventory' as source, 1 as prio,
+  select 'inventory' as source,
          "상품코드", "상품명", "옵션", "바코드", "스냅샷일자"
   from public.inventory
   where "스냅샷일자" = (select max("스냅샷일자") from public.inventory)
-  union all
-  select 'inventory_artwork', 2,
-         "상품코드", "상품명", "옵션", "바코드", "스냅샷일자"
-  from public.inventory_artwork
-  where "스냅샷일자" = (select max("스냅샷일자") from public.inventory_artwork)
 ),
 latest as (
-  -- v_negative_stock 과 같은 기준: 같은 상품코드+옵션은 최신 스냅샷(같으면 inventory) 한 행만
+  -- 같은 상품코드+옵션이 여러 행이면 한 행만
   select distinct on ("상품코드", "옵션") *, coalesce("바코드", '') as b
   from src
-  order by "상품코드", "옵션", "스냅샷일자" desc, prio
+  order by "상품코드", "옵션"
 ),
 dup as (
   select b from latest where b <> '' group by b having count(distinct "상품코드") > 1
@@ -72,9 +67,6 @@ create or replace view public.v_barcode_check_summary as
 with src as (
   select "상품코드", "옵션", "스냅샷일자" from public.inventory
   where "스냅샷일자" = (select max("스냅샷일자") from public.inventory)
-  union all
-  select "상품코드", "옵션", "스냅샷일자" from public.inventory_artwork
-  where "스냅샷일자" = (select max("스냅샷일자") from public.inventory_artwork)
 )
 select max("스냅샷일자") as snapshot_date,
        count(distinct ("상품코드", "옵션")) as checked_count
