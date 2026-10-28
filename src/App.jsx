@@ -54,6 +54,8 @@ const toYmd=(d)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-$
 const DELAY_EXCLUDED_MANUAL_ST=new Set(["입고완료","입고확정"]);
 const isGroupDelayed=(g)=>g.events.some(e=>e.isDelayed)&&!(g.rep.statusManual&&DELAY_EXCLUDED_MANUAL_ST.has(String(g.rep.status||"").replace(/\s/g,"")));
 // 뷰 자동 판정 상태 중 수동 선택지(ORDER_STATUS_OPTIONS)에 없는 값의 색상
+// 입고 완료 카드는 지연 · 시트 반영 실패 뱃지를 숨긴다
+const isDoneStatus=(s)=>String(s||"").replace(/\s/g,"")==="입고완료";
 const statusColor=(s,src)=>(src==="print"?PRINT_STATUS_COLOR:ORDER_STATUS_COLOR)[s]||(s==="지연"?{bg:"#FEE2E2",color:"#DC2626"}:null);
 // 옵션명 표기 정규화: "[버건디-M]" → "버건디/M"
 const fmtOption=(v)=>String(v||"").trim().replace(/^\[|\]$/g,"").trim().replace(/-/g,"/");
@@ -1158,7 +1160,7 @@ function ScheduleTab(){
   // 시트 반영 상태 뱃지 — error 우선(툴팁=message), 그다음 pending
   const queueBadge=(events)=>{
     const qs=events.map(e=>sheetQueue[String(e.rowKey)]).filter(Boolean);
-    const errs=qs.filter(q=>q.status==="error");
+    const errs=events.every(e=>isDoneStatus(e.status))?[]:qs.filter(q=>q.status==="error");
     const base={flexShrink:0,fontSize:10,fontWeight:700,borderRadius:3,padding:"0 4px",whiteSpace:"nowrap"};
     if(errs.length)return <span title={[...new Set(errs.map(q=>q.message).filter(Boolean))].join(" / ")||"시트 반영 실패"} style={{...base,color:"#FFF",background:"#DC2626"}}>시트 반영 실패</span>;
     if(qs.length)return <span title="구글 시트 반영 대기 중 (10분 주기)" style={{...base,color:"#64748B",background:"#F1F5F9",border:"1px solid #E2E8F0"}}>시트 대기</span>;
@@ -1375,7 +1377,7 @@ function ScheduleTab(){
                 return(
                 <div key={g.key} onClick={e=>{e.stopPropagation();setSelectedCard(g.key);setSelectedDay(dayStr);}} {...cardDragProps(g,dayStr)}
                   title={g.totalRemain<=0?ETA_LOCKED_MSG:`${g.status||"발주"}${g.delayed?" · 지연":""}${g.revised?" · 조정":""} · ${[...new Set(g.events.map(e=>e.displayName||e.item||""))].join(", ")}`}
-                  style={{display:"flex",gap:6,alignItems:"center",padding:"6px 7px",borderRadius:4,marginBottom:2,background:pc.bg,border:"1px solid "+pc.color+"55",...(g.delayed?{borderLeft:"3px solid #DC2626"}:{}),fontSize:12,lineHeight:1.3,userSelect:"none",cursor:"pointer",...cardDragStyle(g,dayStr)}}>
+                  style={{display:"flex",gap:6,alignItems:"center",padding:"6px 7px",borderRadius:4,marginBottom:2,background:pc.bg,border:"1px solid "+pc.color+"55",...(g.delayed&&!isDoneStatus(g.status)?{borderLeft:"3px solid #DC2626"}:{}),fontSize:12,lineHeight:1.3,userSelect:"none",cursor:"pointer",...cardDragStyle(g,dayStr)}}>
                   <span style={{display:"flex",flexShrink:0}}>
                     {g.images.length>0
                       ?g.images.map((u,k)=><span key={u} style={{display:"block",marginLeft:k?-8:0,position:"relative",zIndex:3-k,borderRadius:4,boxShadow:"0 0 0 1.5px #FFF"}}><CalThumb src={u} size={24} /></span>)
@@ -1384,7 +1386,7 @@ function ScheduleTab(){
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{display:"flex",alignItems:"center",gap:4,color:pc.color,fontWeight:600,fontSize:11,minWidth:0}}>
                       <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.status||"발주"}</span>
-                      {g.delayed&&<span style={{flexShrink:0,fontSize:10,fontWeight:800,color:"#FFF",background:"#DC2626",borderRadius:3,padding:"0 4px"}}>지연</span>}
+                      {g.delayed&&!isDoneStatus(g.status)&&<span style={{flexShrink:0,fontSize:10,fontWeight:800,color:"#FFF",background:"#DC2626",borderRadius:3,padding:"0 4px"}}>지연</span>}
                       {g.revised&&<span style={{flexShrink:0,fontSize:10,fontWeight:700,color:"#475569",background:"#E2E8F0",borderRadius:3,padding:"0 4px"}}>조정</span>}
                       {queueBadge(g.events)}
                     </div>
@@ -1395,7 +1397,7 @@ function ScheduleTab(){
               }
               const ev=g.rep;
               const nc=statusColor(ev.status,ev.source)||{bg:"#EDE9FE",color:"#6D28D9"};
-              const delayed=g.delayed;
+              const delayed=g.delayed&&!isDoneStatus(ev.status);
               const revised=!!ev.revisedEta&&ev.date===ev.revisedEta&&ev.revisedEta!==ev.eta; // 조정입고일로 떠 있는 카드
               return(
                 <div key={g.key} {...cardDragProps(g,dayStr)} title={g.totalRemain<=0?ETA_LOCKED_MSG:`${ev.status||"발주"}${delayed?" · 지연":""}${revised?` · 조정 (예정 ${ev.eta||"-"})`:""}${ev.code?" · "+ev.code:""}`}
@@ -1598,7 +1600,7 @@ function ScheduleTab(){
                       <CalThumb src={g.imageUrl} size={28} />
                       <span style={{flex:"1 1 200px",minWidth:0,fontSize:14,fontWeight:700,color:"#1E293B",overflowWrap:"anywhere"}}>{g.rep.displayName||g.rep.item||"-"}</span>
                       <span style={{flexShrink:0,fontSize:13,fontWeight:700,whiteSpace:"nowrap",color:g.totalRemain>0?"#C2410C":"#0F766E"}}>{qtyText(g.totalRemain,g.totalReceived)}</span>
-                      {g.delayed&&miniBadge("지연","#FFF","#DC2626")}
+                      {g.delayed&&!isDoneStatus(g.rep.status)&&miniBadge("지연","#FFF","#DC2626")}
                       {revised&&miniBadge("조정","#475569","#E2E8F0")}
                       {queueBadge(g.events)}
                       {etaInput(g)}
