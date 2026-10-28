@@ -76,6 +76,131 @@ const S = {
   empty: { textAlign: 'center', padding: 40, color: '#94a3b8' },
 };
 
+// 바코드 17자리 규칙 — 자리(0-based) 별 허용 패턴. supabase/barcode_check.sql 과 같은 규칙
+const BARCODE_RULES = [
+  [0, 1, /^V$/, '브랜드'], [1, 3, /^[0-9]{2}$/, '년도'], [3, 4, /^[PSFWA]$/, '시즌'], [4, 5, /^[A-Z]$/, '복종'],
+  [5, 7, /^[0-9]{2}$/, '품번'], [7, 8, /^[UWM]$/, '성별'], [8, 9, /^[BCAP]$/, '타입'], [9, 17, /^[0-9A-Z]+$/, '아트웍·옵션'],
+];
+// 규칙에 어긋난 자리(0-based) 집합 — 17자리일 때만 자리별로 표시
+const badBarcodePositions = (b) => {
+  const bad = new Set();
+  if (!b || b.length !== 17) return bad;
+  BARCODE_RULES.forEach(([s, e, re]) => { if (!re.test(b.slice(s, e))) for (let i = s; i < e; i++) bad.add(i); });
+  return bad;
+};
+
+function BarcodeCheckSection() {
+  const [items, setItems] = useState([]);
+  const [summary, setSummary] = useState(null); // {snapshot_date, checked_count}
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [level, setLevel] = useState('error'); // error | legacy | all
+  const [q, setQ] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const [list, sum] = await Promise.all([
+        sbFetch('v_barcode_check?select=*&order=level.asc,product_code.asc&limit=5000'),
+        sbFetch('v_barcode_check_summary?select=*&limit=1').catch(() => null),
+      ]);
+      setItems(list || []);
+      setSummary(sum?.[0] || null);
+    } catch (e) {
+      setError(String(e.message || e).includes('v_barcode_check')
+        ? '검수 뷰가 아직 없습니다 — supabase/barcode_check.sql 을 실행해주세요'
+        : e.message || String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const errCount = items.filter((r) => r.level === 'error').length;
+  const legacyCount = items.length - errCount;
+  const shown = useMemo(() => {
+    const kw = q.trim().toLowerCase();
+    return items.filter((r) => (level === 'all' || r.level === level)
+      && (!kw || [r.product_code, r.product_name, r.option_name, r.barcode].some((v) => String(v || '').toLowerCase().includes(kw))));
+  }, [items, level, q]);
+
+  const chip = (key, label, n, color) => (
+    <button key={key} onClick={() => setLevel(key)}
+      style={{ ...S.btn(false, false), borderColor: level === key ? color : '#d1d5db', color: level === key ? color : '#475569', fontWeight: level === key ? 700 : 500 }}>
+      {label} {n.toLocaleString()}
+    </button>
+  );
+
+  return (
+    <div style={S.card}>
+      <div style={{ ...S.bar, justifyContent: 'space-between' }}>
+        <h3 style={S.title}>🔍 바코드 검수</h3>
+        <span style={{ fontSize: 12, color: '#64748b' }}>
+          {summary ? <>{summary.snapshot_date} 스냅샷 · {Number(summary.checked_count || 0).toLocaleString()}개 옵션 검사</> : ''}
+        </span>
+      </div>
+
+      {!loading && !error && (
+        <div style={{ ...S.msg(errCount ? 'err' : 'ok'), marginBottom: 12, fontWeight: 600 }}>
+          {errCount ? `규칙에 맞지 않는 바코드 ${errCount.toLocaleString()}건` : '모든 바코드가 17자리 규칙에 맞습니다 ✅'}
+        </div>
+      )}
+
+      <div style={S.bar}>
+        {chip('error', '오류', errCount, '#b91c1c')}
+        {chip('legacy', '구형 단축', legacyCount, '#64748b')}
+        {chip('all', '전체', items.length, '#4f46e5')}
+        <input style={{ ...S.input, flex: '1 1 220px' }} placeholder="상품명 · 상품코드 · 바코드 검색" value={q} onChange={(e) => setQ(e.target.value)} />
+        <button style={S.btn(false, loading)} disabled={loading} onClick={load}>새로고침</button>
+      </div>
+
+      {error ? (
+        <div style={{ ...S.empty, color: '#b91c1c' }}>{error}</div>
+      ) : loading ? (
+        <div style={S.empty}>⏳ 불러오는 중...</div>
+      ) : !shown.length ? (
+        <div style={S.empty}>{level === 'error' ? '오류 바코드가 없습니다 🎉' : '표시할 항목이 없습니다'}</div>
+      ) : (
+        <div style={{ ...S.tableWrap, maxHeight: 480, overflowY: 'auto' }}>
+          <table style={S.table}>
+            <thead>
+              <tr>
+                <th style={S.th}>상품코드</th><th style={S.th}>상품명</th><th style={S.th}>옵션</th>
+                <th style={S.th}>바코드</th><th style={S.th}>자릿수</th><th style={S.th}>사유</th><th style={S.th}>출처</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((r, i) => {
+                const bc = String(r.barcode || '');
+                const bad = badBarcodePositions(bc);
+                return (
+                  <tr key={`${r.product_code}|${r.option_name}|${i}`}>
+                    <td style={{ ...S.td, ...S.mono }}>{r.product_code}</td>
+                    <td style={S.td}>{r.product_name}</td>
+                    <td style={S.td}>{r.option_name}</td>
+                    <td style={{ ...S.td, ...S.mono, whiteSpace: 'pre' }}>
+                      {bc ? [...bc].map((c, k) => (
+                        <span key={k} style={bad.has(k) ? { color: '#dc2626', fontWeight: 800, background: '#fee2e2' } : undefined}>{c}</span>
+                      )) : <span style={{ color: '#94a3b8' }}>(없음)</span>}
+                    </td>
+                    <td style={{ ...S.td, textAlign: 'right', color: bc.length === 17 ? '#64748b' : '#dc2626', fontWeight: 600 }}>{bc.length}</td>
+                    <td style={{ ...S.td, color: r.level === 'error' ? '#b91c1c' : '#64748b' }}>{r.issue}</td>
+                    <td style={{ ...S.td, color: '#64748b', whiteSpace: 'nowrap' }}>{r.source === 'inventory_artwork' ? '아트웍' : '기본'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div style={{ ...S.msg('neutral'), marginTop: 8, fontSize: 12 }}>
+        규칙: 1 V · 2-3 년도 · 4 시즌(P/S/F/W/A) · 5 복종 · 6-7 품번 · 8 성별(U/W/M) · 9 타입(B/C/A/P) · 10-17 영문 대문자·숫자
+      </div>
+    </div>
+  );
+}
+
 export default function StockCheckTab() {
   const [rows, setRows] = useState([]);
   const [logs, setLogs] = useState([]); // 최근 7일 stock_fix_log
@@ -355,6 +480,9 @@ export default function StockCheckTab() {
       </div>
 
       </div>
+
+      {/* 6) 바코드 검수 — 최신 스냅샷 기준, 매일 갱신 */}
+      <BarcodeCheckSection />
 
       {toast && <div role="status" style={S.toast(toast.kind)}>{toast.text}</div>}
     </div>
