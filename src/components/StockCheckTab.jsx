@@ -89,6 +89,14 @@ const badBarcodePositions = (b) => {
   return bad;
 };
 
+// 검수 예외(목록에서 숨김) — 바코드 체계 밖 상품
+//  · 바코드 = 상품코드 : 자수아트웍 · 키링 · 수선상품 등
+//  · V25ST006 : 에센셜 Restchill (품번 3자리 예외)
+const isBarcodeException = (r) => {
+  const bc = String(r.barcode || '');
+  return (bc !== '' && bc === String(r.product_code || '')) || bc.startsWith('V25ST006');
+};
+
 function BarcodeCheckSection() {
   const [items, setItems] = useState([]);
   const [summary, setSummary] = useState(null); // {snapshot_date, checked_count}
@@ -96,6 +104,7 @@ function BarcodeCheckSection() {
   const [error, setError] = useState('');
   const [level, setLevel] = useState('error'); // error | legacy | all
   const [q, setQ] = useState('');
+  const [exceptCount, setExceptCount] = useState(0); // 예외로 숨긴 건수
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -105,7 +114,9 @@ function BarcodeCheckSection() {
         sbFetch('v_barcode_check?select=*&order=level.asc,product_code.asc&limit=5000'),
         sbFetch('v_barcode_check_summary?select=*&limit=1').catch(() => null),
       ]);
-      setItems(list || []);
+      const all = list || [];
+      setItems(all.filter((r) => !isBarcodeException(r)));
+      setExceptCount(all.filter(isBarcodeException).length);
       setSummary(sum?.[0] || null);
     } catch (e) {
       setError(String(e.message || e).includes('v_barcode_check')
@@ -194,6 +205,7 @@ function BarcodeCheckSection() {
         </div>
       )}
       <div style={{ ...S.msg('neutral'), marginTop: 8, fontSize: 12 }}>
+        {exceptCount > 0 && <>예외 {exceptCount.toLocaleString()}건 제외(자수아트웍·키링·수선상품 등 바코드=상품코드, 에센셜 Restchill) · </>}
         규칙: 1 V · 2-3 년도 · 4 시즌(P/S/F/W/A) · 5 복종 · 6-7 품번 · 8 성별(U/W/M) · 9 타입(B/C/A/P) · 10-17 영문 대문자·숫자
       </div>
     </div>
