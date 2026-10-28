@@ -104,6 +104,11 @@ const isBarcodeException = (r) => {
   return (bc !== '' && bc === String(r.product_code || '')) || bc.startsWith('V25ST006');
 };
 
+// 수정완료 숨김 키 — 상품코드 + 옵션 + (수정 전) 바코드
+const fixKey = (r) => `${r.product_code}|${r.option_name ?? ''}|${r.barcode ?? ''}`;
+// KST 'YYYY-MM-DD HH:MM'
+const kstDateTime = (iso) => new Date(new Date(iso).getTime() + 9 * 3600 * 1000).toISOString().slice(0, 16).replace('T', ' ');
+
 function BarcodeCheckSection() {
   const [items, setItems] = useState([]);
   const [summary, setSummary] = useState(null); // {snapshot_date, checked_count}
@@ -111,20 +116,34 @@ function BarcodeCheckSection() {
   const [error, setError] = useState('');
   const [level, setLevel] = useState('error'); // error | legacy | all
   const [q, setQ] = useState('');
-  const [exceptCount, setExceptCount] = useState(0); // 예외로 숨긴 건수
+  const [fixes, setFixes] = useState([]); // barcode_fix_log (최신순)
+  const [fixMissing, setFixMissing] = useState(false); // 수정 기록 테이블 없음
+  const [busyKey, setBusyKey] = useState(null);
+  const [showFixed, setShowFixed] = useState(false);
+  const [undoArm, setUndoArm] = useState(null); // 되돌리기 2단계 확인 중인 id
+  const [msg, setMsg] = useState(null); // {kind, text} — 3초 후 사라짐
+  const msgTimer = useRef(null);
+  const undoTimer = useRef(null);
+  useEffect(() => () => { clearTimeout(msgTimer.current); clearTimeout(undoTimer.current); }, []);
+  const flash = (kind, text) => {
+    clearTimeout(msgTimer.current);
+    setMsg({ kind, text });
+    msgTimer.current = setTimeout(() => setMsg(null), 3000);
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const [list, sum] = await Promise.all([
+      const [list, sum, fx] = await Promise.all([
         sbFetch('v_barcode_check?select=*&order=level.asc,product_code.asc&limit=5000'),
         sbFetch('v_barcode_check_summary?select=*&limit=1').catch(() => null),
+        sbFetch('barcode_fix_log?select=*&order=fixed_at.desc&limit=5000').catch(() => null),
       ]);
-      const all = list || [];
-      setItems(all.filter((r) => !isBarcodeException(r)));
-      setExceptCount(all.filter(isBarcodeException).length);
+      setItems((list || []).filter((r) => !isBarcodeException(r)));
       setSummary(sum?.[0] || null);
+      setFixes(fx || []);
+      setFixMissing(fx === null);
     } catch (e) {
       setError(String(e.message || e).includes('v_barcode_check')
         ? '검수 뷰가 아직 없습니다 — supabase/barcode_check.sql 을 실행해주세요'
@@ -135,13 +154,53 @@ function BarcodeCheckSection() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const errCount = items.filter((r) => r.level === 'error').length;
-  const legacyCount = items.length - errCount;
+  // 수정완료 체크한 상품은 목록에서 숨김
+  const fixedKeys = useMemo(() => new Set(fixes.map(fixKey)), [fixes]);
+  const open = useMemo(() => items.filter((r) => !fixedKeys.has(fixKey(r))), [items, fixedKeys]);
+  const errCount = open.filter((r) => r.level === 'error').length;
+  const legacyCount = open.length - errCount;
   const shown = useMemo(() => {
     const kw = q.trim().toLowerCase();
-    return items.filter((r) => (level === 'all' || r.level === level)
+    return open.filter((r) => (level === 'all' || r.level === level)
       && (!kw || [r.product_code, r.product_name, r.option_name, r.barcode].some((v) => String(v || '').toLowerCase().includes(kw))));
-  }, [items, level, q]);
+  }, [open, level, q]);
+
+  const markFixed = async (r) => {
+    const k = fixKey(r);
+    setBusyKey(k);
+    try {
+      const saved = await sbFetch('barcode_fix_log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Prefer: 'return=representation' },
+        body: JSON.stringify({ product_code: r.product_code, product_name: r.product_name, option_name: r.option_name, barcode: r.barcode, issue: r.issue }),
+      });
+      setFixes((p) => [...(saved || []), ...p]);
+      flash('ok', `${r.product_code} ${r.option_name || ''} 수정완료 처리`);
+    } catch (e) {
+      flash('err', '수정완료 기록 실패 — 다시 시도해주세요');
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  // 되돌리기 — 첫 클릭은 확인 대기(3초), 3초 안에 다시 누르면 기록 삭제 → 목록에 다시 표시
+  const undoFix = async (f) => {
+    if (undoArm !== f.id) {
+      clearTimeout(undoTimer.current);
+      setUndoArm(f.id);
+      undoTimer.current = setTimeout(() => setUndoArm(null), 3000);
+      return;
+    }
+    clearTimeout(undoTimer.current);
+    setUndoArm(null);
+    try {
+      await sbFetch(`barcode_fix_log?id=eq.${f.id}`, { method: 'DELETE' });
+      setFixes((p) => p.filter((x) => x.id !== f.id));
+      flash('neutral', `${f.product_code} ${f.option_name || ''} 되돌림 — 목록에 다시 표시`);
+    } catch (e) {
+      flash('err', '되돌리기 실패 — 다시 시도해주세요');
+    }
+  };
 
   const chip = (key, label, n, color) => (
     <button key={key} onClick={() => setLevel(key)}
@@ -187,6 +246,7 @@ function BarcodeCheckSection() {
               <tr>
                 <th style={S.th}>상품코드</th><th style={S.th}>상품명</th><th style={S.th}>옵션</th>
                 <th style={S.th}>바코드</th><th style={S.th}>자릿수</th><th style={S.th}>사유</th>
+                <th style={{ ...S.th, textAlign: 'center' }}>수정완료</th>
               </tr>
             </thead>
             <tbody>
@@ -205,6 +265,11 @@ function BarcodeCheckSection() {
                     </td>
                     <td style={{ ...S.td, textAlign: 'right', color: bc.length === 17 ? '#64748b' : '#dc2626', fontWeight: 600 }}>{bc.length}</td>
                     <td style={{ ...S.td, color: r.level === 'error' ? '#b91c1c' : '#64748b' }}>{r.issue}</td>
+                    <td style={{ ...S.td, textAlign: 'center' }}>
+                      <input type="checkbox" checked={false} disabled={fixMissing || busyKey === fixKey(r)}
+                        title={fixMissing ? '수정 기록 테이블이 없습니다' : '수정완료 — 목록에서 숨김'}
+                        onChange={() => markFixed(r)} style={{ width: 16, height: 16, cursor: fixMissing ? 'not-allowed' : 'pointer' }} />
+                    </td>
                   </tr>
                 );
               })}
@@ -212,9 +277,47 @@ function BarcodeCheckSection() {
           </table>
         </div>
       )}
-      <div style={{ ...S.msg('neutral'), marginTop: 8, fontSize: 12 }}>
-        {exceptCount > 0 && <>예외 {exceptCount.toLocaleString()}건 제외(자수아트웍·키링·수선상품 등 바코드=상품코드, 에센셜 Restchill) · </>}
-        규칙: 1 V · 2-3 년도 · 4 시즌(P/S/F/W/A) · 5 복종 · 6-7 품번 · 8 성별(U/W/M) · 9 타입(B/C/A/P) · 10-17 영문 대문자·숫자
+      {msg && <div style={{ ...S.msg(msg.kind), marginTop: 8 }}>{msg.text}</div>}
+      {fixMissing && !loading && (
+        <div style={{ ...S.msg('err'), marginTop: 8, fontSize: 12 }}>수정완료 체크를 쓰려면 supabase/barcode_fix_log.sql 을 실행해주세요</div>
+      )}
+
+      {/* 수정된 상품 — 토글 */}
+      <div style={{ marginTop: 14, borderTop: '1px solid #f1f5f9', paddingTop: 10 }}>
+        <button onClick={() => setShowFixed((v) => !v)} disabled={!fixes.length}
+          style={{ background: 'none', border: 'none', padding: 0, fontSize: 14, fontWeight: 700, color: fixes.length ? '#047857' : '#94a3b8', cursor: fixes.length ? 'pointer' : 'default' }}>
+          {showFixed ? '▾' : '▸'} 수정된 상품 {fixes.length.toLocaleString()}건
+        </button>
+        {showFixed && fixes.length > 0 && (
+          <div style={{ ...S.tableWrap, marginTop: 8, maxHeight: 360, overflowY: 'auto' }}>
+            <table style={S.table}>
+              <thead>
+                <tr>
+                  <th style={S.th}>수정일</th><th style={S.th}>상품코드</th><th style={S.th}>상품명</th><th style={S.th}>옵션</th>
+                  <th style={S.th}>수정 전 바코드</th><th style={S.th}>사유</th><th style={S.th}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {fixes.map((f) => (
+                  <tr key={f.id}>
+                    <td style={{ ...S.td, whiteSpace: 'nowrap', color: '#047857', fontWeight: 600 }}>{kstDateTime(f.fixed_at)}</td>
+                    <td style={{ ...S.td, ...S.mono }}>{f.product_code}</td>
+                    <td style={S.td}>{f.product_name}</td>
+                    <td style={S.td}>{f.option_name}</td>
+                    <td style={{ ...S.td, ...S.mono, color: '#64748b', textDecoration: 'line-through' }}>{f.barcode}</td>
+                    <td style={{ ...S.td, color: '#64748b' }}>{f.issue}</td>
+                    <td style={{ ...S.td, textAlign: 'right' }}>
+                      <button onClick={() => undoFix(f)}
+                        style={{ ...S.btn(false, false), fontSize: 12, padding: '4px 10px', ...(undoArm === f.id ? { borderColor: '#dc2626', color: '#dc2626', fontWeight: 700 } : {}) }}>
+                        {undoArm === f.id ? '한 번 더 누르면 되돌림' : '되돌리기'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
     </section>
