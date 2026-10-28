@@ -74,6 +74,9 @@ const S = {
     background: kind === 'ok' ? '#15803d' : kind === 'err' ? '#b91c1c' : '#475569', color: '#fff',
   }),
   empty: { textAlign: 'center', padding: 40, color: '#94a3b8' },
+  // 큰 구역(재고 점검 / 바코드 검수) — 배경색 · 왼쪽 띠 · 제목으로 구분
+  section: (c) => ({ background: c.bg, border: `1px solid ${c.line}`, borderLeft: `5px solid ${c.accent}`, borderRadius: 14, padding: '14px 16px 0', marginBottom: 20 }),
+  sectionHead: (c) => ({ display: 'flex', alignItems: 'center', gap: 8, fontSize: 16, fontWeight: 800, color: c.accent, marginBottom: 12 }),
 };
 
 // 바코드 17자리 규칙 — 자리(0-based) 별 허용 패턴. supabase/barcode_check.sql 과 같은 규칙
@@ -92,6 +95,10 @@ const badBarcodePositions = (b) => {
 // 검수 예외(목록에서 숨김) — 바코드 체계 밖 상품
 //  · 바코드 = 상품코드 : 자수아트웍 · 키링 · 수선상품 등
 //  · V25ST006 : 에센셜 Restchill (품번 3자리 예외)
+// 구역 색 — 재고 점검(인디고) / 바코드 검수(틸)
+const SEC_STOCK = { bg: '#eef2ff', line: '#c7d2fe', accent: '#4338ca' };
+const SEC_BARCODE = { bg: '#ecfdf5', line: '#a7f3d0', accent: '#047857' };
+
 const isBarcodeException = (r) => {
   const bc = String(r.barcode || '');
   return (bc !== '' && bc === String(r.product_code || '')) || bc.startsWith('V25ST006');
@@ -144,9 +151,10 @@ function BarcodeCheckSection() {
   );
 
   return (
+    <section style={S.section(SEC_BARCODE)}>
+    <div style={S.sectionHead(SEC_BARCODE)}>🔍 바코드 검수</div>
     <div style={S.card}>
-      <div style={{ ...S.bar, justifyContent: 'space-between' }}>
-        <h3 style={S.title}>🔍 바코드 검수</h3>
+      <div style={{ ...S.bar, justifyContent: 'flex-end' }}>
         <span style={{ fontSize: 12, color: '#64748b' }}>
           {summary ? <>{summary.snapshot_date} 스냅샷 · {Number(summary.checked_count || 0).toLocaleString()}개 옵션 검사</> : ''}
         </span>
@@ -209,6 +217,7 @@ function BarcodeCheckSection() {
         규칙: 1 V · 2-3 년도 · 4 시즌(P/S/F/W/A) · 5 복종 · 6-7 품번 · 8 성별(U/W/M) · 9 타입(B/C/A/P) · 10-17 영문 대문자·숫자
       </div>
     </div>
+    </section>
   );
 }
 
@@ -344,6 +353,8 @@ export default function StockCheckTab() {
 
   return (
     <div>
+      <section style={S.section(SEC_STOCK)}>
+      <div style={S.sectionHead(SEC_STOCK)}>🔻 재고 점검</div>
       {/* 1) 상단 요약 */}
       <div style={S.stats}>
         <div style={S.stat}>
@@ -491,6 +502,7 @@ export default function StockCheckTab() {
       </div>
 
       </div>
+      </section>
 
       {/* 6) 바코드 검수 — 최신 스냅샷 기준, 매일 갱신 */}
       <BarcodeCheckSection />
