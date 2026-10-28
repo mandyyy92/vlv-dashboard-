@@ -879,6 +879,7 @@ function ScheduleTab(){
   const[dragging,setDragging]=useState(null); // 드래그 중인 카드 {key,date,events}
   const[dropDay,setDropDay]=useState(null); // 드래그가 올라가 있는 날짜 칸
   const[etaMsg,setEtaMsg]=useState(null); // 조정입고일 변경 결과 {ok,text} — 상단 인라인, 3초 후 사라짐
+  const[bulkEta,setBulkEta]=useState({}); // 프린팅 외주 서랍 — 업체·차수 카드별 조정입고일 일괄 입력값 {cardKey:'YYYY-MM-DD'}
   const[etaInputRev,setEtaInputRev]=useState(0); // 서랍 date input 리마운트 키 — 저장 실패 시 원래 값으로 복원
   const etaTimerRef=useRef(null); // 서랍 date input 입력 debounce
   const[recvRound,setRecvRound]=useState(1); // 서랍 실입고 회차(1~6) → sheet_edit_queue field recv_qty_N / recv_date_N
@@ -1135,7 +1136,15 @@ function ScheduleTab(){
       await saveRevisedEta(source,rowKeys,newValue,prevByKey);
       console.log(`[revised_eta] sheet_edit_queue 등록 ${rowKeys.length}건 (카드 옵션 ${events.length}개) → ${newValue??"(지움)"}`,rowKeys);
       setSheetQueue(p=>{const n={...p};keySet.forEach(k=>{n[k]={status:"pending",message:""};});return n;});
-      setEtaMsg({ok:true,text:"조정입고일 변경됨 · 시트 반영 대기"});
+      // 프린팅 외주: 조정입고일이 등록되면 '발송 완료' 상품은 '발송 예정' 으로 (order_status, group_key 단위)
+      const toPlan=source==="print"&&newValue?[...new Set(events.filter(e=>e.status==="발송 완료"&&e.groupKey).map(e=>e.groupKey))]:[];
+      let planFail=false;
+      if(toPlan.length){
+        try{await Promise.all(toPlan.map(k=>saveOrderStatus(k,source,"발송 예정")));}
+        catch(err){planFail=true;console.error("[order_status] 발송 예정 변경 실패",err);}
+      }
+      setEtaMsg(planFail?{ok:false,text:"조정입고일은 변경됨 · 발송 예정 변경 실패 — 상태를 직접 바꿔주세요"}
+        :{ok:true,text:`조정입고일 변경됨${toPlan.length?` · 발송 예정 ${toPlan.length}건`:""} · 시트 반영 대기`});
       reloadCalendar();reloadUpcoming();reloadWait();
     }catch(e){
       console.error("[revised_eta] 저장 실패",e);
@@ -1589,6 +1598,17 @@ function ScheduleTab(){
                 <div style={{display:"flex",alignItems:"baseline",gap:10,flexWrap:"wrap",marginBottom:10}}>
                   <span style={{fontSize:16,fontWeight:800,color:"#0F172A"}}>{c.title}</span>
                   <span style={{fontSize:13,color:"#64748B"}}>품목 {c.itemCount}종 · <b style={{color:c.totalRemain>0?"#C2410C":"#0F766E"}}>{qtyText(c.totalRemain,c.totalReceived)}</b></span>
+                  {/* 조정입고일 일괄 — 잔량 있는 상품 전체에 같은 날짜 적용 */}
+                  {(()=>{const evs=c.blocks.flatMap(g=>g.totalRemain>0?g.events:[]);const v=bulkEta[c.key]||"";const ok=evs.length>0&&/^20\d\d-\d\d-\d\d$/.test(v);return(
+                  <span style={{marginLeft:"auto",display:"inline-flex",alignItems:"center",gap:6,fontSize:12,fontWeight:600,color:"#64748B",whiteSpace:"nowrap"}}>
+                    조정입고일 일괄
+                    <input type="date" value={v} disabled={!evs.length} onChange={e=>{const nv=e.target.value;setBulkEta(p=>({...p,[c.key]:nv}));}}
+                      style={{padding:"3px 6px",borderRadius:6,border:"1px solid #CBD5E1",fontSize:12,color:"#1E293B",background:evs.length?"#FFF":"#F1F5F9"}} />
+                    <button onClick={()=>{if(!ok)return;changeRevisedEta(evs,v);setBulkEta(p=>{const n={...p};delete n[c.key];return n;});}} disabled={!ok}
+                      style={{padding:"4px 12px",borderRadius:6,border:"none",fontSize:12,fontWeight:700,color:"#FFF",background:ok?"#2563EB":"#CBD5E1",cursor:ok?"pointer":"not-allowed"}}>
+                      전체 적용 ({c.blocks.filter(g=>g.totalRemain>0).length})
+                    </button>
+                  </span>);})()}
                 </div>
                 {c.blocks.map(g=>{
                   const open=!!openBlocks[g.key];
