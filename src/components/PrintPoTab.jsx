@@ -88,13 +88,13 @@ const designMatches = (design, productName) => {
   return design.arts.every((a) => pw.includes(a)) && (!design.types.length || design.types.some((t) => lower.includes(t)));
 };
 
-// 시즌 필터 — 사계절(A)·봄(P, 간절기: 일반 집업 후드 등)은 양쪽 모두 포함. 기본값은 현재 달 기준(9~2월 가을·겨울, 3~8월 봄·여름)
+// 시즌 필터 — 봄·가을·겨울(P·F·W) / 여름(S), 사계절(A)은 양쪽 모두 포함. 기본값은 현재 달 기준(6~8월 여름, 그 외 봄·가을·겨울)
 const SEASON_SETS = {
-  fw: { label: '가을·겨울', codes: ['F', 'W', 'A', 'P'] },
-  ss: { label: '봄·여름', codes: ['P', 'S', 'A'] },
+  fw: { label: '봄·가을·겨울', codes: ['P', 'F', 'W', 'A'] },
+  ss: { label: '여름', codes: ['S', 'A'] },
   all: { label: '전체', codes: null },
 };
-const defaultSeasonSet = () => { const m = new Date().getMonth() + 1; return m >= 3 && m <= 8 ? 'ss' : 'fw'; };
+const defaultSeasonSet = () => { const m = new Date().getMonth() + 1; return m >= 6 && m <= 8 ? 'ss' : 'fw'; };
 
 // 사이즈별 숫자 색 — 범례 칩과 같은 색으로 짝지음 (베이스 부족은 빨강이 우선)
 const NUM_COLOR = {
