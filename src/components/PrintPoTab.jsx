@@ -550,6 +550,12 @@ export default function PrintPoTab() {
         <div style={{ fontSize: 12, color: '#64748b', marginBottom: 10 }}>
           추천수량 = 일평균 판매 × 목표 일수 − (가용재고 + 입고대기), 10단위 올림 · 기본 컬러 = 판매 상위 누적 80%
         </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', fontSize: 12, color: '#475569', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '7px 10px', marginBottom: 10 }}>
+          <span><b>판매</b> 최근 {days}일 판매량(무신사+MFS)</span>
+          <span><b>재고</b> 아트웍 가용재고 + 입고대기</span>
+          <span><b>베이스</b> 프린팅할 베이스 상품 가용재고{baseIncoming ? ' + 입고대기' : ''} — 부족하면 <b style={{ color: '#dc2626' }}>빨강</b>, 의뢰수량은 베이스 한도까지만 발주</span>
+          <span style={{ color: '#94a3b8' }}>항목에 마우스를 올리면 상세 설명</span>
+        </div>
 
         {!shownProducts.length ? <div style={S.empty}>표시할 상품이 없습니다</div> : shownProducts.slice(0, showN).map((p, idx) => {
           const on = !!picked[p.name];
@@ -573,7 +579,7 @@ export default function PrintPoTab() {
                     <table style={S.table}>
                       <thead><tr>
                         <th style={S.th}>진행</th><th style={S.th}>컬러</th><th style={{ ...S.th, textAlign: 'right' }}>판매</th><th style={{ ...S.th, textAlign: 'right' }}>비중</th>
-                        <th style={S.th}>사이즈별 의뢰수량 (판매 · 재고+입고대기 · 베이스 재고)</th>
+                        <th style={S.th}>사이즈별 의뢰수량</th>
                       </tr></thead>
                       <tbody>
                         {p.colors.map((c) => {
@@ -596,8 +602,13 @@ export default function PrintPoTab() {
                                         <div style={{ fontSize: 11, fontWeight: 700, color: '#334155' }}>{o.size || '-'}</div>
                                         <input type="number" min={0} step={10} disabled={!cOn} value={v}
                                           onChange={(e) => setQtyOf((s) => ({ ...s, [o.code]: e.target.value }))} style={{ ...S.qty, borderColor: short ? '#dc2626' : '#cbd5e1' }} />
-                                        <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>
-                                          {o.sold}·{o.stock + o.incoming}·<span style={{ color: o.base ? (short ? '#dc2626' : '#64748b') : '#dc2626' }}>{o.base ? baseQty : '없음'}</span>
+                                        {/* 판매 / 재고(아트웍 가용+입고대기) / 베이스(가용, 입고대기 포함 옵션 시 더함) */}
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'auto auto', columnGap: 6, fontSize: 10.5, lineHeight: 1.45, marginTop: 3, color: '#64748b' }}>
+                                          <span title={`최근 ${days}일 판매량 (무신사 + MFS)`}>판매</span><b style={{ textAlign: 'right', color: '#334155' }}>{o.sold.toLocaleString()}</b>
+                                          <span title={`아트웍 가용재고 ${o.stock} + 입고대기 ${o.incoming}`}>재고</span><b style={{ textAlign: 'right', color: '#334155' }}>{(o.stock + o.incoming).toLocaleString()}</b>
+                                          <span title={o.base ? `베이스 ${o.base['상품코드']} ${o.base['상품명']} ${o.option} · 가용 ${baseQty}${baseIncoming ? ` + 입고대기 ${num(o.base['입고대기'])}` : ''}` : '같은 바코드 그룹·옵션의 베이스 상품을 찾지 못함'}
+                                            style={{ color: short || !o.base ? '#dc2626' : '#64748b', fontWeight: short || !o.base ? 700 : 400 }}>베이스</span>
+                                          <b style={{ textAlign: 'right', color: short || !o.base ? '#dc2626' : '#334155' }}>{o.base ? baseAvail(o.base).toLocaleString() : '없음'}</b>
                                         </div>
                                         {cOn && short && (
                                           <div style={{ fontSize: 10, fontWeight: 800, color: a.eff ? '#ea580c' : '#dc2626' }}>
