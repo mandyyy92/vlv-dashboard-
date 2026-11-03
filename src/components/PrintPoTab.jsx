@@ -527,7 +527,6 @@ export default function PrintPoTab() {
       <div style={S.card}>
         <div style={{ ...S.bar, justifyContent: 'space-between' }}>
           <h3 style={S.title}><span style={S.step}>1</span>판매 순위에서 상품·컬러 선택</h3>
-          <span style={{ fontSize: 12, color: '#64748b' }}>업체 매칭된 아트웍 상품 {products.length}개 · 무신사 + MFS 판매 기준</span>
         </div>
         <div style={S.bar}>
           <label style={{ fontSize: 12, color: '#475569', fontWeight: 600 }}>판매 기간
