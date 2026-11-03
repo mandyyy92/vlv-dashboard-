@@ -45,8 +45,17 @@ async function loadXLSX() {
   }
   return window.XLSX;
 }
-// sheets: [{name, rows(2차원 배열), cols?}]
-async function saveXlsx(fileName, sheets) {
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+function downloadBlob(blob, fileName) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+// sheets: [{name, rows(2차원 배열), cols?}] · writer(blob, fileName) 가 있으면 폴더에 저장, 없으면 다운로드
+async function saveXlsx(fileName, sheets, writer) {
   const XLSX = await loadXLSX();
   const wb = XLSX.utils.book_new();
   sheets.forEach(({ name, rows, cols }) => {
@@ -54,7 +63,55 @@ async function saveXlsx(fileName, sheets) {
     if (cols) ws['!cols'] = cols.map((wch) => ({ wch }));
     XLSX.utils.book_append_sheet(wb, ws, name);
   });
-  XLSX.writeFile(wb, fileName);
+  const blob = new Blob([XLSX.write(wb, { type: 'array', bookType: 'xlsx' })], { type: XLSX_MIME });
+  return writer ? writer(blob, fileName) : downloadBlob(blob, fileName);
+}
+
+// ── 공유 폴더(\\…\02_나염) 바로 저장 — File System Access API (Chrome·Edge) ──
+// 폴더 구조: {NN}_{업체}_발송요청/파일  ·  {NN}_{업체}_입고/{N}차/파일. 업체 폴더가 없으면 다음 번호로 새로 만든다.
+const FS_SUPPORTED = typeof window !== 'undefined' && 'showDirectoryPicker' in window;
+const FOLDER_ALIAS = { 국제프린팅: ['국제나염'], 코스타컴퍼니: ['코스타'] }; // 기존 폴더 이름의 업체 표기
+const idbKv = (mode, fn) => new Promise((resolve, reject) => {
+  const open = indexedDB.open('printpo-fs', 1);
+  open.onupgradeneeded = () => open.result.createObjectStore('kv');
+  open.onerror = () => reject(open.error);
+  open.onsuccess = () => {
+    const tx = open.result.transaction('kv', mode);
+    const req = fn(tx.objectStore('kv'));
+    tx.oncomplete = () => resolve(req && req.result);
+    tx.onerror = () => reject(tx.error);
+  };
+});
+const idbGet = (k) => idbKv('readonly', (s) => s.get(k)).catch(() => null);
+const idbSet = (k, v) => idbKv('readwrite', (s) => s.put(v, k)).catch(() => null);
+
+async function ensurePermission(handle) {
+  const opts = { mode: 'readwrite' };
+  if ((await handle.queryPermission(opts)) === 'granted') return true;
+  return (await handle.requestPermission(opts)) === 'granted';
+}
+// 업체 폴더 찾기/만들기 — suffix: '발송요청' | '입고'
+async function supplierDir(root, supplier, suffix) {
+  const bare = supplier.replace(/\(.*?\)/g, '').trim(); // '코스타컴퍼니(나염)' → '코스타컴퍼니' (이름 변경 전 저장된 발주)
+  const keys = [...new Set([supplier, bare, ...[supplier, bare].flatMap((s) => [...(VENDOR_ALIAS[s] || []), ...(FOLDER_ALIAS[s] || [])])].filter(Boolean))];
+  let found = null, sameSupplierNo = null, maxNo = 0;
+  for await (const [name, h] of root.entries()) {
+    if (h.kind !== 'directory') continue;
+    const no = Number((name.match(/^(\d+)_/) || [])[1]) || 0;
+    maxNo = Math.max(maxNo, no);
+    if (!keys.some((k) => name.includes(k))) continue;
+    if (no) sameSupplierNo = no;
+    if (name.endsWith(`_${suffix}`)) found = h;
+  }
+  if (found) return found;
+  const no = String(sameSupplierNo || maxNo + 1).padStart(2, '0');
+  return root.getDirectoryHandle(`${no}_${supplier}_${suffix}`, { create: true });
+}
+async function writeFile(dir, fileName, blob) {
+  const fh = await dir.getFileHandle(fileName, { create: true });
+  const w = await fh.createWritable();
+  await w.write(blob);
+  await w.close();
 }
 
 // ── 발송요청(업체 전달용) 서식 엑셀: ExcelJS — 테두리·초록 헤더·셀 병합·이미지 ──
@@ -134,17 +191,12 @@ async function addStyledSheet(wb, { name, headers, widths, groups, total, mergeC
     styleRow(ws.rowCount, { bold: true, fill: true, top: xlMedium });
   }
 }
-async function saveStyledXlsx(fileName, sheets) {
+async function saveStyledXlsx(fileName, sheets, writer) {
   const ExcelJS = await loadExcelJS();
   const wb = new ExcelJS.Workbook();
   for (const sh of sheets) await addStyledSheet(wb, sh);
-  const buf = await wb.xlsx.writeBuffer();
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  const blob = new Blob([await wb.xlsx.writeBuffer()], { type: XLSX_MIME });
+  return writer ? writer(blob, fileName) : downloadBlob(blob, fileName);
 }
 
 // 옵션 "[화이트/블랙-M]" → {color:"화이트/블랙", size:"M"}
@@ -251,6 +303,8 @@ export default function PrintPoTab() {
 
   const [openPo, setOpenPo] = useState(null);    // 입고 처리 중 po id
   const [viewPo, setViewPo] = useState(null);    // 옵션별 발주 수량 펼친 po id
+  const [rootDir, setRootDir] = useState(null);  // 엑셀 저장 폴더(02_나염) 핸들 — 브라우저(IndexedDB)에 기억
+  useEffect(() => { if (FS_SUPPORTED) idbGet('root').then((h) => { if (h) setRootDir(h); }); }, []);
   const [recvQty, setRecvQty] = useState({});    // {lineId: value}
   const [recvDate, setRecvDate] = useState(kstDate());
   const [extraOf, setExtraOf] = useState({});    // {baseCode: value} 추가출고 수동 수정
@@ -514,26 +568,58 @@ export default function PrintPoTab() {
       image: images[(gb.find((b) => images[b.code]) || {}).code] || '',
       rows: gb.map((b, i) => ['', b.code, i === 0 ? b.name : '', b.option, b.qty, b.qty, '', '', '']),
     }));
-    await saveStyledXlsx(`${N}차_${supplierName}_발송요청_${d6}.xlsx`, [
+    const out = [];
+    out.push(await saveStyledXlsx(`${N}차_${supplierName}_발송요청_${d6}.xlsx`, [
       { name: '상품별 수량', headers: ['이미지', '바코드', '상품코드', '상품명', '옵션', '의뢰수량', '조정', '비고'],
         widths: [12, 22, 11, 28, 18, 10, 10, 18], groups: artGroups, mergeCols: [0, 3],
         total: ['', '', '', '', '합 계', rawSum, artSum, ''] },
       { name: '발송 요청', headers: ['이미지', '베이스 상품코드', '상품명', '옵션', '수량', '1차 출고', '2차 출고', '차이', '박스 수량'],
         widths: [12, 15, 24, 18, 9, 10, 10, 8, 10], groups: baseGroups, mergeCols: [0, 2],
         total: ['합 계', '', '', '', artSum, artSum, '', '', ''] },
-    ]);
+    ], makeWriter(supplierName, '발송요청')));
     // 2) 베이스출고 — 베이스 상품코드 · 수량 · 메모 (이지어드민)
     const bm = `${d6}_${supplierName}_베이스출고_${N}차`;
-    await saveXlsx(`${N}차_베이스출고_${supplierName}.xlsx`, [{
+    out.push(await saveXlsx(`${N}차_베이스출고_${supplierName}.xlsx`, [{
       name: 'Sheet1', cols: [10, 8, 32, 22, 18],
       rows: [['상품코드', '수량', '메모'], ...bases.filter((b) => b.code).map((b) => [b.code, b.qty, bm, b.name, b.option])],
-    }]);
+    }], makeWriter(supplierName, '입고', N)));
     // 3) 입고대기 — 아트웍 상품코드 · 의뢰수량 · 메모
     const wm = `${d6}_${supplierName}_입고대기_${N}차`;
-    await saveXlsx(`${N}차_입고대기_${supplierName}.xlsx`, [{
+    out.push(await saveXlsx(`${N}차_입고대기_${supplierName}.xlsx`, [{
       name: 'Sheet1', cols: [10, 8, 32, 26, 18],
       rows: [['상품코드', '수량', '메모'], ...lines.map((l) => [l.artwork_code, l.request_qty, wm, l.artwork_name, l.option_name])],
-    }]);
+    }], makeWriter(supplierName, '입고', N)));
+    return out;
+  };
+
+  // ── 공유 폴더 바로 저장 ──
+  const connectFolder = async () => {
+    try {
+      const h = await window.showDirectoryPicker({ id: 'printpo-nayeom', mode: 'readwrite' });
+      setRootDir(h);
+      await idbSet('root', h);
+      flash('ok', `저장 폴더 연결: ${h.name}`);
+    } catch (e) {
+      if (e && e.name !== 'AbortError') flash('err', '폴더를 연결하지 못했습니다');
+    }
+  };
+  // 반환값: 저장된 위치 문자열(폴더) 또는 '' (다운로드)
+  const makeWriter = (supplier, kind, round) => async (blob, fileName) => {
+    if (!rootDir) { downloadBlob(blob, fileName); return ''; }
+    try {
+      if (!(await ensurePermission(rootDir))) throw new Error('permission');
+      const parent = await supplierDir(rootDir, supplier, kind);
+      const dir = kind === '입고' ? await parent.getDirectoryHandle(`${round}차`, { create: true }) : parent;
+      await writeFile(dir, fileName, blob);
+      return kind === '입고' ? `${parent.name}/${round}차` : parent.name;
+    } catch (e) {
+      downloadBlob(blob, fileName); // 폴더 저장 실패 → 다운로드로 대신
+      return '';
+    }
+  };
+  const whereText = (paths) => {
+    const ps = [...new Set((paths || []).filter(Boolean))];
+    return ps.length ? `${rootDir?.name || ''} 폴더에 저장 (${ps.join(' · ')})` : '다운로드';
   };
 
   // 업체 1곳 발주 저장 + 3개 파일
@@ -541,6 +627,7 @@ export default function PrintPoTab() {
     const m = metaOf(g);
     if (!num(m.round_no)) { flash('err', '차수를 입력해주세요'); return; }
     if (poMissing) { flash('err', '발주 저장 테이블이 없습니다 — supabase/print_po.sql 을 실행해주세요'); return; }
+    if (rootDir) await ensurePermission(rootDir).catch(() => false); // 폴더 권한은 클릭 직후에 요청해야 함
     setSaving(true);
     try {
       const [po] = await sbFetch('print_po', {
@@ -553,12 +640,12 @@ export default function PrintPoTab() {
         request_qty: l.qty, unit_cost: l.unit_cost,
       }));
       await sbFetch('print_po_lines', { method: 'POST', headers: { 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: JSON.stringify(lines) });
-      await downloadRequestFiles(g.supplier_name, num(m.round_no), m.order_date, lines.map((x, i) => ({ ...x, raw_qty: g.lines[i].raw })));
+      const paths = await downloadRequestFiles(g.supplier_name, num(m.round_no), m.order_date, lines.map((x, i) => ({ ...x, raw_qty: g.lines[i].raw })));
       // 저장된 업체 상품은 선택 해제
       const done = new Set(g.lines.map((l) => l.product));
       setPicked((s) => { const n = { ...s }; done.forEach((k) => delete n[k]); return n; });
       await loadPos();
-      flash('ok', `${g.supplier_name} ${m.round_no}차 저장 · 엑셀 3개 생성`);
+      flash('ok', `${g.supplier_name} ${m.round_no}차 저장 · 엑셀 3개 ${whereText(paths)}`);
     } catch (e) {
       flash('err', `저장 실패 — ${String(e.message || e).slice(0, 80)}`);
     } finally {
@@ -591,6 +678,7 @@ export default function PrintPoTab() {
 
   const saveReceive = async () => {
     if (!current) return;
+    if (rootDir) await ensurePermission(rootDir).catch(() => false);
     setSaving(true);
     try {
       await Promise.all(curLines.map((l) => sbFetch(`print_po_lines?id=eq.${l.id}`, {
@@ -603,12 +691,14 @@ export default function PrintPoTab() {
       const recvRows = curLines.filter((l) => num(recvOf(l)) > 0);
       const head = ['상품코드', '수량', '메모', '상품명', '옵션', '바코드'];
       const cols = [10, 8, 32, 26, 18, 20];
-      await saveXlsx(`${N}차_정상입고_${sup}.xlsx`, [{ name: 'Sheet1', cols, rows: [head, ...recvRows.map((l) => [l.artwork_code, num(recvOf(l)), `${d6}_${sup}_정상입고_${N}차`, l.artwork_name, l.option_name, l.artwork_barcode])] }]);
-      await saveXlsx(`${N}차_MFS출고_${sup}.xlsx`, [{ name: 'Sheet1', cols, rows: [head, ...recvRows.map((l) => [l.artwork_code, num(recvOf(l)), `${d6}_${sup}_MFS출고_${N}차`, l.artwork_name, l.option_name, l.artwork_barcode])] }]);
+      const wr = makeWriter(sup, '입고', N); // {NN}_{업체}_입고/{N}차 폴더
+      const paths = [];
+      paths.push(await saveXlsx(`${N}차_정상입고_${sup}.xlsx`, [{ name: 'Sheet1', cols, rows: [head, ...recvRows.map((l) => [l.artwork_code, num(recvOf(l)), `${d6}_${sup}_정상입고_${N}차`, l.artwork_name, l.option_name, l.artwork_barcode])] }], wr));
+      paths.push(await saveXlsx(`${N}차_MFS출고_${sup}.xlsx`, [{ name: 'Sheet1', cols, rows: [head, ...recvRows.map((l) => [l.artwork_code, num(recvOf(l)), `${d6}_${sup}_MFS출고_${N}차`, l.artwork_name, l.option_name, l.artwork_barcode])] }], wr));
       const em = `${yymmdd(current.order_date)}_베이스출고_${sup}_${N}차 (추가출고 수량 조정)`;
-      await saveXlsx(`${N}차_베이스출고(추가출고)_${sup}.xlsx`, [{ name: 'Sheet1', cols: [10, 8, 40, 22, 18], rows: [['상품코드', '수량', '메모'], ...extraRows.map((r) => [r.code, num(extraOfRow(r)), em, r.name, r.option])] }]);
+      paths.push(await saveXlsx(`${N}차_베이스출고(추가출고)_${sup}.xlsx`, [{ name: 'Sheet1', cols: [10, 8, 40, 22, 18], rows: [['상품코드', '수량', '메모'], ...extraRows.map((r) => [r.code, num(extraOfRow(r)), em, r.name, r.option])] }], wr));
       await loadPos();
-      flash('ok', `${sup} ${N}차 입고 저장 · 엑셀 3개 생성`);
+      flash('ok', `${sup} ${N}차 입고 저장 · 엑셀 3개 ${whereText(paths)}`);
     } catch (e) {
       flash('err', `입고 저장 실패 — ${String(e.message || e).slice(0, 80)}`);
     } finally {
@@ -617,8 +707,15 @@ export default function PrintPoTab() {
   };
 
   // 저장한 발주의 발송요청 파일 다시 받기
-  const redownload = (p) => downloadRequestFiles(p.supplier_name, p.round_no, p.order_date, [...(p.print_po_lines || [])].sort((a, b) => a.id - b.id))
-    .catch(() => flash('err', '엑셀 생성 실패'));
+  const redownload = async (p) => {
+    try {
+      if (rootDir) await ensurePermission(rootDir).catch(() => false);
+      const paths = await downloadRequestFiles(p.supplier_name, p.round_no, p.order_date, [...(p.print_po_lines || [])].sort((a, b) => a.id - b.id));
+      flash('ok', `${p.supplier_name} ${p.round_no}차 엑셀 3개 ${whereText(paths)}`);
+    } catch (e) {
+      flash('err', '엑셀 생성 실패');
+    }
+  };
 
   // 삭제 — 2단계(3초 안에 다시 누르면 삭제)
   const deletePo = async (p) => {
@@ -797,7 +894,18 @@ export default function PrintPoTab() {
 
       {/* 2) 업체·차수별 발주 리스트 */}
       <div style={S.card}>
-        <h3 style={{ ...S.title, marginBottom: 12 }}><span style={S.step}>2</span>업체·차수별 발주 리스트</h3>
+        <div style={{ ...S.bar, justifyContent: 'space-between' }}>
+          <h3 style={S.title}><span style={S.step}>2</span>업체·차수별 발주 리스트</h3>
+          {/* 엑셀 저장 위치 — 폴더 연결 시 업체별 발송요청 / 입고/{N}차 폴더에 바로 저장 */}
+          {FS_SUPPORTED ? (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#475569' }}>
+              {rootDir ? <>📁 저장 폴더 <b style={{ color: '#0f172a' }}>{rootDir.name}</b></> : <span style={{ color: '#94a3b8' }}>폴더 미연결 · 다운로드 폴더로 저장</span>}
+              <button style={{ ...S.btn(!rootDir, false), fontSize: 12, padding: '5px 10px' }} onClick={connectFolder}>{rootDir ? '변경' : '📁 저장 폴더 연결'}</button>
+            </span>
+          ) : (
+            <span style={{ fontSize: 12, color: '#94a3b8' }}>폴더 바로 저장은 Chrome·Edge 에서만 가능 · 다운로드로 저장</span>
+          )}
+        </div>
         {baseLimit && (baseCut.dropped > 0 || baseCut.reduced > 0) && (
           <div style={{ ...S.msg('err'), fontSize: 12, marginBottom: 10 }}>
             베이스 재고 부족 — {baseCut.dropped ? `${baseCut.dropped}개 옵션 제외` : ''}{baseCut.dropped && baseCut.reduced ? ' · ' : ''}{baseCut.reduced ? `${baseCut.reduced}개 옵션 수량 줄임` : ''}
