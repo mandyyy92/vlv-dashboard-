@@ -92,6 +92,7 @@ const designMatches = (design, productName) => {
 const NUM_COLOR = {
   sold: { fg: '#2563eb', bg: '#dbeafe' },     // 판매 — 파랑
   incoming: { fg: '#0d9488', bg: '#ccfbf1' }, // 입고대기 — 청록
+  mfs: { fg: '#ea580c', bg: '#ffedd5' },      // MFS — 주황
   base: { fg: '#7c3aed', bg: '#ede9fe' },     // 베이스 — 보라
 };
 
@@ -130,6 +131,7 @@ export default function PrintPoTab() {
   const [salesLoading, setSalesLoading] = useState(false);
   const [error, setError] = useState('');
   const [poMissing, setPoMissing] = useState(false);
+  const [mfs, setMfs] = useState(null);          // {barcode: {avail, incoming, defect}} · null = 뷰 없음
 
   const [days, setDays] = useState(30);
   const [targetDays, setTargetDays] = useState(30);
@@ -178,13 +180,16 @@ export default function PrintPoTab() {
       setLoading(true);
       setError('');
       try {
-        const [st, sup, psp, sheet] = await Promise.all([
+        const [st, sup, psp, sheet, mfsRows] = await Promise.all([
           sbAll('v_option_current_stock?select=group_key,option_key,ba_flag,바코드,상품명,옵션,가용재고,입고대기,상품코드&order=상품코드.asc,옵션.asc'),
           sbFetch('print_suppliers?select=id,name,active&order=name.asc'),
           sbFetch('print_supplier_products?select=id,supplier_id,design_name,unit_cost,sample_status&limit=2000'),
           sbAll('sheet_print_orders?select=vendor,order_round&order=row_key.asc').catch(() => []),
+          // MFS 최신 재고(뷰 v_mfs_stock_latest) — 없으면 MFS 줄 없이 동작
+          sbAll('v_mfs_stock_latest?select=barcode,avail,incoming,defect&order=barcode.asc').catch(() => null),
         ]);
         setStock(st || []);
+        setMfs(mfsRows ? Object.fromEntries(mfsRows.map((r) => [r.barcode, { avail: num(r.avail), incoming: num(r.incoming), defect: num(r.defect) }])) : null);
         setSuppliers((sup || []).filter((s) => s.active !== false));
         const nameById = new Map((sup || []).map((s) => [String(s.id), s.name]));
         setDesigns((psp || []).map((d) => ({ ...d, supplier_name: nameById.get(String(d.supplier_id)) || '', ...parseDesign(d.design_name) })));
@@ -255,6 +260,7 @@ export default function PrintPoTab() {
         return {
           code: r['상품코드'], barcode: r['바코드'], option: r['옵션'], color, size,
           sold: sales[r['바코드']] || 0, stock: num(r['가용재고']), incoming: num(r['입고대기']), base,
+          mfs: mfs ? (mfs[r['바코드']] || { avail: 0, incoming: 0, defect: 0 }) : null,
         };
       });
       const colors = new Map();
@@ -272,7 +278,7 @@ export default function PrintPoTab() {
       out.push({ name, sold: colorList.reduce((s, c) => s + c.sold, 0), colors: colorList, cands: sup });
     });
     return out.sort((a, b) => b.sold - a.sold || a.name.localeCompare(b.name, 'ko'));
-  }, [stock, designs, sales, baseIndex]);
+  }, [stock, designs, sales, baseIndex, mfs]);
 
   // 기본 진행 컬러: 판매 많은 순으로 누적 80% 까지(최소 1개, 판매 0 컬러 제외)
   const defaultColorOn = useCallback((p) => {
@@ -287,7 +293,8 @@ export default function PrintPoTab() {
     return set;
   }, []);
   const recommend = (o) => {
-    const need = Math.ceil((o.sold / Math.max(1, days)) * targetDays) - o.stock - o.incoming;
+    // 자사 창고(가용+입고대기)와 MFS(가용+입고예정) 재고를 모두 뺀다
+    const need = Math.ceil((o.sold / Math.max(1, days)) * targetDays) - o.stock - o.incoming - (o.mfs ? o.mfs.avail + o.mfs.incoming : 0);
     return need > 0 ? Math.ceil(need / 10) * 10 : 0;
   };
   const isColorOn = (p, c) => {
@@ -555,7 +562,9 @@ export default function PrintPoTab() {
         </div>
         {/* 사이즈별 숫자 범례 — 짧은 칩 3개 */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, fontSize: 12, marginBottom: 10 }}>
-          {[[NUM_COLOR.sold, '판매', `최근 ${days}일`], [NUM_COLOR.incoming, '입고대기', '들어올 아트웍'], [NUM_COLOR.base, '베이스', '남은 베이스 재고 · 빨강 = 부족']].map(([c, k, v]) => (
+          {[[NUM_COLOR.sold, '판매', `최근 ${days}일`], [NUM_COLOR.incoming, '입고대기', '들어올 아트웍'],
+            ...(mfs ? [[NUM_COLOR.mfs, 'MFS', '무신사 창고 재고']] : []),
+            [NUM_COLOR.base, '베이스', '남은 베이스 재고 · 빨강 = 부족']].map(([c, k, v]) => (
             <span key={k} style={{ display: 'inline-flex', gap: 5, alignItems: 'center', padding: '3px 9px', borderRadius: 99, background: c.bg, color: c.fg }}>
               <b>{k}</b><span style={{ opacity: 0.8 }}>{v}</span>
             </span>
@@ -611,6 +620,10 @@ export default function PrintPoTab() {
                                         <div style={{ display: 'grid', gridTemplateColumns: 'auto auto', columnGap: 6, fontSize: 10.5, lineHeight: 1.45, marginTop: 3, color: '#64748b' }}>
                                           <span title={`최근 ${days}일 판매량 (무신사 + MFS)`} style={{ color: NUM_COLOR.sold.fg }}>판매</span><b style={{ textAlign: 'right', color: NUM_COLOR.sold.fg }}>{o.sold.toLocaleString()}</b>
                                           <span title={`아트웍 입고대기 ${o.incoming} (가용재고 ${o.stock})`} style={{ color: NUM_COLOR.incoming.fg }}>입고대기</span><b style={{ textAlign: 'right', color: NUM_COLOR.incoming.fg }}>{o.incoming.toLocaleString()}</b>
+                                          {o.mfs && (<>
+                                            <span title={`MFS 가용 ${o.mfs.avail} · 입고예정 ${o.mfs.incoming} · 불량 ${o.mfs.defect}`} style={{ color: NUM_COLOR.mfs.fg }}>MFS</span>
+                                            <b style={{ textAlign: 'right', color: NUM_COLOR.mfs.fg }}>{o.mfs.avail.toLocaleString()}</b>
+                                          </>)}
                                           <span title={o.base ? `베이스 ${o.base['상품코드']} ${o.base['상품명']} ${o.option} · 가용 ${baseQty}${baseIncoming ? ` + 입고대기 ${num(o.base['입고대기'])}` : ''}` : '같은 바코드 그룹·옵션의 베이스 상품을 찾지 못함'}
                                             style={{ color: short || !o.base ? '#dc2626' : NUM_COLOR.base.fg, fontWeight: short || !o.base ? 700 : 400 }}>베이스</span>
                                           <b style={{ textAlign: 'right', color: short || !o.base ? '#dc2626' : NUM_COLOR.base.fg }}>{o.base ? baseAvail(o.base).toLocaleString() : '없음'}</b>
