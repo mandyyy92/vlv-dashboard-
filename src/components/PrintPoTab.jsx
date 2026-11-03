@@ -142,7 +142,8 @@ export default function PrintPoTab() {
   const [poMissing, setPoMissing] = useState(false);
   const [seasonSet, setSeasonSet] = useState(defaultSeasonSet); // 판매 순위 시즌 필터
   const [minSold, setMinSold] = useState(100);   // 판매 기간 판매량이 이 수 이상인 상품만
-  const [mfs, setMfs] = useState(null);         // {barcode: {avail, incoming, defect}} · null = 뷰 없음
+  const [images, setImages] = useState({});      // {상품코드: 이미지URL}
+  const [mfs, setMfs] = useState(null);        // {barcode: {avail, incoming, defect}} · null = 뷰 없음
 
   const [days, setDays] = useState(30);
   const [targetDays, setTargetDays] = useState(30);
@@ -191,14 +192,21 @@ export default function PrintPoTab() {
       setLoading(true);
       setError('');
       try {
-        const [st, sup, psp, sheet, mfsRows] = await Promise.all([
+        const [st, sup, psp, sheet, mfsRows, invImg, oldImg] = await Promise.all([
           sbAll('v_option_current_stock?select=group_key,option_key,ba_flag,바코드,상품명,옵션,가용재고,입고대기,상품코드&order=상품코드.asc,옵션.asc'),
           sbFetch('print_suppliers?select=id,name,active&order=name.asc'),
           sbFetch('print_supplier_products?select=id,supplier_id,design_name,unit_cost,sample_status&limit=2000'),
           sbAll('sheet_print_orders?select=vendor,order_round&order=row_key.asc').catch(() => []),
           // MFS 최신 재고(뷰 v_mfs_stock_latest) — 없으면 MFS 줄 없이 동작
           sbAll('v_mfs_stock_latest?select=barcode,avail,incoming,defect&order=barcode.asc').catch(() => null),
+          // 상품 이미지: inventory 최신 스냅샷 뷰 우선, 없으면 product_images(보관본)
+          sbAll('v_inventory_image_latest?select=product_code,image_url&order=product_code.asc').catch(() => []),
+          sbAll('product_images?select=상품코드,이미지url&order=상품코드.asc').catch(() => []),
         ]);
+        const img = {};
+        (oldImg || []).forEach((r) => { if (r['이미지url']) img[r['상품코드']] = r['이미지url']; });
+        (invImg || []).forEach((r) => { if (r.image_url) img[r.product_code] = r.image_url; });
+        setImages(img);
         setStock(st || []);
         setMfs(mfsRows ? Object.fromEntries(mfsRows.map((r) => [r.barcode, { avail: num(r.avail), incoming: num(r.incoming), defect: num(r.defect) }])) : null);
         setSuppliers((sup || []).filter((s) => s.active !== false));
@@ -287,10 +295,11 @@ export default function PrintPoTab() {
       const sup = [...cands].sort((a, b) => (a.sample_status === '승인완료' ? 0 : 1) - (b.sample_status === '승인완료' ? 0 : 1)
         || (num(a.unit_cost) || 1e9) - (num(b.unit_cost) || 1e9));
       // 시즌 = 바코드 4번째 자리 (P 봄 · S 여름 · F 가을 · W 겨울 · A 사계절)
-      out.push({ name, sold: colorList.reduce((s, c) => s + c.sold, 0), colors: colorList, cands: sup, season: String(rows[0].group_key || '')[3] || '' });
+      const imgRow = rows.find((r) => images[r['상품코드']]);
+      out.push({ name, sold: colorList.reduce((s, c) => s + c.sold, 0), colors: colorList, cands: sup, season: String(rows[0].group_key || '')[3] || '', image: imgRow ? images[imgRow['상품코드']] : '' });
     });
     return out.sort((a, b) => b.sold - a.sold || a.name.localeCompare(b.name, 'ko'));
-  }, [stock, designs, sales, baseIndex, mfs]);
+  }, [stock, designs, sales, baseIndex, mfs, images]);
 
   // 기본 진행 컬러: 판매 많은 순으로 누적 80% 까지(최소 1개, 판매 0 컬러 제외)
   const defaultColorOn = useCallback((p) => {
@@ -600,6 +609,9 @@ export default function PrintPoTab() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', flexWrap: 'wrap' }}>
                 <input type="checkbox" checked={on} onChange={() => togglePick(p)} style={{ width: 16, height: 16, cursor: 'pointer' }} />
                 <span style={{ width: 28, fontSize: 12, fontWeight: 800, color: '#94a3b8' }}>{idx + 1}</span>
+                {p.image
+                  ? <img src={p.image} alt="" loading="lazy" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 6, border: '1px solid #e5e7eb', flexShrink: 0 }} onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }} />
+                  : <span style={{ width: 40, height: 40, borderRadius: 6, background: '#f1f5f9', flexShrink: 0 }} />}
                 <span onClick={() => togglePick(p)} style={{ flex: '1 1 220px', fontWeight: 700, color: '#0f172a', cursor: 'pointer' }}>{p.name}</span>
                 <span style={{ fontSize: 12, color: '#475569' }}>판매 <b style={{ color: '#0f172a' }}>{p.sold.toLocaleString()}</b></span>
                 <select value={d ? d.supplier_id : ''} onChange={(e) => setSupplierOf((s) => ({ ...s, [p.name]: e.target.value }))} style={{ ...S.input, fontSize: 12 }}>
