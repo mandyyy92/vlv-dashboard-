@@ -631,28 +631,35 @@ export default function PrintPoTab() {
                                     const v = qtyFor(o);
                                     const a = alloc[o.code];
                                     const short = baseLimit ? !!a && a.raw > 0 && a.eff < a.raw : baseQty !== null && num(v) > baseQty;
+                                    const baseBad = short || !o.base;
+                                    // 사이즈 카드: 위 = 사이즈·의뢰수량, 아래 = 판매 / 입고대기 / MFS / 베이스 칸
+                                    const tiles = [
+                                      [NUM_COLOR.sold, '판매', o.sold.toLocaleString(), `최근 ${days}일 판매량 (무신사 + MFS)`],
+                                      [NUM_COLOR.incoming, '입고대기', o.incoming.toLocaleString(), `아트웍 입고대기 ${o.incoming} (가용재고 ${o.stock})`],
+                                      ...(o.mfs ? [[NUM_COLOR.mfs, 'MFS', o.mfs.avail.toLocaleString(), `MFS 가용 ${o.mfs.avail} · 입고예정 ${o.mfs.incoming} · 불량 ${o.mfs.defect}`]] : []),
+                                      [baseBad ? { fg: '#dc2626', bg: '#fee2e2' } : NUM_COLOR.base, '베이스', o.base ? baseAvail(o.base).toLocaleString() : '없음',
+                                        o.base ? `베이스 ${o.base['상품코드']} ${o.base['상품명']} ${o.option} · 가용 ${baseQty}${baseIncoming ? ` + 입고대기 ${num(o.base['입고대기'])}` : ''}` : '같은 바코드 그룹·옵션의 베이스 상품을 찾지 못함'],
+                                    ];
                                     return (
-                                      <div key={o.code} title={`${o.code} · ${o.option}${o.base ? ` → 베이스 ${o.base['상품코드']} ${o.base['상품명']}` : ' → 베이스 없음'}`}>
-                                        <div style={{ fontSize: 11, fontWeight: 700, color: '#334155' }}>{o.size || '-'}</div>
-                                        <input type="number" min={0} step={10} disabled={!cOn} value={v}
-                                          onChange={(e) => setQtyOf((s) => ({ ...s, [o.code]: e.target.value }))} style={{ ...S.qty, borderColor: short ? '#dc2626' : '#cbd5e1' }} />
-                                        {/* 판매 / 입고대기(아트웍) / 베이스(가용, 입고대기 포함 옵션 시 더함) */}
-                                        <div style={{ display: 'grid', gridTemplateColumns: 'auto auto', columnGap: 6, fontSize: 10.5, lineHeight: 1.45, marginTop: 3, color: '#64748b' }}>
-                                          <span title={`최근 ${days}일 판매량 (무신사 + MFS)`} style={{ color: NUM_COLOR.sold.fg }}>판매</span><b style={{ textAlign: 'right', color: NUM_COLOR.sold.fg }}>{o.sold.toLocaleString()}</b>
-                                          <span title={`아트웍 입고대기 ${o.incoming} (가용재고 ${o.stock})`} style={{ color: NUM_COLOR.incoming.fg }}>입고대기</span><b style={{ textAlign: 'right', color: NUM_COLOR.incoming.fg }}>{o.incoming.toLocaleString()}</b>
-                                          {o.mfs && (<>
-                                            <span title={`MFS 가용 ${o.mfs.avail} · 입고예정 ${o.mfs.incoming} · 불량 ${o.mfs.defect}`} style={{ color: NUM_COLOR.mfs.fg }}>MFS</span>
-                                            <b style={{ textAlign: 'right', color: NUM_COLOR.mfs.fg }}>{o.mfs.avail.toLocaleString()}</b>
-                                          </>)}
-                                          <span title={o.base ? `베이스 ${o.base['상품코드']} ${o.base['상품명']} ${o.option} · 가용 ${baseQty}${baseIncoming ? ` + 입고대기 ${num(o.base['입고대기'])}` : ''}` : '같은 바코드 그룹·옵션의 베이스 상품을 찾지 못함'}
-                                            style={{ color: short || !o.base ? '#dc2626' : NUM_COLOR.base.fg, fontWeight: short || !o.base ? 700 : 400 }}>베이스</span>
-                                          <b style={{ textAlign: 'right', color: short || !o.base ? '#dc2626' : NUM_COLOR.base.fg }}>{o.base ? baseAvail(o.base).toLocaleString() : '없음'}</b>
+                                      <div key={o.code} title={`${o.code} · ${o.option}`} style={{ border: `1px solid ${short ? '#fecaca' : '#e2e8f0'}`, borderRadius: 8, padding: 8, background: '#fff' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                                          <span style={{ minWidth: 26, fontSize: 13, fontWeight: 800, color: '#0f172a' }}>{o.size || '-'}</span>
+                                          <input type="number" min={0} step={10} disabled={!cOn} value={v}
+                                            onChange={(e) => setQtyOf((s) => ({ ...s, [o.code]: e.target.value }))} style={{ ...S.qty, width: 70, borderColor: short ? '#dc2626' : '#cbd5e1' }} />
+                                          {cOn && short && (
+                                            <span style={{ fontSize: 11, fontWeight: 800, color: a.eff ? '#ea580c' : '#dc2626', whiteSpace: 'nowrap' }}>
+                                              {a.eff ? `→ ${a.eff} 베이스 한도` : (o.base ? '베이스 없음 · 제외' : '베이스 미매칭 · 제외')}
+                                            </span>
+                                          )}
                                         </div>
-                                        {cOn && short && (
-                                          <div style={{ fontSize: 10, fontWeight: 800, color: a.eff ? '#ea580c' : '#dc2626' }}>
-                                            {a.eff ? `→ ${a.eff} (베이스 한도)` : (o.base ? '베이스 재고 없음 · 제외' : '베이스 없음 · 제외')}
-                                          </div>
-                                        )}
+                                        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${tiles.length}, minmax(52px, 1fr))`, gap: 4 }}>
+                                          {tiles.map(([col, label, value, tip]) => (
+                                            <div key={label} title={tip} style={{ background: col.bg, borderRadius: 6, padding: '3px 6px', textAlign: 'center' }}>
+                                              <div style={{ fontSize: 10, fontWeight: 600, color: col.fg, opacity: 0.85 }}>{label}</div>
+                                              <div style={{ fontSize: 13, fontWeight: 800, color: col.fg }}>{value}</div>
+                                            </div>
+                                          ))}
+                                        </div>
                                       </div>
                                     );
                                   })}
