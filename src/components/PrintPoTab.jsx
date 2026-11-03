@@ -98,10 +98,11 @@ const defaultSeasonSet = () => { const m = new Date().getMonth() + 1; return m >
 
 // 사이즈별 숫자 색 — 범례 칩과 같은 색으로 짝지음 (베이스 부족은 빨강이 우선)
 const NUM_COLOR = {
-  sold: { fg: '#2563eb', bg: '#dbeafe' },     // 판매 — 파랑
-  incoming: { fg: '#0d9488', bg: '#ccfbf1' }, // 입고대기 — 청록
-  mfs: { fg: '#ea580c', bg: '#ffedd5' },      // MFS — 주황
-  base: { fg: '#7c3aed', bg: '#ede9fe' },     // 베이스 — 보라
+  // 한 가지 색(블루그레이)에서 진하기만 다르게 — 판매가 가장 진하고 베이스가 가장 옅음
+  sold: { fg: '#1e3a5f', bg: '#d5dfec' },     // 판매
+  incoming: { fg: '#2f5079', bg: '#e1e8f2' }, // 입고대기
+  mfs: { fg: '#4a6a92', bg: '#ebf0f6' },      // MFS
+  base: { fg: '#6a84a6', bg: '#f3f6fa' },     // 베이스
 };
 
 // 시트(sheet_print_orders) 업체명이 업체·단가 관리와 다른 경우 — 차수 추천용
