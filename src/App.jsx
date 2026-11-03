@@ -118,7 +118,28 @@ const mapCalendarRow=(r,source)=>({
 
 // 필터로 뷰를 조회 → 단일 이벤트 배열. sources: "order"(v_inbound_calendar) / "print"(v_print_calendar). 실패해도 빈 배열로 정상 렌더.
 const CALENDAR_VIEW={order:"v_inbound_calendar",print:"v_print_calendar"};
+// 시트→DB 동기화(10분 주기)가 큐의 시트 반영보다 먼저 돌면 sheet_* 의 조정입고일이 이전 값으로 덮여 카드가 되돌아간다.
+// → 최근 30분 대시보드 조정입고일 변경 중 아직 DB 동기화에 반영되지 않은 것(pending, 또는 applied_at > synced_at)을 덮어씌운다.
+async function fetchRecentEtaEdits(){
+  try{
+    const since=new Date(Date.now()-30*60*1000).toISOString();
+    const r=await fetch(`${SUPABASE_URL}/rest/v1/sheet_edit_queue?select=id,target,row_key,new_value,status,applied_at&field=eq.revised_eta&status=in.(pending,done)&requested_at=gte.${encodeURIComponent(since)}&order=id.asc`,{headers:sbHeaders});
+    if(!r.ok)return new Map();
+    const m=new Map();
+    ((await r.json())||[]).forEach(q=>m.set(`${q.target}|${q.row_key}`,q)); // 같은 행은 최신 요청이 남음
+    return m;
+  }catch(e){console.warn("[revised_eta] 최근 변경 조회 실패",e);return new Map();}
+}
+const applyEtaEdit=(x,source,edits)=>{
+  const q=edits.get(`${source}|${x.row_key}`);
+  if(!q)return x;
+  if(q.status==="done"&&q.applied_at&&x.synced_at&&new Date(x.synced_at)>=new Date(q.applied_at))return x; // 이미 동기화됨
+  const v=q.new_value||null;
+  if((x.revised_eta||null)===v)return x;
+  return{...x,revised_eta:v,show_date:Number(x.remain_qty)>0?(v||x.eta):x.show_date};
+};
 async function fetchCalendarRows(filter,sources=["order","print"]){
+  const editsP=fetchRecentEtaEdits();
   const load=async(view,source)=>{
     try{
       // PostgREST 응답 상한(1000행) → offset 페이징으로 전량 조회. 페이지 경계가 흔들리지 않게 row_key 로 2차 정렬.
@@ -130,7 +151,8 @@ async function fetchCalendarRows(filter,sources=["order","print"]){
         rows.push(...(chunk||[]));
         if(!chunk||chunk.length<PAGE)break;
       }
-      return rows.filter(x=>x&&x.show_date)
+      const edits=await editsP;
+      return rows.map(x=>x&&applyEtaEdit(x,source,edits)).filter(x=>x&&x.show_date)
         .map(x=>source==="print"?{...x,order_qty:x.req_qty,factory:x.vendor}:x)
         .map(x=>mapCalendarRow(x,source));
     }catch(e){console.warn(`[${view}] 호출 실패`,e);return[];}
