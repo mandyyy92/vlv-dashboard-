@@ -88,6 +88,13 @@ const designMatches = (design, productName) => {
   return design.arts.every((a) => pw.includes(a)) && (!design.types.length || design.types.some((t) => lower.includes(t)));
 };
 
+// 사이즈별 숫자 색 — 범례 칩과 같은 색으로 짝지음 (베이스 부족은 빨강이 우선)
+const NUM_COLOR = {
+  sold: { fg: '#2563eb', bg: '#dbeafe' },     // 판매 — 파랑
+  incoming: { fg: '#0d9488', bg: '#ccfbf1' }, // 입고대기 — 청록
+  base: { fg: '#7c3aed', bg: '#ede9fe' },     // 베이스 — 보라
+};
+
 // 시트(sheet_print_orders) 업체명이 업체·단가 관리와 다른 경우 — 차수 추천용
 const VENDOR_ALIAS = { 국제나염: ['국제나염', '국제프린팅'] };
 
@@ -548,9 +555,9 @@ export default function PrintPoTab() {
         </div>
         {/* 사이즈별 숫자 범례 — 짧은 칩 3개 */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, fontSize: 12, marginBottom: 10 }}>
-          {[['판매', `최근 ${days}일`], ['입고대기', '들어올 아트웍'], ['베이스', '남은 베이스 재고 · 빨강 = 부족']].map(([k, v]) => (
-            <span key={k} style={{ display: 'inline-flex', gap: 5, alignItems: 'center', padding: '3px 9px', borderRadius: 99, background: '#f1f5f9', color: '#64748b' }}>
-              <b style={{ color: '#334155' }}>{k}</b>{v}
+          {[[NUM_COLOR.sold, '판매', `최근 ${days}일`], [NUM_COLOR.incoming, '입고대기', '들어올 아트웍'], [NUM_COLOR.base, '베이스', '남은 베이스 재고 · 빨강 = 부족']].map(([c, k, v]) => (
+            <span key={k} style={{ display: 'inline-flex', gap: 5, alignItems: 'center', padding: '3px 9px', borderRadius: 99, background: c.bg, color: c.fg }}>
+              <b>{k}</b><span style={{ opacity: 0.8 }}>{v}</span>
             </span>
           ))}
         </div>
@@ -602,11 +609,11 @@ export default function PrintPoTab() {
                                           onChange={(e) => setQtyOf((s) => ({ ...s, [o.code]: e.target.value }))} style={{ ...S.qty, borderColor: short ? '#dc2626' : '#cbd5e1' }} />
                                         {/* 판매 / 입고대기(아트웍) / 베이스(가용, 입고대기 포함 옵션 시 더함) */}
                                         <div style={{ display: 'grid', gridTemplateColumns: 'auto auto', columnGap: 6, fontSize: 10.5, lineHeight: 1.45, marginTop: 3, color: '#64748b' }}>
-                                          <span title={`최근 ${days}일 판매량 (무신사 + MFS)`}>판매</span><b style={{ textAlign: 'right', color: '#334155' }}>{o.sold.toLocaleString()}</b>
-                                          <span title={`아트웍 입고대기 ${o.incoming} (가용재고 ${o.stock})`}>입고대기</span><b style={{ textAlign: 'right', color: '#334155' }}>{o.incoming.toLocaleString()}</b>
+                                          <span title={`최근 ${days}일 판매량 (무신사 + MFS)`} style={{ color: NUM_COLOR.sold.fg }}>판매</span><b style={{ textAlign: 'right', color: NUM_COLOR.sold.fg }}>{o.sold.toLocaleString()}</b>
+                                          <span title={`아트웍 입고대기 ${o.incoming} (가용재고 ${o.stock})`} style={{ color: NUM_COLOR.incoming.fg }}>입고대기</span><b style={{ textAlign: 'right', color: NUM_COLOR.incoming.fg }}>{o.incoming.toLocaleString()}</b>
                                           <span title={o.base ? `베이스 ${o.base['상품코드']} ${o.base['상품명']} ${o.option} · 가용 ${baseQty}${baseIncoming ? ` + 입고대기 ${num(o.base['입고대기'])}` : ''}` : '같은 바코드 그룹·옵션의 베이스 상품을 찾지 못함'}
-                                            style={{ color: short || !o.base ? '#dc2626' : '#64748b', fontWeight: short || !o.base ? 700 : 400 }}>베이스</span>
-                                          <b style={{ textAlign: 'right', color: short || !o.base ? '#dc2626' : '#334155' }}>{o.base ? baseAvail(o.base).toLocaleString() : '없음'}</b>
+                                            style={{ color: short || !o.base ? '#dc2626' : NUM_COLOR.base.fg, fontWeight: short || !o.base ? 700 : 400 }}>베이스</span>
+                                          <b style={{ textAlign: 'right', color: short || !o.base ? '#dc2626' : NUM_COLOR.base.fg }}>{o.base ? baseAvail(o.base).toLocaleString() : '없음'}</b>
                                         </div>
                                         {cOn && short && (
                                           <div style={{ fontSize: 10, fontWeight: 800, color: a.eff ? '#ea580c' : '#dc2626' }}>
