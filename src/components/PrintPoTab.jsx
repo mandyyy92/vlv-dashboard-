@@ -547,14 +547,13 @@ export default function PrintPoTab() {
           </label>
           {salesLoading && <span style={S.msg('neutral')}>판매 집계 중…</span>}
         </div>
-        <div style={{ fontSize: 12, color: '#64748b', marginBottom: 10 }}>
-          추천수량 = 일평균 판매 × 목표 일수 − (가용재고 + 입고대기), 10단위 올림 · 기본 컬러 = 판매 상위 누적 80%
-        </div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', fontSize: 12, color: '#475569', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '7px 10px', marginBottom: 10 }}>
-          <span><b>판매</b> 최근 {days}일 판매량(무신사+MFS)</span>
-          <span><b>입고대기</b> 아트웍 입고대기 수량</span>
-          <span><b>베이스</b> 프린팅할 베이스 상품 가용재고{baseIncoming ? ' + 입고대기' : ''} — 부족하면 <b style={{ color: '#dc2626' }}>빨강</b>, 의뢰수량은 베이스 한도까지만 발주</span>
-          <span style={{ color: '#94a3b8' }}>항목에 마우스를 올리면 상세 설명</span>
+        {/* 사이즈별 숫자 범례 — 짧은 칩 3개 */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, fontSize: 12, marginBottom: 10 }}>
+          {[['판매', `최근 ${days}일`], ['입고대기', '들어올 아트웍'], ['베이스', '남은 베이스 재고 · 빨강 = 부족']].map(([k, v]) => (
+            <span key={k} style={{ display: 'inline-flex', gap: 5, alignItems: 'center', padding: '3px 9px', borderRadius: 99, background: '#f1f5f9', color: '#64748b' }}>
+              <b style={{ color: '#334155' }}>{k}</b>{v}
+            </span>
+          ))}
         </div>
 
         {!shownProducts.length ? <div style={S.empty}>표시할 상품이 없습니다</div> : shownProducts.slice(0, showN).map((p, idx) => {
