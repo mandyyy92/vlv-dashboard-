@@ -57,6 +57,85 @@ async function saveXlsx(fileName, sheets) {
   XLSX.writeFile(wb, fileName);
 }
 
+// ── 발송요청(업체 전달용) 서식 엑셀: ExcelJS — 테두리·초록 헤더·셀 병합·이미지 ──
+async function loadExcelJS() {
+  if (typeof window.ExcelJS === 'undefined') {
+    await new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js';
+      s.onload = res;
+      s.onerror = () => rej(new Error('ExcelJS 로드 실패'));
+      document.head.appendChild(s);
+    });
+  }
+  return window.ExcelJS;
+}
+// 상품 이미지 → base64. 이미지 서버에 CORS 가 없어 /api/img 프록시(Vercel)를 거친다. 실패하면 이미지 없이 진행.
+async function fetchImageB64(url) {
+  if (!url) return null;
+  try {
+    const r = await fetch(`/api/img?u=${encodeURIComponent(url)}`);
+    const type = r.headers.get('content-type') || '';
+    if (!r.ok || !type.startsWith('image/')) return null;
+    const bytes = new Uint8Array(await r.arrayBuffer());
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return { base64: btoa(bin), extension: type.includes('png') ? 'png' : type.includes('gif') ? 'gif' : 'jpeg' };
+  } catch (e) {
+    return null;
+  }
+}
+const XL_GREEN = 'FFE2EFDA';
+const XL_FONT = { name: '맑은 고딕', size: 10 };
+const xlThin = { style: 'thin', color: { argb: 'FF8C8C8C' } };
+const xlMedium = { style: 'medium', color: { argb: 'FF595959' } };
+// groups: [{image, rows}] — 그룹 단위로 mergeCols(0-based) 세로 병합, 첫 열에 이미지
+async function addStyledSheet(wb, { name, headers, widths, groups, total, mergeCols }) {
+  const ws = wb.addWorksheet(name);
+  ws.columns = widths.map((width) => ({ width }));
+  const n = headers.length;
+  const styleRow = (r, { bold = false, fill = false, top = xlThin, bottom = xlThin } = {}) => {
+    for (let c = 1; c <= n; c++) {
+      const cell = ws.getCell(r, c);
+      cell.font = { ...XL_FONT, bold };
+      cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+      cell.border = { top, bottom, left: xlThin, right: xlThin };
+      if (fill) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: XL_GREEN } };
+    }
+  };
+  ws.addRow(headers).height = 22;
+  styleRow(1, { bold: true, fill: true, bottom: xlMedium });
+  const imgs = await Promise.all(groups.map((g) => fetchImageB64(g.image)));
+  groups.forEach((g, gi) => {
+    const start = ws.rowCount + 1;
+    const h = Math.max(20, Math.ceil(52 / g.rows.length)); // 이미지(약 60px)가 들어갈 높이 확보
+    g.rows.forEach((vals) => { ws.addRow(vals).height = h; });
+    const end = ws.rowCount;
+    for (let r = start; r <= end; r++) styleRow(r);
+    if (end > start) mergeCols.forEach((c) => ws.mergeCells(start, c + 1, end, c + 1));
+    if (imgs[gi]) {
+      const id = wb.addImage(imgs[gi]);
+      ws.addImage(id, { tl: { col: 0.12, row: start - 1 + 0.1 }, ext: { width: 60, height: 60 }, editAs: 'oneCell' });
+    }
+  });
+  if (total) {
+    ws.addRow(total).height = 20;
+    styleRow(ws.rowCount, { bold: true, fill: true, top: xlMedium });
+  }
+}
+async function saveStyledXlsx(fileName, sheets) {
+  const ExcelJS = await loadExcelJS();
+  const wb = new ExcelJS.Workbook();
+  for (const sh of sheets) await addStyledSheet(wb, sh);
+  const buf = await wb.xlsx.writeBuffer();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+
 // 옵션 "[화이트/블랙-M]" → {color:"화이트/블랙", size:"M"}
 const splitOption = (opt) => {
   const s = String(opt || '').trim().replace(/^\[/, '').replace(/\]$/, '');
@@ -396,17 +475,22 @@ export default function PrintPoTab() {
   const downloadRequestFiles = async (supplierName, roundNo, orderDate, lines) => {
     const N = roundNo, d6 = yymmdd(orderDate);
     // 1) 발송요청 — 상품별 수량(아트웍) / 발송 요청(베이스, 같은 베이스 옵션은 합산)
-    const art = [['이미지', '바코드', '상품코드', '상품명', '옵션', '의뢰수량', '조정', '비고']];
-    let prev = '';
-    lines.forEach((l) => {
-      // 의뢰수량 = 입력·추천 수량, 조정 = 베이스 재고 한도 적용 후 실제 발주 수량
-      const raw = l.raw_qty ?? l.request_qty;
-      art.push(['', l.artwork_barcode, l.artwork_code, l.artwork_name === prev ? '' : l.artwork_name, l.option_name, raw, l.request_qty, raw !== l.request_qty ? '베이스 재고 한도' : '']);
-      prev = l.artwork_name;
-    });
+    // 같은 이름끼리 묶기(순서 유지) — 이미지·상품명 셀 병합 단위
+    const groupBy = (arr, keyOf) => {
+      const m = new Map();
+      arr.forEach((x) => { const k = keyOf(x); if (!m.has(k)) m.set(k, []); m.get(k).push(x); });
+      return [...m.values()];
+    };
     const artSum = lines.reduce((s, l) => s + l.request_qty, 0);
     const rawSum = lines.reduce((s, l) => s + (l.raw_qty ?? l.request_qty), 0);
-    art.push(['', '', '', '', '합 계', rawSum, artSum, '']);
+    // 의뢰수량 = 입력·추천 수량, 조정 = 베이스 재고 한도 적용 후 실제 발주 수량
+    const artGroups = groupBy(lines, (l) => l.artwork_name).map((gl) => ({
+      image: images[(gl.find((l) => images[l.artwork_code]) || {}).artwork_code] || '',
+      rows: gl.map((l, i) => {
+        const raw = l.raw_qty ?? l.request_qty;
+        return ['', l.artwork_barcode, l.artwork_code, i === 0 ? l.artwork_name : '', l.option_name, raw, l.request_qty, raw !== l.request_qty ? '베이스 재고 한도' : ''];
+      }),
+    }));
     const baseMap = new Map();
     lines.forEach((l) => {
       const k = l.base_code || `(베이스 없음) ${l.artwork_code}`;
@@ -414,12 +498,17 @@ export default function PrintPoTab() {
       baseMap.get(k).qty += l.request_qty;
     });
     const bases = [...baseMap.values()];
-    const req = [['상품코드', '베이스 상품코드', '상품명', '옵션', '수량', '1차 출고', '2차 출고', '차이', '박스 수량']];
-    bases.forEach((b) => req.push(['', b.code, b.name, b.option, b.qty, b.qty, '', '', '']));
-    req.push(['합 계', '', '', '', artSum, artSum, 0, 0, '']);
-    await saveXlsx(`${N}차_${supplierName}_발송요청_${d6}.xlsx`, [
-      { name: '상품별 수량', rows: art, cols: [8, 20, 10, 28, 18, 9, 9, 16] },
-      { name: '발송 요청', rows: req, cols: [10, 14, 22, 18, 8, 9, 9, 7, 9] },
+    const baseGroups = groupBy(bases, (b) => b.name).map((gb) => ({
+      image: images[(gb.find((b) => images[b.code]) || {}).code] || '',
+      rows: gb.map((b, i) => ['', b.code, i === 0 ? b.name : '', b.option, b.qty, b.qty, '', '', '']),
+    }));
+    await saveStyledXlsx(`${N}차_${supplierName}_발송요청_${d6}.xlsx`, [
+      { name: '상품별 수량', headers: ['이미지', '바코드', '상품코드', '상품명', '옵션', '의뢰수량', '조정', '비고'],
+        widths: [12, 22, 11, 28, 18, 10, 10, 18], groups: artGroups, mergeCols: [0, 3],
+        total: ['', '', '', '', '합 계', rawSum, artSum, ''] },
+      { name: '발송 요청', headers: ['이미지', '베이스 상품코드', '상품명', '옵션', '수량', '1차 출고', '2차 출고', '차이', '박스 수량'],
+        widths: [12, 15, 24, 18, 9, 10, 10, 8, 10], groups: baseGroups, mergeCols: [0, 2],
+        total: ['합 계', '', '', '', artSum, artSum, '', '', ''] },
     ]);
     // 2) 베이스출고 — 베이스 상품코드 · 수량 · 메모 (이지어드민)
     const bm = `${d6}_${supplierName}_베이스출고_${N}차`;
