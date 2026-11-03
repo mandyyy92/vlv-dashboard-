@@ -114,8 +114,19 @@ async function addStyledSheet(wb, { name, headers, widths, groups, total, mergeC
     for (let r = start; r <= end; r++) styleRow(r);
     if (end > start) mergeCols.forEach((c) => ws.mergeCells(start, c + 1, end, c + 1));
     if (imgs[gi]) {
+      // 병합 칸 정가운데 — 픽셀로 계산해 EMU(1px = 9525) 오프셋으로 지정
+      const EMU = 9525;
+      const colPx = Math.round(widths[0] * 7 + 5);          // 엑셀 열 너비(문자) → 픽셀
+      const rowPx = (h * 96) / 72;                          // 행 높이(pt) → 픽셀
+      const size = Math.min(60, Math.floor(rowPx * g.rows.length) - 8, colPx - 8);
+      const top = (rowPx * g.rows.length - size) / 2;
+      const rowIdx = Math.min(g.rows.length - 1, Math.floor(top / rowPx));
       const id = wb.addImage(imgs[gi]);
-      ws.addImage(id, { tl: { col: 0.12, row: start - 1 + 0.1 }, ext: { width: 60, height: 60 }, editAs: 'oneCell' });
+      ws.addImage(id, {
+        tl: { nativeCol: 0, nativeColOff: Math.round(((colPx - size) / 2) * EMU), nativeRow: start - 1 + rowIdx, nativeRowOff: Math.round((top - rowIdx * rowPx) * EMU) },
+        ext: { width: size, height: size },
+        editAs: 'oneCell',
+      });
     }
   });
   if (total) {
