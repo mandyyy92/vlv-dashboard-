@@ -128,6 +128,8 @@ export default function PrintPoTab() {
   const [targetDays, setTargetDays] = useState(30);
   const [q, setQ] = useState('');
   const [showN, setShowN] = useState(20);
+  const [baseLimit, setBaseLimit] = useState(true);      // 베이스 재고 한도 적용(초과분 줄이고 재고 0 이면 제외)
+  const [baseIncoming, setBaseIncoming] = useState(false); // 베이스 입고대기 수량도 한도에 포함
 
   const [picked, setPicked] = useState({});      // {productName: true}
   const [supplierOf, setSupplierOf] = useState({}); // {productName: supplierId}
@@ -286,6 +288,31 @@ export default function PrintPoTab() {
     return k in colorOn ? colorOn[k] : defaultColorOn(p).has(c.color);
   };
   const qtyFor = (o) => (o.code in qtyOf ? qtyOf[o.code] : recommend(o));
+  const baseAvail = (base) => (base ? num(base['가용재고']) + (baseIncoming ? num(base['입고대기']) : 0) : 0);
+
+  // 베이스 재고 한도 배분 — 판매 순위가 높은 상품부터 같은 베이스 옵션의 재고를 나눠 쓴다(여러 아트웍이 한 베이스를 공유).
+  // {아트웍코드: {raw: 입력·추천수량, eff: 실제 발주수량, avail: 배분 직전 남은 베이스 재고}}
+  const alloc = useMemo(() => {
+    const left = {};
+    const out = {};
+    products.forEach((p) => {
+      if (!picked[p.name]) return;
+      p.colors.forEach((c) => {
+        if (!isColorOn(p, c)) return;
+        c.options.forEach((o) => {
+          const raw = Math.max(0, num(qtyFor(o)));
+          if (!baseLimit) { out[o.code] = { raw, eff: raw, avail: null }; return; }
+          const key = o.base ? o.base['상품코드'] : null;
+          const avail = key ? (key in left ? left[key] : baseAvail(o.base)) : 0;
+          const eff = Math.min(raw, Math.max(0, avail));
+          if (key) left[key] = avail - eff;
+          out[o.code] = { raw, eff, avail };
+        });
+      });
+    });
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [products, picked, colorOn, qtyOf, days, targetDays, baseLimit, baseIncoming]);
 
   const togglePick = (p) => setPicked((s) => ({ ...s, [p.name]: !s[p.name] }));
   const supplierFor = (p) => {
@@ -303,17 +330,23 @@ export default function PrintPoTab() {
       p.colors.forEach((c) => {
         if (!isColorOn(p, c)) return;
         c.options.forEach((o) => {
-          const qty = num(qtyFor(o));
-          if (qty <= 0) return;
+          const a = alloc[o.code];
+          if (!a || a.eff <= 0) return;
           const key = String(d.supplier_id);
           if (!m.has(key)) m.set(key, { supplier_id: d.supplier_id, supplier_name: d.supplier_name, lines: [] });
-          m.get(key).lines.push({ product: p.name, o, qty, unit_cost: num(d.unit_cost) });
+          m.get(key).lines.push({ product: p.name, o, qty: a.eff, raw: a.raw, unit_cost: num(d.unit_cost) });
         });
       });
     });
     return [...m.values()].sort((a, b) => a.supplier_name.localeCompare(b.supplier_name, 'ko'));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [products, picked, supplierOf, colorOn, qtyOf, days, targetDays]);
+  }, [products, picked, supplierOf, colorOn, alloc]);
+
+  // 베이스 재고 때문에 줄었거나 빠진 옵션 (발주 리스트 안내용)
+  const baseCut = useMemo(() => {
+    const vals = Object.values(alloc).filter((a) => a.raw > 0 && a.eff < a.raw);
+    return { dropped: vals.filter((a) => a.eff === 0).length, reduced: vals.filter((a) => a.eff > 0).length };
+  }, [alloc]);
 
   const nextRound = (g) => {
     const names = VENDOR_ALIAS[g.supplier_name] || [g.supplier_name];
@@ -331,11 +364,14 @@ export default function PrintPoTab() {
     const art = [['이미지', '바코드', '상품코드', '상품명', '옵션', '의뢰수량', '조정', '비고']];
     let prev = '';
     lines.forEach((l) => {
-      art.push(['', l.artwork_barcode, l.artwork_code, l.artwork_name === prev ? '' : l.artwork_name, l.option_name, l.request_qty, l.request_qty, '']);
+      // 의뢰수량 = 입력·추천 수량, 조정 = 베이스 재고 한도 적용 후 실제 발주 수량
+      const raw = l.raw_qty ?? l.request_qty;
+      art.push(['', l.artwork_barcode, l.artwork_code, l.artwork_name === prev ? '' : l.artwork_name, l.option_name, raw, l.request_qty, raw !== l.request_qty ? '베이스 재고 한도' : '']);
       prev = l.artwork_name;
     });
     const artSum = lines.reduce((s, l) => s + l.request_qty, 0);
-    art.push(['', '', '', '', '합 계', artSum, artSum, '']);
+    const rawSum = lines.reduce((s, l) => s + (l.raw_qty ?? l.request_qty), 0);
+    art.push(['', '', '', '', '합 계', rawSum, artSum, '']);
     const baseMap = new Map();
     lines.forEach((l) => {
       const k = l.base_code || `(베이스 없음) ${l.artwork_code}`;
@@ -381,7 +417,7 @@ export default function PrintPoTab() {
         request_qty: l.qty, unit_cost: l.unit_cost,
       }));
       await sbFetch('print_po_lines', { method: 'POST', headers: { 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: JSON.stringify(lines) });
-      await downloadRequestFiles(g.supplier_name, num(m.round_no), m.order_date, lines);
+      await downloadRequestFiles(g.supplier_name, num(m.round_no), m.order_date, lines.map((x, i) => ({ ...x, raw_qty: g.lines[i].raw })));
       // 저장된 업체 상품은 선택 해제
       const done = new Set(g.lines.map((l) => l.product));
       setPicked((s) => { const n = { ...s }; done.forEach((k) => delete n[k]); return n; });
@@ -503,6 +539,12 @@ export default function PrintPoTab() {
             <input type="number" min={1} value={targetDays} onChange={(e) => setTargetDays(Math.max(1, Number(e.target.value) || 1))} style={{ ...S.input, width: 64, marginLeft: 6 }} />일
           </label>
           <input style={{ ...S.input, flex: '1 1 200px' }} placeholder="상품명 · 업체 검색" value={q} onChange={(e) => setQ(e.target.value)} />
+          <label style={{ fontSize: 12, color: '#475569', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <input type="checkbox" checked={baseLimit} onChange={(e) => setBaseLimit(e.target.checked)} />베이스 재고 한도 적용
+          </label>
+          <label style={{ fontSize: 12, color: baseLimit ? '#475569' : '#cbd5e1', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <input type="checkbox" checked={baseIncoming} disabled={!baseLimit} onChange={(e) => setBaseIncoming(e.target.checked)} />베이스 입고대기 포함
+          </label>
           {salesLoading && <span style={S.msg('neutral')}>판매 집계 중…</span>}
         </div>
         <div style={{ fontSize: 12, color: '#64748b', marginBottom: 10 }}>
@@ -547,7 +589,8 @@ export default function PrintPoTab() {
                                   {c.options.map((o) => {
                                     const baseQty = o.base ? num(o.base['가용재고']) : null;
                                     const v = qtyFor(o);
-                                    const short = baseQty !== null && num(v) > baseQty;
+                                    const a = alloc[o.code];
+                                    const short = baseLimit ? !!a && a.raw > 0 && a.eff < a.raw : baseQty !== null && num(v) > baseQty;
                                     return (
                                       <div key={o.code} title={`${o.code} · ${o.option}${o.base ? ` → 베이스 ${o.base['상품코드']} ${o.base['상품명']}` : ' → 베이스 없음'}`}>
                                         <div style={{ fontSize: 11, fontWeight: 700, color: '#334155' }}>{o.size || '-'}</div>
@@ -556,6 +599,11 @@ export default function PrintPoTab() {
                                         <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>
                                           {o.sold}·{o.stock + o.incoming}·<span style={{ color: o.base ? (short ? '#dc2626' : '#64748b') : '#dc2626' }}>{o.base ? baseQty : '없음'}</span>
                                         </div>
+                                        {cOn && short && (
+                                          <div style={{ fontSize: 10, fontWeight: 800, color: a.eff ? '#ea580c' : '#dc2626' }}>
+                                            {a.eff ? `→ ${a.eff} (베이스 한도)` : (o.base ? '베이스 재고 없음 · 제외' : '베이스 없음 · 제외')}
+                                          </div>
+                                        )}
                                       </div>
                                     );
                                   })}
@@ -580,6 +628,12 @@ export default function PrintPoTab() {
       {/* 2) 업체·차수별 발주 리스트 */}
       <div style={S.card}>
         <h3 style={{ ...S.title, marginBottom: 12 }}><span style={S.step}>2</span>업체·차수별 발주 리스트</h3>
+        {baseLimit && (baseCut.dropped > 0 || baseCut.reduced > 0) && (
+          <div style={{ ...S.msg('err'), fontSize: 12, marginBottom: 10 }}>
+            베이스 재고 부족 — {baseCut.dropped ? `${baseCut.dropped}개 옵션 제외` : ''}{baseCut.dropped && baseCut.reduced ? ' · ' : ''}{baseCut.reduced ? `${baseCut.reduced}개 옵션 수량 줄임` : ''}
+            {' '}(발송요청 '상품별 수량' 시트에 의뢰수량 / 조정으로 함께 표시)
+          </div>
+        )}
         {!groups.length ? <div style={S.empty}>1단계에서 상품을 선택하면 업체별로 묶여 나옵니다</div> : groups.map((g) => {
           const m = metaOf(g);
           const total = g.lines.reduce((s, l) => s + l.qty, 0);
