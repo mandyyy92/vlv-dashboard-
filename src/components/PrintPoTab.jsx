@@ -250,6 +250,7 @@ export default function PrintPoTab() {
   const [saving, setSaving] = useState(false);
 
   const [openPo, setOpenPo] = useState(null);    // 입고 처리 중 po id
+  const [viewPo, setViewPo] = useState(null);    // 옵션별 발주 수량 펼친 po id
   const [recvQty, setRecvQty] = useState({});    // {lineId: value}
   const [recvDate, setRecvDate] = useState(kstDate());
   const [extraOf, setExtraOf] = useState({});    // {baseCode: value} 추가출고 수동 수정
@@ -861,13 +862,15 @@ export default function PrintPoTab() {
           const open = openPo === p.id;
           return (
             <div key={p.id} style={{ border: `1px solid ${open ? '#a5b4fc' : '#e5e7eb'}`, borderRadius: 10, marginBottom: 8 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', flexWrap: 'wrap' }}>
+              <div onClick={() => setViewPo((v) => (v === p.id ? null : p.id))} title="클릭하면 옵션별 발주 수량"
+                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', flexWrap: 'wrap', cursor: 'pointer' }}>
+                <span style={{ fontSize: 10, color: '#94a3b8', width: 10 }}>{viewPo === p.id ? '▼' : '▶'}</span>
                 <span style={{ fontWeight: 800, color: '#0f172a' }}>{p.supplier_name} · {p.round_no}차</span>
                 <span style={{ fontSize: 12, color: '#64748b' }}>발주 {p.order_date} · {lines.length}옵션 · {total.toLocaleString()}장</span>
                 <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 99, background: p.status === 'received' ? '#dcfce7' : '#e0e7ff', color: p.status === 'received' ? '#15803d' : '#4338ca' }}>
                   {p.status === 'received' ? `입고완료 ${p.received_date || ''} · ${recvTotal.toLocaleString()}장` : '발송요청'}
                 </span>
-                <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                <span onClick={(e) => e.stopPropagation()} style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
                   <button style={{ ...S.btn(false, false), fontSize: 12 }} onClick={() => redownload(p)}>발주 엑셀 다시 받기</button>
                   <button style={{ ...S.btn(open, false), fontSize: 12 }} onClick={() => openReceive(p)}>{open ? '닫기' : '입고 처리'}</button>
                   <button style={{ ...S.btn(false, false), fontSize: 12, ...(delArm === p.id ? { borderColor: '#dc2626', color: '#dc2626', fontWeight: 700 } : {}) }} onClick={() => deletePo(p)}>
@@ -875,6 +878,46 @@ export default function PrintPoTab() {
                   </button>
                 </span>
               </div>
+              {/* 옵션별 발주 수량 (헤더 클릭으로 펼침) */}
+              {viewPo === p.id && !open && (
+                <div style={{ padding: '0 12px 12px' }}>
+                  <div style={{ ...S.tableWrap, maxHeight: 360, overflowY: 'auto' }}>
+                    <table style={S.table}>
+                      <thead><tr>
+                        <th style={S.th}></th><th style={S.th}>아트웍 상품</th><th style={S.th}>상품코드</th><th style={S.th}>옵션</th>
+                        <th style={{ ...S.th, textAlign: 'right' }}>발주수량</th>
+                        {p.status === 'received' && <th style={{ ...S.th, textAlign: 'right' }}>실입고</th>}
+                        <th style={S.th}>베이스 상품</th><th style={S.th}>베이스 코드</th>
+                      </tr></thead>
+                      <tbody>
+                        {[...lines].sort((a, b) => a.id - b.id).map((l, i, arr) => {
+                          const first = i === 0 || arr[i - 1].artwork_name !== l.artwork_name;
+                          return (
+                            <tr key={l.id}>
+                              <td style={{ ...S.td, width: 40 }}>
+                                {first && images[l.artwork_code] && <img src={images[l.artwork_code]} alt="" loading="lazy" style={{ width: 32, height: 32, objectFit: 'cover', borderRadius: 5 }} />}
+                              </td>
+                              <td style={{ ...S.td, fontWeight: first ? 700 : 400, color: first ? '#0f172a' : '#cbd5e1' }}>{first ? l.artwork_name : '〃'}</td>
+                              <td style={{ ...S.td, ...S.mono }}>{l.artwork_code}</td>
+                              <td style={S.td}>{l.option_name}</td>
+                              <td style={{ ...S.td, textAlign: 'right', fontWeight: 700 }}>{num(l.request_qty).toLocaleString()}</td>
+                              {p.status === 'received' && <td style={{ ...S.td, textAlign: 'right', color: num(l.received_qty) === num(l.request_qty) ? '#334155' : '#dc2626', fontWeight: 700 }}>{num(l.received_qty).toLocaleString()}</td>}
+                              <td style={{ ...S.td, color: l.base_code ? '#475569' : '#dc2626' }}>{l.base_name || '베이스 없음'}</td>
+                              <td style={{ ...S.td, ...S.mono }}>{l.base_code || '-'}</td>
+                            </tr>
+                          );
+                        })}
+                        <tr style={{ background: '#f8fafc' }}>
+                          <td style={{ ...S.td, fontWeight: 700 }} colSpan={4}>합계</td>
+                          <td style={{ ...S.td, textAlign: 'right', fontWeight: 800 }}>{total.toLocaleString()}</td>
+                          {p.status === 'received' && <td style={{ ...S.td, textAlign: 'right', fontWeight: 800 }}>{recvTotal.toLocaleString()}</td>}
+                          <td style={S.td} colSpan={2}></td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
               {open && (
                 <div style={{ padding: '0 12px 12px' }}>
                   <div style={S.bar}>
