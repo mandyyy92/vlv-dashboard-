@@ -106,7 +106,7 @@ const NUM_COLOR = {
 };
 
 // 시트(sheet_print_orders) 업체명이 업체·단가 관리와 다른 경우 — 차수 추천용
-const VENDOR_ALIAS = { 국제나염: ['국제나염', '국제프린팅'] };
+const VENDOR_ALIAS = { 국제프린팅: ['국제프린팅', '국제나염'], 코스타컴퍼니: ['코스타컴퍼니', '코스타컴퍼니(나염)'] };
 
 const S = {
   card: { background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: 16, marginBottom: 16 },
