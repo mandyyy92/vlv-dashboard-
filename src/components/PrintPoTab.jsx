@@ -552,7 +552,7 @@ export default function PrintPoTab() {
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', fontSize: 12, color: '#475569', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '7px 10px', marginBottom: 10 }}>
           <span><b>판매</b> 최근 {days}일 판매량(무신사+MFS)</span>
-          <span><b>재고</b> 아트웍 가용재고 + 입고대기</span>
+          <span><b>입고대기</b> 아트웍 입고대기 수량</span>
           <span><b>베이스</b> 프린팅할 베이스 상품 가용재고{baseIncoming ? ' + 입고대기' : ''} — 부족하면 <b style={{ color: '#dc2626' }}>빨강</b>, 의뢰수량은 베이스 한도까지만 발주</span>
           <span style={{ color: '#94a3b8' }}>항목에 마우스를 올리면 상세 설명</span>
         </div>
@@ -602,10 +602,10 @@ export default function PrintPoTab() {
                                         <div style={{ fontSize: 11, fontWeight: 700, color: '#334155' }}>{o.size || '-'}</div>
                                         <input type="number" min={0} step={10} disabled={!cOn} value={v}
                                           onChange={(e) => setQtyOf((s) => ({ ...s, [o.code]: e.target.value }))} style={{ ...S.qty, borderColor: short ? '#dc2626' : '#cbd5e1' }} />
-                                        {/* 판매 / 재고(아트웍 가용+입고대기) / 베이스(가용, 입고대기 포함 옵션 시 더함) */}
+                                        {/* 판매 / 입고대기(아트웍) / 베이스(가용, 입고대기 포함 옵션 시 더함) */}
                                         <div style={{ display: 'grid', gridTemplateColumns: 'auto auto', columnGap: 6, fontSize: 10.5, lineHeight: 1.45, marginTop: 3, color: '#64748b' }}>
                                           <span title={`최근 ${days}일 판매량 (무신사 + MFS)`}>판매</span><b style={{ textAlign: 'right', color: '#334155' }}>{o.sold.toLocaleString()}</b>
-                                          <span title={`아트웍 가용재고 ${o.stock} + 입고대기 ${o.incoming}`}>재고</span><b style={{ textAlign: 'right', color: '#334155' }}>{(o.stock + o.incoming).toLocaleString()}</b>
+                                          <span title={`아트웍 입고대기 ${o.incoming} (가용재고 ${o.stock})`}>입고대기</span><b style={{ textAlign: 'right', color: '#334155' }}>{o.incoming.toLocaleString()}</b>
                                           <span title={o.base ? `베이스 ${o.base['상품코드']} ${o.base['상품명']} ${o.option} · 가용 ${baseQty}${baseIncoming ? ` + 입고대기 ${num(o.base['입고대기'])}` : ''}` : '같은 바코드 그룹·옵션의 베이스 상품을 찾지 못함'}
                                             style={{ color: short || !o.base ? '#dc2626' : '#64748b', fontWeight: short || !o.base ? 700 : 400 }}>베이스</span>
                                           <b style={{ textAlign: 'right', color: short || !o.base ? '#dc2626' : '#334155' }}>{o.base ? baseAvail(o.base).toLocaleString() : '없음'}</b>
