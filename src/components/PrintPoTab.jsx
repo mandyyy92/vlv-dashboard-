@@ -140,6 +140,7 @@ export default function PrintPoTab() {
   const [error, setError] = useState('');
   const [poMissing, setPoMissing] = useState(false);
   const [seasonSet, setSeasonSet] = useState(defaultSeasonSet); // 판매 순위 시즌 필터
+  const [minSold, setMinSold] = useState(100);   // 판매 기간 판매량이 이 수 이상인 상품만
   const [mfs, setMfs] = useState(null);         // {barcode: {avail, incoming, defect}} · null = 뷰 없음
 
   const [days, setDays] = useState(30);
@@ -531,9 +532,9 @@ export default function PrintPoTab() {
   const shownProducts = useMemo(() => {
     const kw = q.trim().toLowerCase();
     const seasons = SEASON_SETS[seasonSet].codes;
-    return products.filter((p) => (!seasons || seasons.includes(p.season))
+    return products.filter((p) => (!seasons || seasons.includes(p.season)) && p.sold >= minSold
       && (!kw || p.name.toLowerCase().includes(kw) || p.cands.some((d) => d.supplier_name.includes(q.trim()))));
-  }, [products, q, seasonSet]);
+  }, [products, q, seasonSet, minSold]);
 
   if (loading) return <div style={S.card}><div style={S.empty}>⏳ 재고·업체 데이터를 불러오는 중...</div></div>;
   if (error) return <div style={S.card}><div style={{ ...S.empty, color: '#b91c1c' }}>불러오지 못했습니다: {error}</div></div>;
@@ -571,6 +572,9 @@ export default function PrintPoTab() {
               </button>
             ))}
           </span>
+          <label style={{ fontSize: 12, color: '#475569', fontWeight: 600 }}>판매
+            <input type="number" min={0} step={10} value={minSold} onChange={(e) => setMinSold(Math.max(0, Number(e.target.value) || 0))} style={{ ...S.input, width: 64, margin: '0 4px' }} />장 이상
+          </label>
           <input style={{ ...S.input, flex: '1 1 200px' }} placeholder="상품명 · 업체 검색" value={q} onChange={(e) => setQ(e.target.value)} />
           <label style={{ fontSize: 12, color: '#475569', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             <input type="checkbox" checked={baseLimit} onChange={(e) => setBaseLimit(e.target.checked)} />베이스 재고 한도 적용
