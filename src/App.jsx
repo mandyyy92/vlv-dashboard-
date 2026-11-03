@@ -4539,11 +4539,12 @@ function MfsShipout(){
 // ─── MFS 출고 및 프린팅 외주 (UI 틀 · 발주 히스토리 표) ───
 // 소메뉴 4개: MFS 출고 / 발주서 작성 / 업체·단가·샘플 관리 / 발주 히스토리.
 function PrintOutsourcingTab(){
-  const [sub,setSub]=useState("supplier"); // mfsship | order | supplier | history (mfsship·order 는 숨김 → 기본 supplier)
+  const [sub,setSub]=useState("po"); // mfsship | order | po | supplier | history (mfsship·order 는 숨김 → 기본 po)
 
   const subTabs=[
     {id:"mfsship",label:"MFS 출고",hidden:true}, // 메뉴에서만 숨김 — 새 메뉴 '발주서 작성'(PrintPoTab)으로 대체
     {id:"order",label:"발주서 작성",hidden:true},
+    {id:"po",label:"발주서 작성"}, // PrintPoTab — 판매순위·업체 분배·엑셀 생성
     {id:"supplier",label:"업체·단가·샘플 관리"},
     {id:"history",label:"발주 히스토리"},
   ];
@@ -4567,6 +4568,7 @@ function PrintOutsourcingTab(){
 
       {sub==="mfsship"&&<MfsShipout />}
       {sub==="order"&&<PrintOrderCreate />}
+      {sub==="po"&&<PrintPoTab />}
       {sub==="supplier"&&<PrintSupplierManage />}
       {sub==="history"&&<PrintHistory />}
     </>
@@ -7580,7 +7582,6 @@ export default function Dashboard(){
     {id:"schedule",label:"입고 스케줄",icon:"📅"},
     {id:"ordertrack",label:"오더 입고현황",icon:"📊"},
     {id:"print",label:"프린팅 외주",icon:"🖨️"},
-    {id:"printpo",label:"발주서 작성",icon:"🧾"},
     {id:"productdb",label:"제품 DB",icon:"🗃",hidden:true}, // 메뉴에서만 숨김(컴포넌트·데이터 유지)
     {id:"planning",label:"아이템 기획",icon:"💡",hidden:true},
     {id:"sample",label:"작업지시서",icon:"📝",hidden:true}, // 메뉴에서만 숨김(컴포넌트·데이터 유지)
@@ -7641,7 +7642,6 @@ export default function Dashboard(){
         {activeTab==="sample"&&<SampleTabWorkorder />}
         {activeTab==="vendorchat"&&<VendorChatSummary />}
         {activeTab==="stockcheck"&&<StockCheckTab />}
-        {activeTab==="printpo"&&<PrintPoTab />}
         {activeTab==="print"&&<PrintOutsourcingTab />}
         {activeTab==="reorder"&&<ReorderTab />}
         {activeTab==="ordertrack"&&<OrderSheetDashboard />}{/* 기존 <ProductionDashboard /> 는 보존(미사용) */}
