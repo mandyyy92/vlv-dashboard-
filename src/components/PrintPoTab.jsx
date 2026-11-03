@@ -88,6 +88,14 @@ const designMatches = (design, productName) => {
   return design.arts.every((a) => pw.includes(a)) && (!design.types.length || design.types.some((t) => lower.includes(t)));
 };
 
+// 시즌 필터 — 사계절(A)·봄(P, 간절기: 일반 집업 후드 등)은 양쪽 모두 포함. 기본값은 현재 달 기준(9~2월 가을·겨울, 3~8월 봄·여름)
+const SEASON_SETS = {
+  fw: { label: '가을·겨울', codes: ['F', 'W', 'A', 'P'] },
+  ss: { label: '봄·여름', codes: ['P', 'S', 'A'] },
+  all: { label: '전체', codes: null },
+};
+const defaultSeasonSet = () => { const m = new Date().getMonth() + 1; return m >= 3 && m <= 8 ? 'ss' : 'fw'; };
+
 // 사이즈별 숫자 색 — 범례 칩과 같은 색으로 짝지음 (베이스 부족은 빨강이 우선)
 const NUM_COLOR = {
   sold: { fg: '#2563eb', bg: '#dbeafe' },     // 판매 — 파랑
@@ -131,7 +139,8 @@ export default function PrintPoTab() {
   const [salesLoading, setSalesLoading] = useState(false);
   const [error, setError] = useState('');
   const [poMissing, setPoMissing] = useState(false);
-  const [mfs, setMfs] = useState(null);          // {barcode: {avail, incoming, defect}} · null = 뷰 없음
+  const [seasonSet, setSeasonSet] = useState(defaultSeasonSet); // 판매 순위 시즌 필터
+  const [mfs, setMfs] = useState(null);         // {barcode: {avail, incoming, defect}} · null = 뷰 없음
 
   const [days, setDays] = useState(30);
   const [targetDays, setTargetDays] = useState(30);
@@ -275,7 +284,8 @@ export default function PrintPoTab() {
       // 업체 후보: 승인완료 · 단가 낮은 순(0 은 뒤로)
       const sup = [...cands].sort((a, b) => (a.sample_status === '승인완료' ? 0 : 1) - (b.sample_status === '승인완료' ? 0 : 1)
         || (num(a.unit_cost) || 1e9) - (num(b.unit_cost) || 1e9));
-      out.push({ name, sold: colorList.reduce((s, c) => s + c.sold, 0), colors: colorList, cands: sup });
+      // 시즌 = 바코드 4번째 자리 (P 봄 · S 여름 · F 가을 · W 겨울 · A 사계절)
+      out.push({ name, sold: colorList.reduce((s, c) => s + c.sold, 0), colors: colorList, cands: sup, season: String(rows[0].group_key || '')[3] || '' });
     });
     return out.sort((a, b) => b.sold - a.sold || a.name.localeCompare(b.name, 'ko'));
   }, [stock, designs, sales, baseIndex, mfs]);
@@ -520,8 +530,10 @@ export default function PrintPoTab() {
 
   const shownProducts = useMemo(() => {
     const kw = q.trim().toLowerCase();
-    return products.filter((p) => !kw || p.name.toLowerCase().includes(kw) || p.cands.some((d) => d.supplier_name.includes(q.trim())));
-  }, [products, q]);
+    const seasons = SEASON_SETS[seasonSet].codes;
+    return products.filter((p) => (!seasons || seasons.includes(p.season))
+      && (!kw || p.name.toLowerCase().includes(kw) || p.cands.some((d) => d.supplier_name.includes(q.trim()))));
+  }, [products, q, seasonSet]);
 
   if (loading) return <div style={S.card}><div style={S.empty}>⏳ 재고·업체 데이터를 불러오는 중...</div></div>;
   if (error) return <div style={S.card}><div style={{ ...S.empty, color: '#b91c1c' }}>불러오지 못했습니다: {error}</div></div>;
@@ -551,6 +563,14 @@ export default function PrintPoTab() {
           <label style={{ fontSize: 12, color: '#475569', fontWeight: 600 }}>목표 재고 일수
             <input type="number" min={1} value={targetDays} onChange={(e) => setTargetDays(Math.max(1, Number(e.target.value) || 1))} style={{ ...S.input, width: 64, marginLeft: 6 }} />일
           </label>
+          <span style={{ display: 'inline-flex', gap: 4 }}>
+            {Object.entries(SEASON_SETS).map(([k, s]) => (
+              <button key={k} onClick={() => setSeasonSet(k)}
+                style={{ ...S.btn(false, false), fontSize: 12, padding: '5px 10px', ...(seasonSet === k ? { borderColor: '#4f46e5', color: '#4f46e5', fontWeight: 700, background: '#eef2ff' } : {}) }}>
+                {s.label}
+              </button>
+            ))}
+          </span>
           <input style={{ ...S.input, flex: '1 1 200px' }} placeholder="상품명 · 업체 검색" value={q} onChange={(e) => setQ(e.target.value)} />
           <label style={{ fontSize: 12, color: '#475569', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             <input type="checkbox" checked={baseLimit} onChange={(e) => setBaseLimit(e.target.checked)} />베이스 재고 한도 적용
