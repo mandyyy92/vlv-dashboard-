@@ -584,14 +584,10 @@ export default function PrintPoTab() {
           </label>
           {salesLoading && <span style={S.msg('neutral')}>판매 집계 중…</span>}
         </div>
-        {/* 사이즈별 숫자 범례 — 짧은 칩 3개 */}
+        {/* 사이즈별 숫자 범례 — 항목명만 색 칩으로 */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, fontSize: 12, marginBottom: 10 }}>
-          {[[NUM_COLOR.sold, '판매', `최근 ${days}일`], [NUM_COLOR.incoming, '입고대기', '들어올 아트웍'],
-            ...(mfs ? [[NUM_COLOR.mfs, 'MFS', '무신사 창고 재고']] : []),
-            [NUM_COLOR.base, '베이스', '남은 베이스 재고 · 빨강 = 부족']].map(([c, k, v]) => (
-            <span key={k} style={{ display: 'inline-flex', gap: 5, alignItems: 'center', padding: '3px 9px', borderRadius: 99, background: c.bg, color: c.fg }}>
-              <b>{k}</b><span style={{ opacity: 0.8 }}>{v}</span>
-            </span>
+          {[[NUM_COLOR.sold, '판매'], [NUM_COLOR.incoming, '입고대기'], ...(mfs ? [[NUM_COLOR.mfs, 'MFS']] : []), [NUM_COLOR.base, '베이스']].map(([c, k]) => (
+            <b key={k} style={{ padding: '3px 10px', borderRadius: 99, background: c.bg, color: c.fg }}>{k}</b>
           ))}
         </div>
 
