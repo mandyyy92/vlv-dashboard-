@@ -1128,6 +1128,25 @@ function ScheduleTab(){
     }finally{setStatusBusy(null);}
   };
 
+  // 상태 일괄 변경 — 프린팅 외주 서랍의 업체·차수 카드 안 상품(group_key) 전체를 같은 상태로. 실패 시 되돌림.
+  const changeStatusBulk=async(groups,newStatus)=>{
+    const targets=groups.filter(g=>g.key&&g.rep&&g.rep.status!==newStatus);
+    if(!newStatus||targets.length===0)return;
+    const keys=new Set(targets.map(g=>g.key));
+    const prevCal=calEvents,prevUp=upcomingEvents,prevWait=waitEvents;
+    const patch=(arr)=>arr.map(e=>keys.has(e.groupKey)?{...e,status:newStatus,statusManual:true}:e);
+    setCalEvents(patch);setUpcomingEvents(patch);setWaitEvents(patch);
+    try{
+      await Promise.all(targets.map(g=>saveOrderStatus(g.key,g.rep.source,newStatus)));
+      setEtaMsg({ok:true,text:`상태 ${targets.length}건 → ${newStatus}`});
+      await Promise.all([reloadCalendar(),reloadUpcoming(),reloadWait()]);
+    }catch(e){
+      console.error("[order_status] 일괄 저장 실패",e);
+      setCalEvents(prevCal);setUpcomingEvents(prevUp);setWaitEvents(prevWait);
+      setEtaMsg({ok:false,text:"상태 일괄 변경 실패 — 다시 시도해주세요"});
+    }
+  };
+
   // 서랍 '시트 반영' — 입력값 > 0 인 행만 큐에 recv_qty_N · recv_date_N 2건씩 insert. 화면 수량은 시트 동기화 후 갱신.
   const submitRecvQty=async(g)=>{
     const entries=g.events.map(o=>({o,qty:Number(recvInputs[o.id])})).filter(x=>Number.isFinite(x.qty)&&x.qty>0&&x.o.rowKey!=null&&x.o.rowKey!=="");
@@ -1624,6 +1643,13 @@ function ScheduleTab(){
                   {/* 조정입고일 일괄 — 잔량 있는 상품 전체에 같은 날짜 적용 */}
                   {(()=>{const evs=c.blocks.flatMap(g=>g.totalRemain>0?g.events:[]);const v=bulkEta[c.key]||"";const ok=evs.length>0&&/^20\d\d-\d\d-\d\d$/.test(v);return(
                   <span style={{marginLeft:"auto",display:"inline-flex",alignItems:"center",gap:6,fontSize:12,fontWeight:600,color:"#64748B",whiteSpace:"nowrap"}}>
+                    {/* 상태 일괄 — 고르면 카드 안 상품 전체에 바로 적용 */}
+                    상태 일괄
+                    <select value="" onChange={e=>{const st=e.target.value;if(st)changeStatusBulk(c.blocks,st);}}
+                      style={{padding:"3px 6px",borderRadius:6,border:"1px solid #CBD5E1",fontSize:12,color:"#1E293B",background:"#FFF",cursor:"pointer",marginRight:8}}>
+                      <option value="">선택 ({c.blocks.length})</option>
+                      {statusOptionsFor("print").map(st=><option key={st} value={st}>{st}</option>)}
+                    </select>
                     조정입고일 일괄
                     <input type="date" value={v} disabled={!evs.length} onChange={e=>{const nv=e.target.value;setBulkEta(p=>({...p,[c.key]:nv}));}}
                       style={{padding:"3px 6px",borderRadius:6,border:"1px solid #CBD5E1",fontSize:12,color:"#1E293B",background:evs.length?"#FFF":"#F1F5F9"}} />
