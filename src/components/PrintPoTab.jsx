@@ -273,6 +273,290 @@ const S = {
   step: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 22, height: 22, borderRadius: 99, background: '#4f46e5', color: '#fff', fontSize: 12, fontWeight: 800, marginRight: 8 },
 };
 
+// ── 4) 베이스 재고 추가 조정: 발송요청 파일 + 입고(조정) 파일 업로드 비교 ──
+// 파일명용 업체 약칭: '코스타컴퍼니(나염)' → '코스타'
+const shortSupplier = (s) => String(s || '').replace(/\(.*?\)/g, '').replace(/컴퍼니$/, '').trim();
+const normHead = (v) => String(v ?? '').replace(/\s/g, '');
+const isCode = (v) => /^[A-Z]\d{3,}$/i.test(String(v ?? '').trim());
+// 시트 중 필요한 헤더가 모두 있는 표 찾기 → [{헤더: 값}] (병합으로 빈 상품명은 위 값으로 채움)
+async function readTable(file, required, prefer = []) {
+  const XLSX = await loadXLSX();
+  const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+  let best = null;
+  wb.SheetNames.forEach((sn) => {
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: '' });
+    for (let i = 0; i < Math.min(rows.length, 20); i++) {
+      const heads = rows[i].map(normHead);
+      if (!required.every((h) => heads.includes(h))) continue;
+      const score = prefer.filter((h) => heads.includes(h)).length;
+      if (!best || score > best.score) best = { rows, hi: i, heads, score };
+      break;
+    }
+  });
+  if (!best) return null;
+  const out = [];
+  let lastName = '';
+  best.rows.slice(best.hi + 1).forEach((r) => {
+    const o = {};
+    best.heads.forEach((h, j) => { if (h && !(h in o)) o[h] = r[j]; });
+    if (o['상품명']) lastName = String(o['상품명']).trim(); else o['상품명'] = lastName;
+    out.push(o);
+  });
+  return out;
+}
+// 파일명에서 차수·업체: '12차_국제나염_발송요청_261020.xlsx'
+const guessFromName = (name) => {
+  const n = String(name || '');
+  const round = (n.match(/(\d+)\s*차/) || [])[1] || '';
+  const sup = (n.replace(/\.[^.]+$/, '').split('_').find((t) => t && !/\d+\s*차|발송요청|입고|^\d+$/.test(t)) || '').trim();
+  return { round, sup };
+};
+
+function BaseAdjustUpload({ stock, baseIndex, suppliers, makeWriter, whereText, flash, rootDir }) {
+  const [reqFile, setReqFile] = useState(null);
+  const [recvFile, setRecvFile] = useState(null);
+  const [round, setRound] = useState('');
+  const [sup, setSup] = useState('');
+  const [result, setResult] = useState(null); // {rows, unmatched}
+  const [putOver, setPutOver] = useState({});  // {baseCode: 수동 수정}
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const stockByCode = useMemo(() => {
+    const m = new Map();
+    stock.forEach((r) => { if (r['상품코드']) m.set(String(r['상품코드']).trim(), r); });
+    return m;
+  }, [stock]);
+
+  const pickReq = (f) => {
+    setReqFile(f); setResult(null); setErr('');
+    if (f) { const g = guessFromName(f.name); if (g.round) setRound(g.round); if (g.sup) setSup(shortSupplier(g.sup)); }
+  };
+  const pickRecv = (f) => {
+    setRecvFile(f); setResult(null); setErr('');
+    if (f && !round) { const g = guessFromName(f.name); if (g.round) setRound(g.round); }
+  };
+
+  const compare = async () => {
+    if (!reqFile || !recvFile) { setErr('파일 2개를 모두 올려주세요'); return; }
+    setBusy(true); setErr('');
+    try {
+      const req = await readTable(reqFile, ['베이스상품코드', '옵션'], ['1차출고', '수량']);
+      if (!req) throw new Error('① 발송요청 파일에서 "베이스 상품코드" 표를 찾지 못했습니다');
+      const recv = await readTable(recvFile, ['상품코드', '옵션', '조정'], ['불량', '의뢰수량']);
+      if (!recv) throw new Error('② 입고 파일에서 "상품코드 · 옵션 · 조정" 표를 찾지 못했습니다');
+      // 베이스(발송요청) — 1차 + 2차 출고, 둘 다 비면 수량
+      const bases = new Map();
+      req.forEach((r) => {
+        const code = String(r['베이스상품코드'] ?? '').trim();
+        if (!isCode(code)) return;
+        const shipped = num(r['1차출고']) + num(r['2차출고']);
+        const ship = shipped || num(r['수량']);
+        if (!bases.has(code)) bases.set(code, { code, name: String(r['상품명'] || '').trim(), option: String(r['옵션'] || '').trim(), ship: 0, recv: 0, bad: 0, arts: [], artNames: new Set() });
+        bases.get(code).ship += ship;
+      });
+      // 입고(아트웍) → 재고의 group_key + 같은 옵션 B 상품 = 베이스
+      const unmatched = [];
+      recv.forEach((r) => {
+        const code = String(r['상품코드'] ?? '').trim();
+        if (!isCode(code)) return;
+        const adj = num(r['조정']), bad = num(r['불량']);
+        const st = stockByCode.get(code);
+        const base = st ? baseIndex.get(`${st.group_key}|${String(st['옵션'] || '').trim()}`) : null;
+        const bcode = base ? String(base['상품코드']).trim() : '';
+        if (!bcode) { unmatched.push({ code, name: r['상품명'], option: r['옵션'], adj, bad, why: st ? '베이스 상품 없음' : '재고에 상품코드 없음' }); return; }
+        if (!bases.has(bcode)) bases.set(bcode, { code: bcode, name: base['상품명'], option: base['옵션'], ship: 0, recv: 0, bad: 0, arts: [], artNames: new Set(), notInReq: true });
+        const b = bases.get(bcode);
+        b.recv += adj; b.bad += bad; b.arts.push(code); b.artNames.add(String(r['상품명'] || '').trim());
+      });
+      setResult({ rows: [...bases.values()].map((b) => ({ ...b, artNames: [...b.artNames].join(', ') })), unmatched });
+      setPutOver({});
+    } catch (e) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const leftOf = (b) => b.ship - b.recv - b.bad;
+  const putOf = (b) => (b.code in putOver ? num(putOver[b.code]) : Math.max(0, leftOf(b)));
+  const noteOf = (b) => {
+    const left = leftOf(b);
+    if (b.notInReq) return '발송요청 파일에 없는 베이스';
+    if (left < 0) return `${-left}장 초과 입고 — 추가 차감 없음`;
+    if (b.ship && !b.recv) return '입고 없음 — 업체 잔여 확인';
+    if (left >= 20 && left >= b.ship / 2) return `${left}장 부족 — 업체 잔여 확인`;
+    return '';
+  };
+
+  const download = async () => {
+    if (!result) return;
+    const N = String(round).trim(), s = sup.trim();
+    if (!N || !s) { setErr('차수와 업체를 입력해주세요'); return; }
+    if (rootDir) await ensurePermission(rootDir).catch(() => false);
+    setBusy(true);
+    try {
+      const ExcelJS = await loadExcelJS();
+      const wb = new ExcelJS.Workbook();
+      const thin = { style: 'thin', color: { argb: 'FFBFBFBF' } };
+      const border = { top: thin, left: thin, bottom: thin, right: thin };
+      const green = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2EFDA' } };
+      const blue = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDEBF7' } };
+      const d6 = yymmdd(kstDate());
+      const memo = `${d6}_${s}_베이스입고(추가)_${N}차`;
+      const rows = result.rows;
+      const ws = wb.addWorksheet('베이스 재고 입력');
+      ws.mergeCells('A1:K1');
+      ws.getCell('A1').value = `${s} ${N}차 — 어드민 베이스 재고 입력 수량 (${d6})`;
+      ws.getCell('A1').font = { bold: true, size: 14 };
+      ws.mergeCells('A2:K2');
+      ws.getCell('A2').value = '1차 출고는 어드민에서 이미 차감됨 · 어드민에 넣을 수량 = 1차 출고 − 조정(입고) − 불량 (0 미만이면 0, 추가 차감 없음)';
+      ws.getCell('A2').font = { size: 10, color: { argb: 'FF64748B' } };
+      const h = ws.getRow(4);
+      h.values = ['베이스 상품코드', '베이스 상품명', '옵션', '입고 상품코드', '입고 상품명', '1차 출고(차감완료)', '조정(입고)', '불량', '남은 베이스', '어드민에 넣을 수량', '비고'];
+      h.height = 30;
+      h.eachCell((c) => { c.font = { bold: true }; c.fill = green; c.border = border; c.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; });
+      rows.forEach((b, i) => {
+        const n = 5 + i, left = leftOf(b), put = putOf(b), note = noteOf(b);
+        const manual = b.code in putOver;
+        const row = ws.getRow(n);
+        row.values = [b.code, b.name, b.option, b.arts.join(', '), b.artNames, b.ship, b.recv, b.bad || null,
+          { formula: `F${n}-G${n}-H${n}`, result: left },
+          manual ? put : { formula: `MAX(0,I${n})`, result: put },
+          manual ? [note, '수동 수정'].filter(Boolean).join(' · ') : note];
+        row.eachCell({ includeEmpty: true }, (c) => { c.border = border; c.alignment = { vertical: 'middle', horizontal: 'center' }; });
+        [6, 7, 8, 9, 10].forEach((c) => { row.getCell(c).numFmt = '#,##0;[Red]-#,##0'; });
+        row.getCell(10).font = { bold: true };
+        if (put > 0) row.getCell(10).fill = blue;
+        if (note) { row.getCell(11).font = { color: { argb: 'FFC00000' }, size: 10 }; row.getCell(11).alignment = { horizontal: 'left', vertical: 'middle' }; }
+      });
+      const last = 4 + rows.length, t = last + 1;
+      const tr = ws.getRow(t);
+      const tot = (k) => rows.reduce((a, b) => a + k(b), 0);
+      tr.values = ['합 계', '', '', '', '',
+        { formula: `SUM(F5:F${last})`, result: tot((b) => b.ship) }, { formula: `SUM(G5:G${last})`, result: tot((b) => b.recv) },
+        { formula: `SUM(H5:H${last})`, result: tot((b) => b.bad) }, { formula: `SUM(I5:I${last})`, result: tot(leftOf) },
+        { formula: `SUM(J5:J${last})`, result: tot(putOf) }, ''];
+      ws.mergeCells(`A${t}:E${t}`);
+      tr.eachCell({ includeEmpty: true }, (c) => { c.font = { bold: true }; c.fill = green; c.border = border; c.alignment = { horizontal: 'center' }; c.numFmt = '#,##0;[Red]-#,##0'; });
+      if (result.unmatched.length) {
+        const u0 = t + 2;
+        ws.getCell(`A${u0}`).value = '베이스를 찾지 못한 입고 상품 (계산 제외)';
+        ws.getCell(`A${u0}`).font = { bold: true, color: { argb: 'FFC00000' } };
+        result.unmatched.forEach((u, i) => { ws.getRow(u0 + 1 + i).values = ['', '', u.option, u.code, u.name, '', u.adj, u.bad || null, '', '', u.why]; });
+      }
+      [14, 20, 12, 14, 26, 12, 11, 8, 10, 12, 34].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+      ws.views = [{ state: 'frozen', ySplit: 4 }];
+      const ws2 = wb.addWorksheet('어드민 입력용');
+      ws2.getRow(1).values = ['베이스 상품코드', '상품명', '옵션', '입력 수량', '메모'];
+      ws2.getRow(1).eachCell((c) => { c.font = { bold: true }; c.fill = green; c.border = border; c.alignment = { horizontal: 'center' }; });
+      let k = 2;
+      rows.forEach((b) => {
+        const put = putOf(b);
+        if (put <= 0) return;
+        const r = ws2.getRow(k++);
+        r.values = [b.code, b.name, b.option, put, memo];
+        r.eachCell((c) => { c.border = border; c.alignment = { horizontal: 'center' }; });
+      });
+      const tt = ws2.getRow(k);
+      tt.values = ['합 계', '', '', { formula: `SUM(D2:D${Math.max(2, k - 1)})`, result: tot(putOf) }, ''];
+      tt.eachCell({ includeEmpty: true }, (c) => { c.font = { bold: true }; c.fill = green; c.border = border; c.alignment = { horizontal: 'center' }; });
+      [14, 22, 14, 10, 34].forEach((w, i) => { ws2.getColumn(i + 1).width = w; });
+      const blob = new Blob([await wb.xlsx.writeBuffer()], { type: XLSX_MIME });
+      // 폴더 저장: 업체 약칭 → 등록 업체명(폴더 찾기용)
+      const full = (suppliers.find((x) => shortSupplier(x.name) === s || x.name === s) || {}).name || s;
+      const path = await makeWriter(full, '입고', N)(blob, `${N}차_베이스입고(추가)_${s}.xlsx`);
+      flash('ok', `${N}차_베이스입고(추가)_${s} · ${tot(putOf).toLocaleString()}장 · ${whereText([path])}`);
+    } catch (e) {
+      flash('err', `엑셀 생성 실패 — ${String(e.message || e).slice(0, 80)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const fileBox = (label, file, onPick, hint) => (
+    <label style={{ flex: '1 1 260px', display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', border: `1px dashed ${file ? '#14b8a6' : '#cbd5e1'}`, borderRadius: 8, background: file ? '#f0fdfa' : '#f8fafc', cursor: 'pointer', fontSize: 12 }}>
+      <input type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={(e) => { onPick(e.target.files?.[0] || null); e.target.value = ''; }} />
+      <b style={{ color: '#0f766e', whiteSpace: 'nowrap' }}>{label}</b>
+      <span style={{ color: file ? '#0f172a' : '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file ? file.name : hint}</span>
+    </label>
+  );
+
+  const rows = result?.rows || [];
+  const sum = rows.reduce((a, b) => ({ ship: a.ship + b.ship, recv: a.recv + b.recv, bad: a.bad + b.bad, left: a.left + leftOf(b), put: a.put + putOf(b) }), { ship: 0, recv: 0, bad: 0, left: 0, put: 0 });
+
+  return (
+    <div style={{ border: '1px solid #99f6e4', borderRadius: 10, padding: 12, marginBottom: 12 }}>
+      <div style={{ fontSize: 13, fontWeight: 800, color: '#0f766e', marginBottom: 8 }}>파일 2개로 비교</div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+        {fileBox('① 발송요청', reqFile, pickReq, '베이스 상품코드 · 1차 출고 있는 파일')}
+        {fileBox('② 입고', recvFile, pickRecv, '상품코드 · 조정 · 불량 있는 파일')}
+      </div>
+      <div style={{ ...S.bar, marginBottom: 0 }}>
+        <label style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>차수
+          <input value={round} onChange={(e) => setRound(e.target.value.replace(/\D/g, ''))} style={{ ...S.input, width: 50, margin: '0 4px' }} />차
+        </label>
+        <label style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>업체
+          <input value={sup} onChange={(e) => setSup(e.target.value)} placeholder="코스타" style={{ ...S.input, width: 110, marginLeft: 4 }} />
+        </label>
+        <span style={{ fontSize: 12, color: '#64748b' }}>파일명: <b style={{ color: '#334155' }}>{round || 'N'}차_베이스입고(추가)_{sup || '업체'}.xlsx</b></span>
+        <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 6 }}>
+          <button style={S.btn(false, busy)} disabled={busy} onClick={compare}>{busy && !result ? '비교 중…' : '비교하기'}</button>
+          {result && <button style={S.btn(true, busy)} disabled={busy} onClick={download}>엑셀 생성 ({sum.put.toLocaleString()}장)</button>}
+        </span>
+      </div>
+      {err && <div style={{ ...S.msg('err'), marginTop: 8 }}>{err}</div>}
+      {result && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ ...S.tableWrap, maxHeight: 460, overflowY: 'auto' }}>
+            <table style={S.table}>
+              <thead><tr>
+                <th style={S.th}>베이스 코드</th><th style={S.th}>베이스 상품</th><th style={S.th}>옵션</th><th style={S.th}>입고 상품</th>
+                <th style={{ ...S.th, textAlign: 'right' }}>1차 출고</th><th style={{ ...S.th, textAlign: 'right' }}>조정(입고)</th>
+                <th style={{ ...S.th, textAlign: 'right' }}>불량</th><th style={{ ...S.th, textAlign: 'right' }}>남은 베이스</th>
+                <th style={{ ...S.th, textAlign: 'right' }}>어드민에 넣을 수량</th><th style={S.th}>비고</th>
+              </tr></thead>
+              <tbody>
+                {rows.map((b) => {
+                  const left = leftOf(b);
+                  return (
+                    <tr key={b.code}>
+                      <td style={{ ...S.td, ...S.mono }}>{b.code}</td>
+                      <td style={S.td}>{b.name}</td>
+                      <td style={S.td}>{b.option}</td>
+                      <td style={{ ...S.td, fontSize: 11, color: '#64748b' }}>{b.arts.join(', ')}</td>
+                      <td style={{ ...S.td, textAlign: 'right' }}>{b.ship.toLocaleString()}</td>
+                      <td style={{ ...S.td, textAlign: 'right' }}>{b.recv.toLocaleString()}</td>
+                      <td style={{ ...S.td, textAlign: 'right', color: b.bad ? '#b45309' : '#cbd5e1' }}>{b.bad || '-'}</td>
+                      <td style={{ ...S.td, textAlign: 'right', fontWeight: 700, color: left < 0 ? '#dc2626' : '#334155' }}>{left}</td>
+                      <td style={{ ...S.td, textAlign: 'right' }}>
+                        <input type="number" min={0} value={putOf(b)} onChange={(e) => setPutOver((s) => ({ ...s, [b.code]: e.target.value }))} style={S.qty} />
+                      </td>
+                      <td style={{ ...S.td, fontSize: 11, color: '#b91c1c' }}>{noteOf(b)}</td>
+                    </tr>
+                  );
+                })}
+                <tr style={{ background: '#f8fafc' }}>
+                  <td style={{ ...S.td, fontWeight: 700 }} colSpan={4}>합계</td>
+                  {[sum.ship, sum.recv, sum.bad, sum.left, sum.put].map((v, i) => (
+                    <td key={i} style={{ ...S.td, textAlign: 'right', fontWeight: 800, color: i === 4 ? '#0f766e' : '#0f172a' }}>{v.toLocaleString()}</td>
+                  ))}
+                  <td style={S.td}></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          {result.unmatched.length > 0 && (
+            <div style={{ ...S.msg('err'), marginTop: 8 }}>
+              베이스를 찾지 못한 입고 상품 {result.unmatched.length}건 (계산 제외): {result.unmatched.map((u) => `${u.code} ${u.option} (${u.why})`).join(' · ')}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function PrintPoTab() {
   const [stock, setStock] = useState([]);        // v_option_current_stock
   const [designs, setDesigns] = useState([]);    // print_supplier_products + 업체명
@@ -717,8 +1001,8 @@ export default function PrintPoTab() {
         r.ship += num(l.request_qty); r.recv += num(l.received_qty); r.bad += num(defectOfLine(l)); r.put += num(putOfLine(l));
       });
       const bases = [...m.values()];
-      const memo = `${d6}_${sup}_베이스잔여_${N}차`;
-      const path = await saveXlsx(`${N}차_베이스재고조정_${sup}.xlsx`, [
+      const memo = `${d6}_${shortSupplier(sup)}_베이스입고(추가)_${N}차`;
+      const path = await saveXlsx(`${N}차_베이스입고(추가)_${shortSupplier(sup)}.xlsx`, [
         { name: '어드민 입력', cols: [10, 8, 32, 22, 18], rows: [['상품코드', '수량', '메모'], ...bases.filter((b) => b.put > 0).map((b) => [b.code, b.put, memo, b.name, b.option])] },
         { name: '계산 내역', cols: [12, 22, 16, 10, 10, 8, 10, 12], rows: [
           ['베이스 상품코드', '베이스 상품명', '옵션', '1차 출고', '입고', '불량', '남은 베이스', '어드민에 넣을 수량'],
@@ -1150,9 +1434,10 @@ export default function PrintPoTab() {
         <div style={{ fontSize: 12, color: '#64748b', marginBottom: 12 }}>
           1차 출고는 어드민에서 이미 차감됨 · 어드민에 넣을 수량 = 1차 출고 − 입고 − 불량 (입고가 더 많아도 추가 차감 없음)
         </div>
+        <BaseAdjustUpload stock={stock} baseIndex={baseIndex} suppliers={suppliers} makeWriter={makeWriter} whereText={whereText} flash={flash} rootDir={rootDir} />
         {(() => {
           const recvPos = pos.filter((p) => p.status === 'received');
-          if (!recvPos.length) return <div style={S.empty}>입고 처리된 발주가 없습니다 — 3)에서 입고 처리 후 표시됩니다</div>;
+          if (!recvPos.length) return <div style={{ fontSize: 12, color: '#94a3b8', padding: '4px 2px' }}>대시보드에서 입고 처리된 발주는 3)에서 입고 처리 후 여기에도 표시됩니다</div>;
           return recvPos.map((p) => {
             const open = adjPo === p.id;
             const lines = p.print_po_lines || [];
