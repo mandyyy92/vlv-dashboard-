@@ -30,6 +30,8 @@ async function sbAll(path) {
 
 const kstDate = (d = new Date()) => new Date(d.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10);
 const yymmdd = (ymd) => String(ymd || '').slice(2).replace(/-/g, '');
+// KST 'YYYY-MM-DD HH:mm'
+const fmtDateTime = (d) => new Date(new Date(d).getTime() + 9 * 3600 * 1000).toISOString().slice(0, 16).replace('T', ' ');
 const num = (v) => Number(v) || 0;
 
 // SheetJS(XLSX) CDN 동적 로드 — 다른 탭과 같은 방식(의존성 추가 없음)
@@ -286,6 +288,9 @@ export default function PrintPoTab() {
   const [minSold, setMinSold] = useState(100);   // 판매 기간 판매량이 이 수 이상인 상품만
   const [images, setImages] = useState({});      // {상품코드: 이미지URL}
   const [mfs, setMfs] = useState(null);        // {barcode: {avail, incoming, defect}} · null = 뷰 없음
+  const [reloadKey, setReloadKey] = useState(0); // 새로고침 버튼 — 재고·판매·발주 다시 불러오기
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadedAt, setLoadedAt] = useState(null); // 리스트 생성(불러온) 시각
 
   const [days, setDays] = useState(30);
   const [targetDays, setTargetDays] = useState(30);
@@ -307,7 +312,9 @@ export default function PrintPoTab() {
   useEffect(() => { if (FS_SUPPORTED) idbGet('root').then((h) => { if (h) setRootDir(h); }); }, []);
   const [recvQty, setRecvQty] = useState({});    // {lineId: value}
   const [recvDate, setRecvDate] = useState(kstDate());
-  const [extraOf, setExtraOf] = useState({});    // {baseCode: value} 추가출고 수동 수정
+  const [adjPo, setAdjPo] = useState(null);      // 4) 베이스 재고 조정 펼친 po id
+  const [defectOf, setDefectOf] = useState({});  // {lineId: 불량}
+  const [putOf, setPutOf] = useState({});        // {lineId: 어드민에 넣을 수량 수동 수정}
   const [delArm, setDelArm] = useState(null);
 
   const [msg, setMsg] = useState(null);
@@ -334,7 +341,7 @@ export default function PrintPoTab() {
   // 재고 · 업체 · 단가 · 시트 차수 (1회)
   useEffect(() => {
     (async () => {
-      setLoading(true);
+      if (reloadKey === 0) setLoading(true); else setRefreshing(true); // 새로고침은 화면 유지
       setError('');
       try {
         const [st, sup, psp, sheet, mfsRows, invImg, oldImg] = await Promise.all([
@@ -364,10 +371,12 @@ export default function PrintPoTab() {
         setError(e.message || String(e));
       } finally {
         setLoading(false);
+        setRefreshing(false);
+        setLoadedAt(new Date());
       }
     })();
     loadPos();
-  }, [loadPos]);
+  }, [loadPos, reloadKey]);
 
   // 최근 N일 판매 — 무신사(배송·송장·접수·발주) + MFS(결제오류·환불/교환 클레임 제외)
   useEffect(() => {
@@ -388,7 +397,7 @@ export default function PrintPoTab() {
           if (r.claim_status && r.claim_status !== '클레임무효') return;
           m[r.barcode] = (m[r.barcode] || 0) + num(r.quantity);
         });
-        if (alive) setSales(m);
+        if (alive) { setSales(m); setLoadedAt(new Date()); }
       } catch (e) {
         if (alive) flash('err', '판매 데이터를 불러오지 못했습니다');
       } finally {
@@ -396,7 +405,7 @@ export default function PrintPoTab() {
       }
     })();
     return () => { alive = false; };
-  }, [days]);
+  }, [days, reloadKey]);
 
   // 베이스 찾기: group_key + B + 같은 옵션명
   const baseIndex = useMemo(() => {
@@ -657,23 +666,75 @@ export default function PrintPoTab() {
   const current = pos.find((p) => p.id === openPo) || null;
   const curLines = useMemo(() => [...(current?.print_po_lines || [])].sort((a, b) => a.id - b.id), [current]);
   const recvOf = (l) => (l.id in recvQty ? recvQty[l.id] : (l.received_qty ?? l.request_qty));
-  const extraRows = useMemo(() => {
-    const m = new Map();
-    curLines.forEach((l) => {
-      if (!l.base_code) return;
-      if (!m.has(l.base_code)) m.set(l.base_code, { code: l.base_code, name: l.base_name, option: l.option_name, diff: 0 });
-      m.get(l.base_code).diff += num(recvOf(l)) - num(l.request_qty);
-    });
-    return [...m.values()];
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [curLines, recvQty]);
-  const extraOfRow = (r) => (r.code in extraOf ? extraOf[r.code] : r.diff);
-
   const openReceive = (p) => {
     setOpenPo(openPo === p.id ? null : p.id);
     setRecvQty({});
-    setExtraOf({});
     setRecvDate(p.received_date || kstDate());
+  };
+
+  // ── 4) 베이스 재고 추가 조정 (입고 후) ──
+  // 1차 출고(발주수량)는 이미 어드민에서 차감됨 → 남은 베이스 = 출고 − 입고 − 불량, 어드민에 넣을 수량 = max(0, 남은 베이스)
+  // 입고가 출고보다 많아도 추가 차감하지 않음(0)
+  const adjCur = pos.find((p) => p.id === adjPo) || null;
+  const adjLines = useMemo(() => [...(adjCur?.print_po_lines || [])].sort((a, b) => a.id - b.id), [adjCur]);
+  const defectOfLine = (l) => (l.id in defectOf ? defectOf[l.id] : (l.defect_qty ?? ''));
+  const leftOf = (l) => num(l.request_qty) - num(l.received_qty) - num(defectOfLine(l));
+  // 직접 수정값 > (불량을 고쳤으면 다시 계산) > 저장값 > 계산값
+  const putOfLine = (l) => {
+    if (l.id in putOf) return putOf[l.id];
+    if (!(l.id in defectOf) && l.base_return_qty != null) return l.base_return_qty;
+    return Math.max(0, leftOf(l));
+  };
+  const openAdjust = (p) => {
+    setAdjPo(adjPo === p.id ? null : p.id);
+    setDefectOf({});
+    setPutOf({});
+  };
+  const saveAdjust = async () => {
+    if (!adjCur) return;
+    if (rootDir) await ensurePermission(rootDir).catch(() => false);
+    setSaving(true);
+    try {
+      const N = adjCur.round_no, sup = adjCur.supplier_name, d6 = yymmdd(kstDate());
+      // 불량·넣을 수량 저장 — 컬럼이 없으면(SQL 미실행) 저장은 건너뛰고 엑셀만 생성
+      let saved = true;
+      try {
+        await Promise.all(adjLines.map((l) => sbFetch(`print_po_lines?id=eq.${l.id}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+          body: JSON.stringify({ defect_qty: num(defectOfLine(l)), base_return_qty: num(putOfLine(l)) }),
+        })));
+        await sbFetch(`print_po?id=eq.${adjCur.id}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+          body: JSON.stringify({ base_adjusted_at: new Date().toISOString() }),
+        });
+      } catch (e) { saved = false; }
+      // 같은 베이스 코드끼리 합산
+      const m = new Map();
+      adjLines.forEach((l) => {
+        if (!l.base_code) return;
+        if (!m.has(l.base_code)) m.set(l.base_code, { code: l.base_code, name: l.base_name, option: l.option_name, ship: 0, recv: 0, bad: 0, put: 0 });
+        const r = m.get(l.base_code);
+        r.ship += num(l.request_qty); r.recv += num(l.received_qty); r.bad += num(defectOfLine(l)); r.put += num(putOfLine(l));
+      });
+      const bases = [...m.values()];
+      const memo = `${d6}_${sup}_베이스잔여_${N}차`;
+      const path = await saveXlsx(`${N}차_베이스재고조정_${sup}.xlsx`, [
+        { name: '어드민 입력', cols: [10, 8, 32, 22, 18], rows: [['상품코드', '수량', '메모'], ...bases.filter((b) => b.put > 0).map((b) => [b.code, b.put, memo, b.name, b.option])] },
+        { name: '계산 내역', cols: [12, 22, 16, 10, 10, 8, 10, 12], rows: [
+          ['베이스 상품코드', '베이스 상품명', '옵션', '1차 출고', '입고', '불량', '남은 베이스', '어드민에 넣을 수량'],
+          ...bases.map((b) => [b.code, b.name, b.option, b.ship, b.recv, b.bad, b.ship - b.recv - b.bad, b.put]),
+          ['합계', '', '', ...['ship', 'recv', 'bad'].map((k) => bases.reduce((s, b) => s + b[k], 0)), bases.reduce((s, b) => s + b.ship - b.recv - b.bad, 0), bases.reduce((s, b) => s + b.put, 0)],
+        ] },
+      ], makeWriter(sup, '입고', N));
+      await loadPos();
+      const total = bases.reduce((s, b) => s + b.put, 0);
+      if (saved) flash('ok', `${sup} ${N}차 베이스 ${total.toLocaleString()}장 · 엑셀 ${whereText([path])}`);
+      else flash('err', `엑셀은 생성됨 · 불량 저장 실패 — supabase/print_po_base_adjust.sql 실행 필요`);
+    } catch (e) {
+      flash('err', `베이스 조정 실패 — ${String(e.message || e).slice(0, 80)}`);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const saveReceive = async () => {
@@ -695,10 +756,10 @@ export default function PrintPoTab() {
       const paths = [];
       paths.push(await saveXlsx(`${N}차_정상입고_${sup}.xlsx`, [{ name: 'Sheet1', cols, rows: [head, ...recvRows.map((l) => [l.artwork_code, num(recvOf(l)), `${d6}_${sup}_정상입고_${N}차`, l.artwork_name, l.option_name, l.artwork_barcode])] }], wr));
       paths.push(await saveXlsx(`${N}차_MFS출고_${sup}.xlsx`, [{ name: 'Sheet1', cols, rows: [head, ...recvRows.map((l) => [l.artwork_code, num(recvOf(l)), `${d6}_${sup}_MFS출고_${N}차`, l.artwork_name, l.option_name, l.artwork_barcode])] }], wr));
-      const em = `${yymmdd(current.order_date)}_베이스출고_${sup}_${N}차 (추가출고 수량 조정)`;
-      paths.push(await saveXlsx(`${N}차_베이스출고(추가출고)_${sup}.xlsx`, [{ name: 'Sheet1', cols: [10, 8, 40, 22, 18], rows: [['상품코드', '수량', '메모'], ...extraRows.map((r) => [r.code, num(extraOfRow(r)), em, r.name, r.option])] }], wr));
+      // 베이스 재고는 추가로 빼지 않음 — 남은 베이스는 4) 베이스 재고 추가 조정에서 어드민에 다시 넣음
       await loadPos();
-      flash('ok', `${sup} ${N}차 입고 저장 · 엑셀 3개 ${whereText(paths)}`);
+      setAdjPo(current.id);
+      flash('ok', `${sup} ${N}차 입고 저장 · 엑셀 2개 ${whereText(paths)} — 아래 4)에서 베이스 재고 조정`);
     } catch (e) {
       flash('err', `입고 저장 실패 — ${String(e.message || e).slice(0, 80)}`);
     } finally {
@@ -762,6 +823,15 @@ export default function PrintPoTab() {
       <div style={S.card}>
         <div style={{ ...S.bar, justifyContent: 'space-between' }}>
           <h3 style={S.title}><span style={S.step}>1</span>판매 순위에서 상품·컬러 선택</h3>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 12, color: '#64748b' }}>
+              리스트 생성 <b style={{ color: '#334155' }}>{loadedAt ? fmtDateTime(loadedAt) : '-'}</b>
+            </span>
+            <button style={{ ...S.btn(false, refreshing || salesLoading), fontSize: 12 }} disabled={refreshing || salesLoading}
+              onClick={() => setReloadKey((k) => k + 1)}>
+              {refreshing || salesLoading ? '불러오는 중…' : '🔄 새로고침'}
+            </button>
+          </span>
         </div>
         <div style={S.bar}>
           <label style={{ fontSize: 12, color: '#475569', fontWeight: 600 }}>판매 기간
@@ -1032,7 +1102,7 @@ export default function PrintPoTab() {
                     <label style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>입고일
                       <input type="date" value={recvDate} onChange={(e) => setRecvDate(e.target.value)} style={{ ...S.input, marginLeft: 4 }} />
                     </label>
-                    <span style={{ fontSize: 12, color: '#64748b' }}>실입고수량을 입력하면 정상입고·MFS출고는 그 수량 그대로, 추가출고는 (실입고 − 의뢰)로 계산됩니다</span>
+                    <span style={{ fontSize: 12, color: '#64748b' }}>실입고수량을 입력하면 정상입고·MFS출고는 그 수량 그대로 생성됩니다 · 남은 베이스는 아래 4)에서 조정</span>
                   </div>
                   <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
                     <div style={{ ...S.tableWrap, flex: '3 1 480px', maxHeight: 360, overflowY: 'auto' }}>
@@ -1061,27 +1131,10 @@ export default function PrintPoTab() {
                         </tbody>
                       </table>
                     </div>
-                    <div style={{ ...S.tableWrap, flex: '2 1 300px' }}>
-                      <table style={S.table}>
-                        <thead><tr><th style={S.th} colSpan={3}>베이스출고(추가출고) — 수정 가능</th></tr>
-                          <tr><th style={S.th}>베이스 코드</th><th style={S.th}>옵션</th><th style={{ ...S.th, textAlign: 'right' }}>수량</th></tr></thead>
-                        <tbody>
-                          {extraRows.map((r) => (
-                            <tr key={r.code}>
-                              <td style={{ ...S.td, ...S.mono }}>{r.code}</td>
-                              <td style={S.td}>{r.name} {r.option}</td>
-                              <td style={{ ...S.td, textAlign: 'right' }}>
-                                <input type="number" value={extraOfRow(r)} onChange={(e) => setExtraOf((s) => ({ ...s, [r.code]: e.target.value }))} style={S.qty} />
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
                     <button style={S.btn(true, saving)} disabled={saving} onClick={saveReceive}>
-                      {saving ? '저장 중…' : '입고 저장 + 엑셀 3개 (정상입고·MFS출고·추가출고)'}
+                      {saving ? '저장 중…' : '입고 저장 + 엑셀 2개 (정상입고·MFS출고)'}
                     </button>
                   </div>
                 </div>
@@ -1089,6 +1142,97 @@ export default function PrintPoTab() {
             </div>
           );
         })}
+      </div>
+
+      {/* 4) 베이스 재고 추가 조정 (입고 후) */}
+      <div style={S.card}>
+        <h3 style={{ ...S.title, marginBottom: 6 }}><span style={S.step}>4</span>베이스 재고 추가 조정 (입고 후)</h3>
+        <div style={{ fontSize: 12, color: '#64748b', marginBottom: 12 }}>
+          1차 출고는 어드민에서 이미 차감됨 · 어드민에 넣을 수량 = 1차 출고 − 입고 − 불량 (입고가 더 많아도 추가 차감 없음)
+        </div>
+        {(() => {
+          const recvPos = pos.filter((p) => p.status === 'received');
+          if (!recvPos.length) return <div style={S.empty}>입고 처리된 발주가 없습니다 — 3)에서 입고 처리 후 표시됩니다</div>;
+          return recvPos.map((p) => {
+            const open = adjPo === p.id;
+            const lines = p.print_po_lines || [];
+            const savedPut = lines.reduce((s, l) => s + num(l.base_return_qty), 0);
+            return (
+              <div key={p.id} style={{ border: `1px solid ${open ? '#99f6e4' : '#e5e7eb'}`, borderRadius: 10, marginBottom: 8 }}>
+                <div onClick={() => openAdjust(p)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', flexWrap: 'wrap', cursor: 'pointer' }}>
+                  <span style={{ fontSize: 10, color: '#94a3b8', width: 10 }}>{open ? '▼' : '▶'}</span>
+                  <span style={{ fontWeight: 800, color: '#0f172a' }}>{p.supplier_name} · {p.round_no}차</span>
+                  <span style={{ fontSize: 12, color: '#64748b' }}>입고 {p.received_date || '-'} · {lines.length}옵션</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 99, background: p.base_adjusted_at ? '#ccfbf1' : '#f1f5f9', color: p.base_adjusted_at ? '#0f766e' : '#64748b' }}>
+                    {p.base_adjusted_at ? `조정 파일 생성 ${fmtDateTime(p.base_adjusted_at)} · ${savedPut.toLocaleString()}장` : '조정 전'}
+                  </span>
+                </div>
+                {open && (() => {
+                  const sum = adjLines.reduce((s, l) => ({
+                    ship: s.ship + num(l.request_qty), recv: s.recv + num(l.received_qty), bad: s.bad + num(defectOfLine(l)),
+                    left: s.left + leftOf(l), put: s.put + num(putOfLine(l)),
+                  }), { ship: 0, recv: 0, bad: 0, left: 0, put: 0 });
+                  return (
+                    <div style={{ padding: '0 12px 12px' }}>
+                      <div style={{ ...S.tableWrap, maxHeight: 420, overflowY: 'auto' }}>
+                        <table style={S.table}>
+                          <thead><tr>
+                            <th style={S.th}>베이스 코드</th><th style={S.th}>베이스 상품</th><th style={S.th}>옵션</th><th style={S.th}>아트웍 상품</th>
+                            <th style={{ ...S.th, textAlign: 'right' }}>1차 출고</th><th style={{ ...S.th, textAlign: 'right' }}>입고</th>
+                            <th style={{ ...S.th, textAlign: 'right' }}>불량</th><th style={{ ...S.th, textAlign: 'right' }}>남은 베이스</th>
+                            <th style={{ ...S.th, textAlign: 'right' }}>어드민에 넣을 수량</th><th style={S.th}>비고</th>
+                          </tr></thead>
+                          <tbody>
+                            {adjLines.map((l) => {
+                              const left = leftOf(l);
+                              const put = putOfLine(l);
+                              return (
+                                <tr key={l.id}>
+                                  <td style={{ ...S.td, ...S.mono }}>{l.base_code || '-'}</td>
+                                  <td style={{ ...S.td, color: l.base_code ? '#334155' : '#dc2626' }}>{l.base_name || '베이스 없음'}</td>
+                                  <td style={S.td}>{l.option_name}</td>
+                                  <td style={{ ...S.td, color: '#64748b', fontSize: 12 }}>{l.artwork_name}</td>
+                                  <td style={{ ...S.td, textAlign: 'right' }}>{num(l.request_qty).toLocaleString()}</td>
+                                  <td style={{ ...S.td, textAlign: 'right' }}>{num(l.received_qty).toLocaleString()}</td>
+                                  <td style={{ ...S.td, textAlign: 'right' }}>
+                                    <input type="number" min={0} value={defectOfLine(l)} placeholder="0"
+                                      onChange={(e) => { const v = e.target.value; setDefectOf((s) => ({ ...s, [l.id]: v })); setPutOf((s) => { const n = { ...s }; delete n[l.id]; return n; }); }}
+                                      style={{ ...S.qty, color: '#b45309' }} />
+                                  </td>
+                                  <td style={{ ...S.td, textAlign: 'right', fontWeight: 700, color: left < 0 ? '#dc2626' : '#334155' }}>{left}</td>
+                                  <td style={{ ...S.td, textAlign: 'right' }}>
+                                    <input type="number" min={0} value={put} disabled={!l.base_code}
+                                      onChange={(e) => setPutOf((s) => ({ ...s, [l.id]: e.target.value }))} style={S.qty} />
+                                  </td>
+                                  <td style={{ ...S.td, fontSize: 11, color: '#b91c1c' }}>
+                                    {!l.base_code ? '베이스 없음 — 제외' : left < 0 ? `${-left}장 초과 입고 · 추가 차감 없음` : left >= 20 && left >= num(l.request_qty) / 2 ? '미입고 많음 · 업체 잔여 확인' : ''}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                            <tr style={{ background: '#f8fafc' }}>
+                              <td style={{ ...S.td, fontWeight: 700 }} colSpan={4}>합계</td>
+                              {[sum.ship, sum.recv, sum.bad, sum.left, sum.put].map((v, i) => (
+                                <td key={i} style={{ ...S.td, textAlign: 'right', fontWeight: 800, color: i === 4 ? '#0f766e' : '#0f172a' }}>{v.toLocaleString()}</td>
+                              ))}
+                              <td style={S.td}></td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10, marginTop: 10 }}>
+                        <span style={{ fontSize: 12, color: '#64748b' }}>같은 베이스 코드는 합산 · 넣을 수량 0 은 파일에서 제외</span>
+                        <button style={S.btn(true, saving)} disabled={saving} onClick={saveAdjust}>
+                          {saving ? '저장 중…' : `저장 + 베이스 재고 조정 엑셀 (${sum.put.toLocaleString()}장)`}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            );
+          });
+        })()}
       </div>
     </div>
   );
