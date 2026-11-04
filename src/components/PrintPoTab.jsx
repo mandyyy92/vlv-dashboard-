@@ -487,7 +487,6 @@ function BaseAdjustUpload({ stock, baseIndex, suppliers, makeWriter, whereText, 
 
   return (
     <div style={{ border: '1px solid #99f6e4', borderRadius: 10, padding: 12, marginBottom: 12 }}>
-      <div style={{ fontSize: 13, fontWeight: 800, color: '#0f766e', marginBottom: 8 }}>파일 2개로 비교</div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
         {fileBox('① 발송요청', reqFile, pickReq, '베이스 상품코드 · 1차 출고 있는 파일')}
         {fileBox('② 입고', recvFile, pickRecv, '상품코드 · 조정 · 불량 있는 파일')}
@@ -1430,14 +1429,11 @@ export default function PrintPoTab() {
 
       {/* 4) 베이스 재고 추가 조정 (입고 후) */}
       <div style={S.card}>
-        <h3 style={{ ...S.title, marginBottom: 6 }}><span style={S.step}>4</span>베이스 재고 추가 조정 (입고 후)</h3>
-        <div style={{ fontSize: 12, color: '#64748b', marginBottom: 12 }}>
-          1차 출고는 어드민에서 이미 차감됨 · 어드민에 넣을 수량 = 1차 출고 − 입고 − 불량 (입고가 더 많아도 추가 차감 없음)
-        </div>
+        <h3 style={{ ...S.title, marginBottom: 12 }}><span style={S.step}>4</span>베이스 재고 추가 조정 (입고 후)</h3>
         <BaseAdjustUpload stock={stock} baseIndex={baseIndex} suppliers={suppliers} makeWriter={makeWriter} whereText={whereText} flash={flash} rootDir={rootDir} />
         {(() => {
           const recvPos = pos.filter((p) => p.status === 'received');
-          if (!recvPos.length) return <div style={{ fontSize: 12, color: '#94a3b8', padding: '4px 2px' }}>대시보드에서 입고 처리된 발주는 3)에서 입고 처리 후 여기에도 표시됩니다</div>;
+          if (!recvPos.length) return null;
           return recvPos.map((p) => {
             const open = adjPo === p.id;
             const lines = p.print_po_lines || [];
