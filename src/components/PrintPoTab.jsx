@@ -72,6 +72,8 @@ async function saveXlsx(fileName, sheets, writer) {
 // ── 공유 폴더(\\…\02_나염) 바로 저장 — File System Access API (Chrome·Edge) ──
 // 폴더 구조: {NN}_{업체}_발송요청/파일  ·  {NN}_{업체}_입고/{N}차/파일. 업체 폴더가 없으면 다음 번호로 새로 만든다.
 const FS_SUPPORTED = typeof window !== 'undefined' && 'showDirectoryPicker' in window;
+// 다른 사이트에 iframe 으로 들어가 있으면 폴더 선택 불가(SecurityError: Cross origin sub frames…)
+const IN_IFRAME = (() => { try { return window.self !== window.top; } catch (e) { return true; } })();
 const FOLDER_ALIAS = { 국제프린팅: ['국제나염'], 코스타컴퍼니: ['코스타'] }; // 기존 폴더 이름의 업체 표기
 const idbKv = (mode, fn) => new Promise((resolve, reject) => {
   const open = indexedDB.open('printpo-fs', 1);
@@ -1264,8 +1266,14 @@ export default function PrintPoTab() {
           {FS_SUPPORTED ? (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#475569' }}>
               {rootDir ? <>📁 저장 폴더 <b style={{ color: '#0f172a' }}>{rootDir.name}</b></> : <span style={{ color: '#94a3b8' }}>폴더 미연결 · 다운로드 폴더로 저장</span>}
-              <button style={{ ...S.btn(!rootDir, false), fontSize: 12, padding: '5px 10px' }} onClick={() => connectFolder(false)}>{rootDir ? '변경' : '📁 저장 폴더 연결'}</button>
-              {folderErr && (
+              {IN_IFRAME ? (
+                // 다른 사이트 안(iframe)에서는 크롬이 폴더 선택 창을 막음 → 대시보드를 새 탭에서 직접 열어야 함
+                <button style={{ ...S.btn(true, false), fontSize: 12, padding: '5px 10px' }} title="다른 페이지 안에서는 폴더를 연결할 수 없어 새 탭에서 엽니다"
+                  onClick={() => window.open(window.location.href, '_blank', 'noopener')}>↗ 새 탭에서 열어 폴더 연결</button>
+              ) : (
+                <button style={{ ...S.btn(!rootDir, false), fontSize: 12, padding: '5px 10px' }} onClick={() => connectFolder(false)}>{rootDir ? '변경' : '📁 저장 폴더 연결'}</button>
+              )}
+              {folderErr && !IN_IFRAME && (
                 <>
                   <span style={{ color: '#b91c1c', fontWeight: 600, maxWidth: 360 }}>연결 실패 — {folderErr}</span>
                   <button style={{ ...S.btn(false, false), fontSize: 12, padding: '5px 10px' }} onClick={() => connectFolder(true)}>기본 위치로 다시 열기</button>
