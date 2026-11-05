@@ -41,7 +41,7 @@ const ORDER_STATUS_OPTIONS=Object.keys(ORDER_STATUS_COLOR);
 const PRINT_STATUS_COLOR={
   "발송 예정":{bg:"#F1F5F9",color:"#64748B"},
   "발송 완료":{bg:"#DBEAFE",color:"#3B82F6"},
-  "입고 일정 확인중":{bg:"#D1FAE5",color:"#10B981"},
+  "입고 일정 확인중":{bg:"#FEF3C7",color:"#EAB308"},
   "입고 확정":{bg:"#F3E8FF",color:"#A855F7"},
   "입고 완료":{bg:"#DCFCE7",color:"#15803D"},
 };
