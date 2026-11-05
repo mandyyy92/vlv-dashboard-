@@ -592,6 +592,7 @@ export default function PrintPoTab() {
   const [openPo, setOpenPo] = useState(null);    // 입고 처리 중 po id
   const [viewPo, setViewPo] = useState(null);    // 옵션별 발주 수량 펼친 po id
   const [rootDir, setRootDir] = useState(null);  // 엑셀 저장 폴더(02_나염) 핸들 — 브라우저(IndexedDB)에 기억
+  const [folderErr, setFolderErr] = useState(''); // 폴더 연결 실패 사유(다시 시도 버튼과 함께 표시)
   useEffect(() => { if (FS_SUPPORTED) idbGet('root').then((h) => { if (h) setRootDir(h); }); }, []);
   const [recvQty, setRecvQty] = useState({});    // {lineId: value}
   const [recvDate, setRecvDate] = useState(kstDate());
@@ -889,27 +890,20 @@ export default function PrintPoTab() {
   };
 
   // ── 공유 폴더 바로 저장 ──
-  const connectFolder = async () => {
+  // 폴더 선택 창은 클릭 1번에 1번만 열 수 있음(자동 재시도 시 SecurityError) → 실패하면 사유 + '기본 위치로 다시 열기' 버튼
+  // simple: 기억된 시작 위치(id) 없이 열기 — 지난번 위치(네트워크 경로)를 못 찾을 때
+  const connectFolder = async (simple = false) => {
+    setFolderErr('');
     try {
-      let h;
-      try {
-        h = await window.showDirectoryPicker({ id: 'printpo-nayeom', mode: 'readwrite' });
-      } catch (e1) {
-        if (e1 && e1.name === 'AbortError' && !/network|path|start/i.test(e1.message || '')) throw e1; // 사용자가 취소
-        // 네트워크 폴더·기억된 시작 위치 문제 → 옵션 없이 다시 열고 권한은 따로 요청
-        h = await window.showDirectoryPicker();
-        if (!(await ensurePermission(h))) throw Object.assign(new Error('쓰기 권한이 거부되었습니다'), { name: 'NotAllowedError' });
-      }
+      const h = await window.showDirectoryPicker(simple ? { mode: 'readwrite' } : { id: 'printpo-nayeom', mode: 'readwrite' });
+      if ((await h.queryPermission({ mode: 'readwrite' })) !== 'granted') throw Object.assign(new Error('쓰기 권한이 허용되지 않았습니다'), { name: 'NotAllowedError' });
       setRootDir(h);
       await idbSet('root', h);
       flash('ok', `저장 폴더 연결: ${h.name}`);
     } catch (e) {
-      if (e && e.name === 'AbortError') return;
+      if (e && e.name === 'AbortError' && !simple && !/start|path|network|directory/i.test(e.message || '')) return; // 사용자가 취소
       console.error('[저장 폴더 연결 실패]', e);
-      const why = e?.name === 'SecurityError' ? '브라우저가 이 위치를 막았습니다 — 네트워크 드라이브로 연결(Z: 등) 후 선택해주세요'
-        : e?.name === 'NotAllowedError' ? '쓰기 권한이 없습니다'
-        : `${e?.name || ''} ${e?.message || ''}`.trim();
-      flash('err', `폴더를 연결하지 못했습니다 — ${why}`.slice(0, 120));
+      setFolderErr(`${e?.name || 'Error'}: ${e?.message || ''}`.slice(0, 160));
     }
   };
   // 반환값: 저장된 위치 문자열(폴더) 또는 '' (다운로드)
@@ -1270,7 +1264,13 @@ export default function PrintPoTab() {
           {FS_SUPPORTED ? (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#475569' }}>
               {rootDir ? <>📁 저장 폴더 <b style={{ color: '#0f172a' }}>{rootDir.name}</b></> : <span style={{ color: '#94a3b8' }}>폴더 미연결 · 다운로드 폴더로 저장</span>}
-              <button style={{ ...S.btn(!rootDir, false), fontSize: 12, padding: '5px 10px' }} onClick={connectFolder}>{rootDir ? '변경' : '📁 저장 폴더 연결'}</button>
+              <button style={{ ...S.btn(!rootDir, false), fontSize: 12, padding: '5px 10px' }} onClick={() => connectFolder(false)}>{rootDir ? '변경' : '📁 저장 폴더 연결'}</button>
+              {folderErr && (
+                <>
+                  <span style={{ color: '#b91c1c', fontWeight: 600, maxWidth: 360 }}>연결 실패 — {folderErr}</span>
+                  <button style={{ ...S.btn(false, false), fontSize: 12, padding: '5px 10px' }} onClick={() => connectFolder(true)}>기본 위치로 다시 열기</button>
+                </>
+              )}
             </span>
           ) : (
             <span style={{ fontSize: 12, color: '#94a3b8' }}>폴더 바로 저장은 Chrome·Edge 에서만 가능 · 다운로드로 저장</span>
