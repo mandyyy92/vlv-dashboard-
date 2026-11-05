@@ -892,12 +892,25 @@ export default function PrintPoTab() {
   // ── 공유 폴더 바로 저장 ──
   const connectFolder = async () => {
     try {
-      const h = await window.showDirectoryPicker({ id: 'printpo-nayeom', mode: 'readwrite' });
+      let h;
+      try {
+        h = await window.showDirectoryPicker({ id: 'printpo-nayeom', mode: 'readwrite' });
+      } catch (e1) {
+        if (e1 && e1.name === 'AbortError' && !/network|path|start/i.test(e1.message || '')) throw e1; // 사용자가 취소
+        // 네트워크 폴더·기억된 시작 위치 문제 → 옵션 없이 다시 열고 권한은 따로 요청
+        h = await window.showDirectoryPicker();
+        if (!(await ensurePermission(h))) throw Object.assign(new Error('쓰기 권한이 거부되었습니다'), { name: 'NotAllowedError' });
+      }
       setRootDir(h);
       await idbSet('root', h);
       flash('ok', `저장 폴더 연결: ${h.name}`);
     } catch (e) {
-      if (e && e.name !== 'AbortError') flash('err', '폴더를 연결하지 못했습니다');
+      if (e && e.name === 'AbortError') return;
+      console.error('[저장 폴더 연결 실패]', e);
+      const why = e?.name === 'SecurityError' ? '브라우저가 이 위치를 막았습니다 — 네트워크 드라이브로 연결(Z: 등) 후 선택해주세요'
+        : e?.name === 'NotAllowedError' ? '쓰기 권한이 없습니다'
+        : `${e?.name || ''} ${e?.message || ''}`.trim();
+      flash('err', `폴더를 연결하지 못했습니다 — ${why}`.slice(0, 120));
     }
   };
   // 반환값: 저장된 위치 문자열(폴더) 또는 '' (다운로드)
