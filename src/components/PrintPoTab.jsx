@@ -203,6 +203,29 @@ async function saveStyledXlsx(fileName, sheets, writer) {
   return writer ? writer(blob, fileName) : downloadBlob(blob, fileName);
 }
 
+// 어드민 업로드용 표(입고대기·베이스출고): 상품코드|수량|메모|상품명|옵션|바코드 — 연초록 헤더·얇은 테두리·가운데 정렬
+async function saveGridXlsx(fileName, widths, rows, writer) {
+  const ExcelJS = await loadExcelJS();
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Sheet1');
+  const thin = { style: 'thin', color: { argb: 'FFBFBFBF' } };
+  const border = { top: thin, left: thin, bottom: thin, right: thin };
+  ws.addRow(['상품코드', '수량', '메모', '상품명', '옵션', '바코드']);
+  rows.forEach((r) => ws.addRow(r));
+  ws.eachRow((row, i) => {
+    row.height = 18;
+    for (let c = 1; c <= 6; c++) {
+      const cell = row.getCell(c);
+      cell.border = border;
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      if (i === 1) { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2EFDA' } }; cell.font = { bold: true }; }
+    }
+  });
+  widths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+  const blob = new Blob([await wb.xlsx.writeBuffer()], { type: XLSX_MIME });
+  return writer ? writer(blob, fileName) : downloadBlob(blob, fileName);
+}
+
 // 옵션 "[화이트/블랙-M]" → {color:"화이트/블랙", size:"M"}
 const splitOption = (opt) => {
   const s = String(opt || '').trim().replace(/^\[/, '').replace(/\]$/, '');
@@ -859,7 +882,7 @@ export default function PrintPoTab() {
     const baseMap = new Map();
     lines.forEach((l) => {
       const k = l.base_code || `(베이스 없음) ${l.artwork_code}`;
-      if (!baseMap.has(k)) baseMap.set(k, { code: l.base_code || '', name: l.base_name || '(베이스 없음)', option: l.option_name, qty: 0 });
+      if (!baseMap.has(k)) baseMap.set(k, { code: l.base_code || '', name: l.base_name || '(베이스 없음)', option: l.option_name, barcode: l.base_barcode || '', qty: 0 });
       baseMap.get(k).qty += l.request_qty;
     });
     const bases = [...baseMap.values()];
@@ -878,16 +901,12 @@ export default function PrintPoTab() {
     ], makeWriter(supplierName, '발송요청')));
     // 2) 베이스출고 — 베이스 상품코드 · 수량 · 메모 (이지어드민)
     const bm = `${d6}_${supplierName}_베이스출고_${N}차`;
-    out.push(await saveXlsx(`${N}차_베이스출고_${supplierName}.xlsx`, [{
-      name: 'Sheet1', cols: [10, 8, 32, 22, 18],
-      rows: [['상품코드', '수량', '메모'], ...bases.filter((b) => b.code).map((b) => [b.code, b.qty, bm, b.name, b.option])],
-    }], makeWriter(supplierName, '입고', N)));
+    out.push(await saveGridXlsx(`${N}차_베이스출고_${supplierName}.xlsx`, [10, 8, 34, 28, 14, 24],
+      bases.filter((b) => b.code).map((b) => [b.code, b.qty, bm, b.name, b.option, b.barcode]), makeWriter(supplierName, '입고', N)));
     // 3) 입고대기 — 아트웍 상품코드 · 의뢰수량 · 메모
     const wm = `${d6}_입고대기_${supplierName}_${N}차`;
-    out.push(await saveXlsx(`${N}차_입고대기_${supplierName}.xlsx`, [{
-      name: 'Sheet1', cols: [10, 8, 32, 26, 18, 22],
-      rows: [['상품코드', '수량', '메모'], ...lines.map((l) => [l.artwork_code, l.request_qty, wm, l.artwork_name, l.option_name, l.artwork_barcode || ''])],
-    }], makeWriter(supplierName, '입고', N)));
+    out.push(await saveGridXlsx(`${N}차_입고대기_${supplierName}.xlsx`, [10, 8, 34, 28, 14, 24],
+      lines.map((l) => [l.artwork_code, l.request_qty, wm, l.artwork_name, l.option_name, l.artwork_barcode || '']), makeWriter(supplierName, '입고', N)));
     return out;
   };
 
