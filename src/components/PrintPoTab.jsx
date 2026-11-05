@@ -845,13 +845,12 @@ export default function PrintPoTab() {
       return [...m.values()];
     };
     const artSum = lines.reduce((s, l) => s + l.request_qty, 0);
-    const rawSum = lines.reduce((s, l) => s + (l.raw_qty ?? l.request_qty), 0);
-    // 의뢰수량 = 입력·추천 수량, 조정 = 베이스 재고 한도 적용 후 실제 발주 수량
+    // 의뢰수량 = 실제 발주 수량(베이스 재고 한도 적용 후) · 조정·1차 출고는 비워두고 입고·출고 후 직접 기입
     const artGroups = groupBy(lines, (l) => l.artwork_name).map((gl) => ({
       image: images[(gl.find((l) => images[l.artwork_code]) || {}).artwork_code] || '',
       rows: gl.map((l, i) => {
         const raw = l.raw_qty ?? l.request_qty;
-        return ['', l.artwork_barcode, l.artwork_code, i === 0 ? l.artwork_name : '', l.option_name, raw, l.request_qty, raw !== l.request_qty ? '베이스 재고 한도' : ''];
+        return ['', l.artwork_barcode, l.artwork_code, i === 0 ? l.artwork_name : '', l.option_name, l.request_qty, '', raw !== l.request_qty ? `추천 ${raw} → 베이스 재고 한도` : '']; // 조정은 입고 후 직접 기입 — 비워둠
       }),
     }));
     const baseMap = new Map();
@@ -863,16 +862,16 @@ export default function PrintPoTab() {
     const bases = [...baseMap.values()];
     const baseGroups = groupBy(bases, (b) => b.name).map((gb) => ({
       image: images[(gb.find((b) => images[b.code]) || {}).code] || '',
-      rows: gb.map((b, i) => ['', b.code, i === 0 ? b.name : '', b.option, b.qty, b.qty, '', '', '']),
+      rows: gb.map((b, i) => ['', b.code, i === 0 ? b.name : '', b.option, b.qty, '', '', '', '']), // 1차 출고는 출고 후 직접 기입 — 비워둠
     }));
     const out = [];
     out.push(await saveStyledXlsx(`${N}차_${supplierName}_발송요청_${d6}.xlsx`, [
       { name: '상품별 수량', headers: ['이미지', '바코드', '상품코드', '상품명', '옵션', '의뢰수량', '조정', '비고'],
         widths: [12, 22, 11, 28, 18, 10, 10, 18], groups: artGroups, mergeCols: [0, 3],
-        total: ['', '', '', '', '합 계', rawSum, artSum, ''] },
+        total: ['', '', '', '', '합 계', artSum, '', ''] },
       { name: '발송 요청', headers: ['이미지', '베이스 상품코드', '상품명', '옵션', '수량', '1차 출고', '2차 출고', '차이', '박스 수량'],
         widths: [12, 15, 24, 18, 9, 10, 10, 8, 10], groups: baseGroups, mergeCols: [0, 2],
-        total: ['합 계', '', '', '', artSum, artSum, '', '', ''] },
+        total: ['합 계', '', '', '', artSum, '', '', '', ''] },
     ], makeWriter(supplierName, '발송요청')));
     // 2) 베이스출고 — 베이스 상품코드 · 수량 · 메모 (이지어드민)
     const bm = `${d6}_${supplierName}_베이스출고_${N}차`;
