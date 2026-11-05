@@ -900,7 +900,7 @@ export default function PrintPoTab() {
         total: ['합 계', '', '', '', artSum, '', '', '', ''] },
     ], makeWriter(supplierName, '발송요청')));
     // 2) 베이스출고 — 베이스 상품코드 · 수량 · 메모 (이지어드민)
-    const bm = `${d6}_${supplierName}_베이스출고_${N}차`;
+    const bm = `${d6}_외주출고_${supplierName}_${N}차`;
     out.push(await saveGridXlsx(`${N}차_베이스출고_${supplierName}.xlsx`, [10, 8, 34, 28, 14, 24],
       bases.filter((b) => b.code).map((b) => [b.code, b.qty, bm, b.name, b.option, b.barcode]), makeWriter(supplierName, '입고', N)));
     // 3) 입고대기 — 아트웍 상품코드 · 의뢰수량 · 메모
