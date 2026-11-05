@@ -880,7 +880,7 @@ export default function PrintPoTab() {
       rows: [['상품코드', '수량', '메모'], ...bases.filter((b) => b.code).map((b) => [b.code, b.qty, bm, b.name, b.option])],
     }], makeWriter(supplierName, '입고', N)));
     // 3) 입고대기 — 아트웍 상품코드 · 의뢰수량 · 메모
-    const wm = `${d6}_${supplierName}_입고대기_${N}차`;
+    const wm = `${d6}_입고대기_${supplierName}_${N}차`;
     out.push(await saveXlsx(`${N}차_입고대기_${supplierName}.xlsx`, [{
       name: 'Sheet1', cols: [10, 8, 32, 26, 18],
       rows: [['상품코드', '수량', '메모'], ...lines.map((l) => [l.artwork_code, l.request_qty, wm, l.artwork_name, l.option_name])],
