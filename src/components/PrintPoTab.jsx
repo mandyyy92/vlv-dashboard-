@@ -661,7 +661,7 @@ export default function PrintPoTab() {
     loadPos();
   }, [loadPos, reloadKey]);
 
-  // 최근 N일 판매 — 무신사(배송·송장·접수·발주) + MFS(결제오류·환불/교환 클레임 제외)
+  // 최근 N일 판매 — 이지어드민 전체 판매처(배송·송장·접수·발주, 협찬 제외) + MFS(결제오류·환불/교환 클레임 제외)
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -670,11 +670,16 @@ export default function PrintPoTab() {
         const since = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10);
         const M = encodeURIComponent('MUSINSA Detailed Order');
         const [mu, mf] = await Promise.all([
-          sbAll(`${M}?select=바코드,상품수량,주문수량&주문일=gte.${since}&상태=in.(배송,송장,접수,발주)&order=id.asc`),
+          sbAll(`${M}?select=바코드,상품수량,주문수량,판매처&주문일=gte.${since}&상태=in.(배송,송장,접수,발주)&order=id.asc`),
           sbAll(`mfs_sales?select=barcode,quantity,order_status,claim_status&sale_date=gte.${since}&order=id.asc`),
         ]);
         const m = {};
-        (mu || []).forEach((r) => { const b = r['바코드']; if (b) m[b] = (m[b] || 0) + (num(r['상품수량']) || num(r['주문수량'])); });
+        // 이지어드민 전체 판매처 합산 — 협찬(VDP_협찬)은 판매가 아니므로 제외 (판매처 빈 값은 포함)
+        (mu || []).forEach((r) => {
+          const b = r['바코드'];
+          if (!b || String(r['판매처'] || '').includes('협찬')) return;
+          m[b] = (m[b] || 0) + (num(r['상품수량']) || num(r['주문수량']));
+        });
         (mf || []).forEach((r) => {
           if (!r.barcode || r.order_status === '결제오류') return;
           if (r.claim_status && r.claim_status !== '클레임무효') return;
