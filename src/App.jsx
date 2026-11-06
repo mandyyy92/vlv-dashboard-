@@ -203,11 +203,11 @@ async function saveRevisedEta(source,rowKeys,newValue,prevByKey){
   }
 }
 // 실입고 수량·일자 → sheet_edit_queue insert 만(시트·sheet_* 테이블 직접 수정 없음). Apps Script 가 시트 '실입고_N' / '실입고일_N' 칸에 반영.
-// entries: [{rowKey,qty}] · round: 1~6 · date: 'YYYY-MM-DD'. 같은 회차 재반영 시 시트 값 덮어씀.
+// entries: [{rowKey,qty,date}] · round: 1~6 · date: 'YYYY-MM-DD'(행별 실입고일, 없으면 기본 date). qty 없으면 실입고일만. 같은 회차 재반영 시 시트 값 덮어씀.
 async function enqueueRecvQty(source,entries,round,date){
-  const rows=entries.flatMap(({rowKey,qty})=>[
-    {target:source,row_key:rowKey,field:`recv_qty_${round}`,new_value:String(qty),requested_by:"dashboard"},
-    {target:source,row_key:rowKey,field:`recv_date_${round}`,new_value:date,requested_by:"dashboard"},
+  const rows=entries.flatMap(({rowKey,qty,date:d})=>[
+    ...(qty>0?[{target:source,row_key:rowKey,field:`recv_qty_${round}`,new_value:String(qty),requested_by:"dashboard"}]:[]),
+    {target:source,row_key:rowKey,field:`recv_date_${round}`,new_value:d||date,requested_by:"dashboard"},
   ]);
   const q=await fetch(`${SUPABASE_URL}/rest/v1/sheet_edit_queue`,{
     method:"POST",headers:{...sbHeaders,Prefer:"return=minimal"},body:JSON.stringify(rows),
@@ -908,6 +908,7 @@ function ScheduleTab(){
   const[recvRound,setRecvRound]=useState(1); // 서랍 실입고 회차(1~6) → sheet_edit_queue field recv_qty_N / recv_date_N
   const[recvDate,setRecvDate]=useState(()=>{const t=new Date();return`${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,"0")}-${String(t.getDate()).padStart(2,"0")}`;}); // 서랍 실입고일 — 기본 오늘
   const[recvInputs,setRecvInputs]=useState({}); // 서랍 입고수량 입력 {event id: string} — 초기값 비움
+  const[recvDates,setRecvDates]=useState({}); // 서랍 행별 실입고일 입력 {event id: 'YYYY-MM-DD'} — 비우면 상단 입고일 사용
   const[recvBusy,setRecvBusy]=useState(null); // 시트 반영 중인 블록 key
   const calEventsRef=useRef([]);
   calEventsRef.current=calEvents;
@@ -1149,15 +1150,19 @@ function ScheduleTab(){
 
   // 서랍 '시트 반영' — 입력값 > 0 인 행만 큐에 recv_qty_N · recv_date_N 2건씩 insert. 화면 수량은 시트 동기화 후 갱신.
   const submitRecvQty=async(g)=>{
-    const entries=g.events.map(o=>({o,qty:Number(recvInputs[o.id])})).filter(x=>Number.isFinite(x.qty)&&x.qty>0&&x.o.rowKey!=null&&x.o.rowKey!=="");
-    if(entries.length===0){setEtaMsg({ok:false,text:"입고수량을 입력한 옵션이 없습니다"});return;}
-    if(!/^20\d\d-\d\d-\d\d$/.test(recvDate)){setEtaMsg({ok:false,text:"입고일을 확인해주세요"});return;}
+    const isDate=v=>/^20\d\d-\d\d-\d\d$/.test(v||"");
+    const entries=g.events.map(o=>{const q=Number(recvInputs[o.id]);return{o,qty:Number.isFinite(q)&&q>0?q:0,date:recvDates[o.id]||""};})
+      .filter(x=>(x.qty>0||x.date)&&x.o.rowKey!=null&&x.o.rowKey!=="");
+    if(entries.length===0){setEtaMsg({ok:false,text:"입고수량 또는 실입고일을 입력한 옵션이 없습니다"});return;}
+    if(entries.some(x=>x.date&&!isDate(x.date))||(entries.some(x=>!x.date)&&!isDate(recvDate))){setEtaMsg({ok:false,text:"실입고일을 확인해주세요"});return;}
     setRecvBusy(g.key);
     try{
-      await enqueueRecvQty(g.events[0].source,entries.map(x=>({rowKey:x.o.rowKey,qty:x.qty})),recvRound,recvDate);
+      await enqueueRecvQty(g.events[0].source,entries.map(x=>({rowKey:x.o.rowKey,qty:x.qty,date:x.date})),recvRound,recvDate);
       setSheetQueue(p=>{const n={...p};entries.forEach(x=>{n[String(x.o.rowKey)]={status:"pending",message:""};});return n;});
       setRecvInputs(p=>{const n={...p};entries.forEach(x=>{delete n[x.o.id];});return n;});
-      setEtaMsg({ok:true,text:`${recvRound}회차 입고수량 ${entries.length}건 · 시트 반영 대기`});
+      setRecvDates(p=>{const n={...p};entries.forEach(x=>{delete n[x.o.id];});return n;});
+      const nq=entries.filter(x=>x.qty>0).length,nd=entries.length-nq;
+      setEtaMsg({ok:true,text:`${recvRound}회차 ${nq?`입고수량 ${nq}건`:""}${nq&&nd?" · ":""}${nd?`실입고일 ${nd}건`:""} · 시트 반영 대기`});
     }catch(e){
       console.error("[recv_qty] 큐 등록 실패",e);
       setEtaMsg({ok:false,text:"시트 반영 요청 실패 — 다시 시도해주세요"});
@@ -1563,7 +1568,12 @@ function ScheduleTab(){
                           <td style={{...colTd,textAlign:"right",whiteSpace:"nowrap",...(remain>0?{fontWeight:800,color:"#EA580C"}:{color:"#94A3B8"})}}>{remain.toLocaleString()}</td>
                           <td style={{...colTd,whiteSpace:"nowrap",textAlign:"center"}}>{has(o.eta)?o.eta:"-"}</td>
                           <td style={{...colTd,whiteSpace:"nowrap",textAlign:"center",...(revisedDiff?{color:"#2563EB",fontWeight:700}:{})}}>{has(o.revisedEta)?o.revisedEta:"-"}</td>
-                          <td style={{...colTd,whiteSpace:"nowrap",textAlign:"center"}}>{has(o.receivedDate)?o.receivedDate:"-"}</td>
+                          <td style={{...colTd,whiteSpace:"nowrap",textAlign:"center"}}>
+                            <input type="date" value={recvDates[o.id]??""} title="실입고일 입력 (비우면 상단 입고일 사용)"
+                              onChange={e=>{const v=e.target.value;setRecvDates(p=>({...p,[o.id]:v}));}}
+                              style={{width:"100%",boxSizing:"border-box",padding:"2px 3px",borderRadius:5,border:"1px solid #CBD5E1",fontSize:11,color:recvDates[o.id]?"#0F766E":"#94A3B8",fontWeight:recvDates[o.id]?700:400,background:"#FFF"}} />
+                            <div title="시트 실입고일" style={{marginTop:2,fontSize:10,color:"#94A3B8"}}>현재 {has(o.receivedDate)?o.receivedDate:"-"}</div>
+                          </td>
                           {isPrint&&<td style={{...colTd,...oneLine}} title={o.baseFactory||""}>{o.baseFactory||"-"}</td>}
                         </tr>);
                       })}
@@ -1577,7 +1587,7 @@ function ScheduleTab(){
                       </tr>
                     </tbody>
                   </table>
-                  {(()=>{const n=g.events.filter(o=>recvVal(o)>0).length;const busy=recvBusy===g.key;return(
+                  {(()=>{const n=g.events.filter(o=>recvVal(o)>0||recvDates[o.id]).length;const busy=recvBusy===g.key;return(
                   <div style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:10,padding:"8px 10px",borderTop:"1px solid #EEF2F6",background:"#FAFAF9"}}>
                     <span style={{fontSize:11,color:"#94A3B8"}}>{recvRound}회차 · {recvDate||"-"} · 입력 {n}건</span>
                     <button onClick={()=>submitRecvQty(g)} disabled={busy||n===0}
