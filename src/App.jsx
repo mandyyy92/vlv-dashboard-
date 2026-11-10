@@ -1238,7 +1238,7 @@ function ScheduleTab(){
   };
 
   return(<>
-    {etaMsg&&<div style={{position:"fixed",top:16,left:"50%",transform:"translateX(-50%)",zIndex:1100,padding:"10px 18px",borderRadius:10,fontSize:14,fontWeight:700,boxShadow:"0 8px 24px rgba(15,23,42,0.18)",...(etaMsg.ok?{background:"#DCFCE7",color:"#15803D",border:"1px solid #86EFAC"}:{background:"#FEE2E2",color:"#B91C1C",border:"1px solid #FCA5A5"})}}>{etaMsg.text}</div>}
+    {etaMsg&&selectedDay&&<div style={{position:"fixed",top:16,left:"50%",transform:"translateX(-50%)",zIndex:1100,padding:"10px 18px",borderRadius:10,fontSize:14,fontWeight:700,boxShadow:"0 8px 24px rgba(15,23,42,0.18)",...(etaMsg.ok?{background:"#DCFCE7",color:"#15803D",border:"1px solid #86EFAC"}:{background:"#FEE2E2",color:"#B91C1C",border:"1px solid #FCA5A5"})}}>{etaMsg.text}</div>}
     {/* 헤더 */}
     <div style={{background:"#FFF",borderRadius:14,padding:"20px 28px",border:"1px solid #E2E8F0",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
       <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -1360,7 +1360,7 @@ function ScheduleTab(){
     <SectionCard title={`${year}년 ${month+1}월 · ${track==="print"?"프린팅 외주":"생산"}`} actions={
       <div style={{display:"flex",alignItems:"center",gap:14}}>
         {/* 포털 iframe 안에서는 화면 상단 고정 안내가 스크롤 밖이라 안 보임 → 캘린더 제목 줄에도 같은 안내 */}
-        {etaMsg&&<span style={{fontSize:12,fontWeight:700,padding:"4px 10px",borderRadius:6,whiteSpace:"nowrap",...(etaMsg.ok?{background:"#DCFCE7",color:"#15803D",border:"1px solid #86EFAC"}:{background:"#FEE2E2",color:"#B91C1C",border:"1px solid #FCA5A5"})}}>{etaMsg.text}</span>}
+        {etaMsg&&!selectedDay&&<span style={{fontSize:12,fontWeight:700,padding:"4px 10px",borderRadius:6,whiteSpace:"nowrap",...(etaMsg.ok?{background:"#DCFCE7",color:"#15803D",border:"1px solid #86EFAC"}:{background:"#FEE2E2",color:"#B91C1C",border:"1px solid #FCA5A5"})}}>{etaMsg.text}</span>}
         <div style={{display:"flex",alignItems:"center",gap:10,fontSize:12,fontWeight:600,color:"#475569",flexWrap:"wrap"}}>
           {Object.entries(track==="print"?PRINT_STATUS_COLOR:ORDER_STATUS_COLOR).map(([label,c])=>(
             <span key={label} style={{display:"inline-flex",alignItems:"center",gap:4}}>
