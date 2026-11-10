@@ -1201,11 +1201,13 @@ function ScheduleTab(){
     }
   };
   // 카드 드래그 — 잔량 0 카드는 드래그 불가
+  // dragstart 안에서 바로 setState → 리렌더로 칸 스타일이 바뀌면 Chrome 이 드래그를 즉시 취소하는 경우가 있어 다음 틱으로 미룸.
+  // 잔량 0 카드는 드래그를 막고 이유를 인라인 안내(그냥 안 움직이면 고장으로 보임).
   const cardDragProps=(g,dayStr)=>g.totalRemain>0?{
     draggable:true,
-    onDragStart:e=>{e.stopPropagation();e.dataTransfer.effectAllowed="move";try{e.dataTransfer.setData("text/plain",g.key);}catch(_){}setDragging({key:g.key,date:dayStr,events:g.events});},
-    onDragEnd:()=>{setDragging(null);setDropDay(null);},
-  }:{draggable:false,onDragStart:e=>e.preventDefault()};
+    onDragStart:e=>{e.stopPropagation();e.dataTransfer.effectAllowed="move";try{e.dataTransfer.setData("text/plain",g.key);}catch(_){}const d={key:g.key,date:dayStr,events:g.events};setTimeout(()=>setDragging(d),0);},
+    onDragEnd:()=>{setTimeout(()=>{setDragging(null);setDropDay(null);},0);},
+  }:{draggable:true,onDragStart:e=>{e.preventDefault();e.stopPropagation();setEtaMsg({ok:false,text:"입고 완료(잔량 0) 카드는 옮길 수 없습니다"});}};
   const cardDragStyle=(g,dayStr)=>({cursor:g.totalRemain>0?"grab":"default",opacity:dragging&&dragging.key===g.key&&dragging.date===dayStr?0.5:1});
   const dropOnDay=(dayStr)=>{
     const d=dragging;
