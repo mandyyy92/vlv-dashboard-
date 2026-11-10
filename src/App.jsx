@@ -217,10 +217,26 @@ async function enqueueRecvQty(source,entries,round,date){
 // sheet_edit_queue 의 pending / error 행 → {row_key:{status,message}} (같은 row_key 는 error 우선). 실패해도 빈 객체.
 async function fetchSheetQueue(source){
   try{
-    const r=await fetch(`${SUPABASE_URL}/rest/v1/sheet_edit_queue?select=row_key,status,message&target=eq.${source}&status=in.(pending,error)`,{headers:sbHeaders});
+    const r=await fetch(`${SUPABASE_URL}/rest/v1/sheet_edit_queue?select=id,row_key,field,status,message&target=eq.${source}&status=in.(pending,error)`,{headers:sbHeaders});
     if(!r.ok){console.warn("[sheet_edit_queue] 응답 실패",r.status);return{};}
+    const open=(await r.json())||[];
+    if(open.length===0)return{};
+    // 같은 row_key·field 에 더 나중에 성공(done)한 요청이 있으면 예전 실패는 해결된 것 → 뱃지에서 제외
+    const minId=Math.min(...open.map(x=>x.id));
+    const keys=[...new Set(open.map(x=>String(x.row_key)))];
+    let later=[];
+    try{
+      const inList=keys.map(k=>`"${k.replace(/"/g,'\\"')}"`).join(",");
+      const r2=await fetch(`${SUPABASE_URL}/rest/v1/sheet_edit_queue?select=id,row_key,field,status&target=eq.${source}&status=eq.done&id=gt.${minId}&row_key=in.(${encodeURIComponent(inList)})`,{headers:sbHeaders});
+      if(r2.ok)later=(await r2.json())||[];
+    }catch(_){}
+    const lastDone={};
+    later.forEach(x=>{const k=`${x.row_key}|${x.field}`;lastDone[k]=Math.max(lastDone[k]||0,x.id);});
     const m={};
-    ((await r.json())||[]).forEach(x=>{const k=String(x.row_key);if(!m[k]||x.status==="error")m[k]={status:x.status,message:x.message||""};});
+    open.forEach(x=>{
+      if((lastDone[`${x.row_key}|${x.field}`]||0)>x.id)return;
+      const k=String(x.row_key);if(!m[k]||x.status==="error")m[k]={status:x.status,message:x.message||""};
+    });
     return m;
   }catch(e){console.warn("[sheet_edit_queue] 호출 실패",e);return{};}
 }
