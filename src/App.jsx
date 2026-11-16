@@ -214,6 +214,18 @@ async function enqueueRecvQty(source,entries,round,date){
   });
   if(!q.ok)throw new Error(`시트 반영 요청 실패 (${q.status})`);
 }
+// '입고 완료' 지정 시 → 실입고일이 비어 있는 행만 sheet_edit_queue field received_date insert. Apps Script 가 시트 대표 '실입고일' 칸에 씀.
+// rows: [{source,rowKey,date}] · 반환: 등록 건수
+async function enqueueReceivedDate(rows){
+  const body=rows.filter(x=>x.rowKey!=null&&x.rowKey!==""&&/^20\d\d-\d\d-\d\d$/.test(x.date||""))
+    .map(x=>({target:x.source,row_key:x.rowKey,field:"received_date",new_value:x.date,requested_by:"dashboard"}));
+  if(body.length===0)return 0;
+  const q=await fetch(`${SUPABASE_URL}/rest/v1/sheet_edit_queue`,{
+    method:"POST",headers:{...sbHeaders,Prefer:"return=minimal"},body:JSON.stringify(body),
+  });
+  if(!q.ok)throw new Error(`시트 반영 요청 실패 (${q.status})`);
+  return body.length;
+}
 // sheet_edit_queue 의 pending / error 행 → {row_key:{status,message}} (같은 row_key 는 error 우선). 실패해도 빈 객체.
 async function fetchSheetQueue(source){
   try{
@@ -1127,6 +1139,22 @@ function ScheduleTab(){
   const shownWaitCards=activeWaitFilter?waitCards.filter(c=>c.stLabel===activeWaitFilter):waitCards;
   const trackLabel=track==="print"?"프린팅 외주":"생산";
 
+  // '입고 완료'로 바꾸면 실입고일 없는 옵션에 날짜 보냄 — 행별 입력 > 반영한 날짜 > 서랍 입고일(기본 오늘). 실패해도 상태 변경은 유지.
+  const sendDoneDates=async(groups)=>{
+    const rows=groups.flatMap(g=>g.events||[])
+      .filter(o=>o.receivedDate==null||o.receivedDate==="")
+      .map(o=>({source:o.source,rowKey:o.rowKey,date:recvDates[o.id]||recvSent[o.id]?.date||recvDate}));
+    try{
+      const n=await enqueueReceivedDate(rows);
+      if(n){
+        setSheetQueue(p=>{const m={...p};rows.forEach(x=>{if(x.rowKey!=null&&x.rowKey!=="")m[String(x.rowKey)]={status:"pending",message:""};});return m;});
+        setEtaMsg({ok:true,text:`입고 완료 · 실입고일 ${n}건 시트 반영 대기`});
+      }
+    }catch(e){
+      console.error("[received_date] 큐 등록 실패",e);
+      setEtaMsg({ok:false,text:"입고 완료는 저장됐지만 실입고일 시트 반영 요청 실패 — 다시 시도해주세요"});
+    }
+  };
   // 상태 직접 변경 — 낙관적 업데이트 후 order_status upsert, 성공하면 뷰를 다시 조회해 화면 갱신.
   const changeStatus=async(group,newStatus)=>{
     const key=group.key;
@@ -1138,6 +1166,7 @@ function ScheduleTab(){
     setStatusBusy(key);setStatusError(null);
     try{
       await saveOrderStatus(key,group.rep.source,newStatus);
+      if(isDoneStatus(newStatus))await sendDoneDates([group]);
       await Promise.all([reloadCalendar(),reloadUpcoming(),reloadWait()]);
     }catch(e){
       console.error("[order_status] 저장 실패",e);
@@ -1157,6 +1186,7 @@ function ScheduleTab(){
     try{
       await Promise.all(targets.map(g=>saveOrderStatus(g.key,g.rep.source,newStatus)));
       setEtaMsg({ok:true,text:`상태 ${targets.length}건 → ${newStatus}`});
+      if(isDoneStatus(newStatus))await sendDoneDates(targets);
       await Promise.all([reloadCalendar(),reloadUpcoming(),reloadWait()]);
     }catch(e){
       console.error("[order_status] 일괄 저장 실패",e);
