@@ -933,6 +933,8 @@ function ScheduleTab(){
   const[bulkEta,setBulkEta]=useState({}); // 프린팅 외주 서랍 — 업체·차수 카드별 조정입고일 일괄 입력값 {cardKey:'YYYY-MM-DD'}
   const[etaInputRev,setEtaInputRev]=useState(0); // 서랍 date input 리마운트 키 — 저장 실패 시 원래 값으로 복원
   const etaTimerRef=useRef(null); // 서랍 date input 입력 debounce
+  const recvMainTimerRef=useRef(null); // 서랍 상품별 실입고일 input 입력 debounce
+  const[recvMainSent,setRecvMainSent]=useState({}); // 서랍 상품별 실입고일 반영 요청값 {group key: 'YYYY-MM-DD'} — 시트 동기화 전에도 칸에 유지
   const[recvRound,setRecvRound]=useState(1); // 서랍 실입고 회차(1~6) → sheet_edit_queue field recv_qty_N / recv_date_N
   const[recvDate,setRecvDate]=useState(()=>{const t=new Date();return`${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,"0")}-${String(t.getDate()).padStart(2,"0")}`;}); // 서랍 실입고일 — 기본 오늘
   const[recvInputs,setRecvInputs]=useState({}); // 서랍 입고수량 입력 {event id: string} — 초기값 비움
@@ -1009,6 +1011,18 @@ function ScheduleTab(){
       if(seq===calReqRef.current){setCalEvents(rows);setSheetQueue(queue);}
     }finally{if(seq===calReqRef.current)setCalLoading(false);}
   },[monthRange.from,monthRange.to,track]);
+  // 시트 반영 대기 중이면 1분마다 조용히 다시 조회(로딩 표시 없이) → 누적 수량·실입고일·'반영됨' 자동 갱신, 대기 없어지면 멈춤
+  useEffect(()=>{
+    if(!Object.values(sheetQueue).some(x=>x&&x.status==="pending"))return;
+    const t=setInterval(async()=>{
+      const seq=++calReqRef.current;
+      try{
+        const[rows,queue]=await Promise.all([fetchCalendarEvents(monthRange.from,monthRange.to,[track]),fetchSheetQueue(track)]);
+        if(seq===calReqRef.current){setCalEvents(rows);setSheetQueue(queue);}
+      }catch(e){console.warn("[sheet_edit_queue] 자동 갱신 실패",e);}
+    },60000);
+    return()=>clearInterval(t);
+  },[sheetQueue,monthRange.from,monthRange.to,track]);
   const reloadUpcoming=useCallback(async()=>{
     setUpcomingEvents(await fetchCalendarEvents(weekRange.monday,null));
   },[weekRange.monday]);
@@ -1670,6 +1684,35 @@ function ScheduleTab(){
             style={{padding:"3px 6px",borderRadius:6,border:"1px solid #CBD5E1",fontSize:12,color:"#1E293B",background:done?"#F1F5F9":"#FFF",cursor:done?"not-allowed":"pointer"}} />
         </label>);
       };
+      // 상품별 실입고일 — 고르면 이 상품 옵션 전체를 시트 대표 '실입고일' 칸에 반영(sheet_edit_queue received_date). 옵션별 날짜가 다르면 빈칸으로 표시.
+      const recvMainInput=(g)=>{
+        const ds=[...new Set(g.events.map(o=>o.receivedDate||""))];
+        const cur=recvMainSent[g.key]??(ds.length===1?ds[0]:"");
+        const commit=async(v)=>{
+          clearTimeout(recvMainTimerRef.current);
+          if(!/^20\d\d-\d\d-\d\d$/.test(v)||v===cur)return;
+          const rows=g.events.map(o=>({source:o.source,rowKey:o.rowKey,date:v}));
+          try{
+            const n=await enqueueReceivedDate(rows);
+            if(!n){setEtaMsg({ok:false,text:"실입고일을 보낼 옵션이 없습니다"});return;}
+            setRecvMainSent(p=>({...p,[g.key]:v}));
+            setSheetQueue(p=>{const m={...p};rows.forEach(x=>{if(x.rowKey!=null&&x.rowKey!=="")m[String(x.rowKey)]={status:"pending",message:""};});return m;});
+            setEtaMsg({ok:true,text:`실입고일 ${v} · ${n}건 시트 반영 대기`});
+          }catch(e){
+            console.error("[received_date] 큐 등록 실패",e);
+            setEtaMsg({ok:false,text:"실입고일 시트 반영 요청 실패 — 다시 시도해주세요"});
+            setEtaInputRev(r=>r+1);
+          }
+        };
+        return(<label onClick={e=>e.stopPropagation()} title="실입고일 — 고르면 이 상품 옵션 전체의 시트 '실입고일' 칸에 들어갑니다" style={{display:"inline-flex",alignItems:"center",gap:4,flexShrink:0,fontSize:11,fontWeight:600,color:"#64748B",whiteSpace:"nowrap"}}>
+          실입고일
+          <input type="date" key={`r|${g.key}|${cur}|${etaInputRev}`} defaultValue={cur}
+            onChange={e=>{const v=e.target.value;clearTimeout(recvMainTimerRef.current);if(v)recvMainTimerRef.current=setTimeout(()=>commit(v),800);}}
+            onBlur={e=>commit(e.target.value)}
+            onKeyDown={e=>{if(e.key==="Enter")e.currentTarget.blur();}}
+            style={{padding:"3px 6px",borderRadius:6,border:`1px solid ${cur?"#86EFAC":"#CBD5E1"}`,fontSize:12,color:cur?"#15803D":"#1E293B",fontWeight:cur?700:400,background:cur?"#F0FDF4":"#FFF",cursor:"pointer"}} />
+        </label>);
+      };
       const qtyText=(remain,received)=>remain>0?`잔량 ${remain.toLocaleString()}장`:`입고 ${received.toLocaleString()}장`;
       const miniBadge=(label,color,bg)=><span style={{flexShrink:0,fontSize:11,fontWeight:700,color,background:bg,borderRadius:4,padding:"1px 6px",whiteSpace:"nowrap"}}>{label}</span>;
       return(
@@ -1737,6 +1780,7 @@ function ScheduleTab(){
                       {revised&&miniBadge("조정","#475569","#E2E8F0")}
                       {queueBadge(g.events)}
                       {etaInput(g)}
+                    {recvMainInput(g)}
                       {statusPicker(g)}
                     </div>
                     {delayReason&&<div style={{padding:"0 12px 10px 58px",marginTop:-4,fontSize:12,color:"#94A3B8",lineHeight:1.5,overflowWrap:"anywhere"}}>{delayReason}</div>}
@@ -1759,6 +1803,7 @@ function ScheduleTab(){
                   <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
                     {queueBadge(g.events)}
                     {etaInput(g)}
+                    {recvMainInput(g)}
                     {statusPicker(g)}
                   </div>
                 </div>
