@@ -924,6 +924,7 @@ function ScheduleTab(){
   const[recvRound,setRecvRound]=useState(1); // 서랍 실입고 회차(1~6) → sheet_edit_queue field recv_qty_N / recv_date_N
   const[recvDate,setRecvDate]=useState(()=>{const t=new Date();return`${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,"0")}-${String(t.getDate()).padStart(2,"0")}`;}); // 서랍 실입고일 — 기본 오늘
   const[recvInputs,setRecvInputs]=useState({}); // 서랍 입고수량 입력 {event id: string} — 초기값 비움
+  const[recvSent,setRecvSent]=useState({}); // 시트 반영 요청한 값 {event id:{qty,date,base}} — 반영 후에도 입력칸에 계속 표시(base=요청 시점 시트 누적, 바뀌면 시트 반영 완료)
   const[recvDates,setRecvDates]=useState({}); // 서랍 행별 실입고일 입력 {event id: 'YYYY-MM-DD'} — 비우면 상단 입고일 사용
   const[recvBusy,setRecvBusy]=useState(null); // 시트 반영 중인 블록 key
   const calEventsRef=useRef([]);
@@ -1175,6 +1176,7 @@ function ScheduleTab(){
     try{
       await enqueueRecvQty(g.events[0].source,entries.map(x=>({rowKey:x.o.rowKey,qty:x.qty,date:x.date})),recvRound,recvDate);
       setSheetQueue(p=>{const n={...p};entries.forEach(x=>{n[String(x.o.rowKey)]={status:"pending",message:""};});return n;});
+      setRecvSent(p=>{const n={...p};entries.forEach(x=>{const prev=p[x.o.id];n[x.o.id]={qty:x.qty>0?x.qty:(prev?.qty||0),date:x.date||recvDate,base:x.o.received??null};});return n;});
       setRecvInputs(p=>{const n={...p};entries.forEach(x=>{delete n[x.o.id];});return n;});
       setRecvDates(p=>{const n={...p};entries.forEach(x=>{delete n[x.o.id];});return n;});
       const nq=entries.filter(x=>x.qty>0).length,nd=entries.length-nq;
@@ -1507,7 +1509,9 @@ function ScheduleTab(){
       const colTd={padding:"5px 4px",fontSize:11,color:"#334155",borderBottom:"1px solid #F1F5F9",verticalAlign:"top"};
       const oneLine={whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"};
       const closePanel=()=>{setStatusMenu(null);setSelectedDay(null);setSelectedCard(null);setRecvInputs({});};
-      const recvVal=(o)=>{const n=Number(recvInputs[o.id]);return Number.isFinite(n)&&n>0?n:0;}; // 입력 중 잔량 재계산용
+      const recvTyped=(o)=>{const n=Number(recvInputs[o.id]);return Number.isFinite(n)&&n>0?n:0;}; // 아직 반영 안 한 입력값
+      const sentSynced=(o)=>{const x=recvSent[o.id];return !!x&&String(o.received??"")!==String(x.base??"");}; // 시트 누적이 요청 후 바뀌었으면 반영 완료
+      const recvVal=(o)=>{const t=recvTyped(o);if(t)return t;const x=recvSent[o.id];return x&&x.qty>0&&!sentSynced(o)?x.qty:0;}; // 잔량 재계산용(입력값 또는 반영 대기 값)
       const isPrint=track==="print"; // 프린팅 외주 전용: 업체·차수 카드 → 상품 블록(접힘), 옵션표 '베이스 업체' 열, 지연 사유
       // 프린팅 외주: 클릭한 카드(업체·차수)만. 셀 클릭이면 그 날짜 카드 전체.
       const dayCards=isPrint?groupPrintCards(dayEvents):[];
@@ -1580,18 +1584,18 @@ function ScheduleTab(){
                           <td style={{...colTd,...oneLine}} title={opt||""}>{opt||"-"}</td>
                           <td style={{...colTd,textAlign:"right",fontWeight:700,color:"#0F172A",whiteSpace:"nowrap"}}>{(Number(o.qty)||0).toLocaleString()}</td>
                           <td style={{...colTd,textAlign:"right",whiteSpace:"nowrap"}}>
-                            <input type="number" min={0} step={1} inputMode="numeric" value={recvInputs[o.id]??""} placeholder="0"
+                            <input type="number" min={0} step={1} inputMode="numeric" value={recvInputs[o.id]??(recvSent[o.id]?.qty||"")} placeholder="0"
                               onChange={e=>{const v=e.target.value;setRecvInputs(p=>({...p,[o.id]:v}));}}
-                              style={{width:"100%",boxSizing:"border-box",padding:"3px 5px",borderRadius:5,border:"1px solid #CBD5E1",fontSize:11,fontWeight:700,textAlign:"right",color:"#0F766E",background:"#FFF"}} />
-                            <div title="시트 실입고 총수량" style={{marginTop:2,fontSize:10,color:"#94A3B8"}}>누적 {recNum!==null?recNum.toLocaleString():"-"}</div>
+                              style={{width:"100%",boxSizing:"border-box",padding:"3px 5px",borderRadius:5,border:`1px solid ${recvInputs[o.id]==null&&recvSent[o.id]?.qty?"#99F6E4":"#CBD5E1"}`,fontSize:11,fontWeight:700,textAlign:"right",color:"#0F766E",background:recvInputs[o.id]==null&&recvSent[o.id]?.qty?"#F0FDFA":"#FFF"}} />
+                            <div title="시트 실입고 총수량" style={{marginTop:2,fontSize:10,color:"#94A3B8"}}>누적 {recNum!==null?recNum.toLocaleString():"-"}{recvInputs[o.id]==null&&recvSent[o.id]&&<span style={{marginLeft:4,fontWeight:700,color:sentSynced(o)?"#16A34A":"#64748B"}}>{sentSynced(o)?"· 반영됨":"· 반영 대기"}</span>}</div>
                           </td>
                           <td style={{...colTd,textAlign:"right",whiteSpace:"nowrap",...(remain>0?{fontWeight:800,color:"#EA580C"}:{color:"#94A3B8"})}}>{remain.toLocaleString()}</td>
                           <td style={{...colTd,whiteSpace:"nowrap",textAlign:"center"}}>{has(o.eta)?o.eta:"-"}</td>
                           <td style={{...colTd,whiteSpace:"nowrap",textAlign:"center",...(revisedDiff?{color:"#2563EB",fontWeight:700}:{})}}>{has(o.revisedEta)?o.revisedEta:"-"}</td>
                           <td style={{...colTd,whiteSpace:"nowrap",textAlign:"center"}}>
-                            <input type="date" value={recvDates[o.id]??""} title="실입고일 입력 (비우면 상단 입고일 사용)"
+                            <input type="date" value={recvDates[o.id]??(recvSent[o.id]?.date||"")} title="실입고일 입력 (비우면 상단 입고일 사용)"
                               onChange={e=>{const v=e.target.value;setRecvDates(p=>({...p,[o.id]:v}));}}
-                              style={{width:"100%",boxSizing:"border-box",padding:"2px 3px",borderRadius:5,border:"1px solid #CBD5E1",fontSize:11,color:recvDates[o.id]?"#0F766E":"#94A3B8",fontWeight:recvDates[o.id]?700:400,background:"#FFF"}} />
+                              style={{width:"100%",boxSizing:"border-box",padding:"2px 3px",borderRadius:5,border:"1px solid #CBD5E1",fontSize:11,color:(recvDates[o.id]??recvSent[o.id]?.date)?"#0F766E":"#94A3B8",fontWeight:(recvDates[o.id]??recvSent[o.id]?.date)?700:400,background:recvDates[o.id]==null&&recvSent[o.id]?.date?"#F0FDFA":"#FFF"}} />
                             <div title="시트 실입고일" style={{marginTop:2,fontSize:10,color:"#94A3B8"}}>현재 {has(o.receivedDate)?o.receivedDate:"-"}</div>
                           </td>
                           {isPrint&&<td style={{...colTd,...oneLine}} title={o.baseFactory||""}>{o.baseFactory||"-"}</td>}
@@ -1607,7 +1611,7 @@ function ScheduleTab(){
                       </tr>
                     </tbody>
                   </table>
-                  {(()=>{const n=g.events.filter(o=>recvVal(o)>0||recvDates[o.id]).length;const busy=recvBusy===g.key;return(
+                  {(()=>{const n=g.events.filter(o=>recvTyped(o)>0||recvDates[o.id]).length;const busy=recvBusy===g.key;return(
                   <div style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:10,padding:"8px 10px",borderTop:"1px solid #EEF2F6",background:"#FAFAF9"}}>
                     <span style={{fontSize:11,color:"#94A3B8"}}>{recvRound}회차 · {recvDate||"-"} · 입력 {n}건</span>
                     <button onClick={()=>submitRecvQty(g)} disabled={busy||n===0}
