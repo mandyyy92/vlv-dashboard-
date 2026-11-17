@@ -8,7 +8,7 @@
 // 재고는 v_option_current_stock 뷰 읽기만 한다(보호 테이블 직접 접근 없음).
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  sbAll, loadExcelJS, downloadBlob, XLSX_MIME, FS_SUPPORTED, IN_IFRAME,
+  sbAll, loadExcelJS, downloadBlob, XLSX_MIME, FS_SUPPORTED,
   idbGet, idbSet, ensurePermission, writeFile, readTable, S,
 } from './PrintPoTab';
 
@@ -358,25 +358,9 @@ export default function BaseExtraShipTab() {
       <div style={S.card}>
         <div style={{ ...S.bar, justifyContent: 'space-between' }}>
           <h3 style={S.title}><span style={S.step}>1</span>나염 차수 선택</h3>
-          <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 12, color: '#64748b' }}>
-            {rootDir ? <>📁 <b style={{ color: '#0f172a' }}>{rootDir.name}</b></> : '폴더 미연결'}
-            {FS_SUPPORTED && !IN_IFRAME && <button style={{ ...S.btn(!rootDir, false), fontSize: 12, padding: '5px 10px' }} onClick={() => connectFolder(false)}>{rootDir ? '변경' : '📁 02_나염 폴더 연결'}</button>}
-            {rootDir && <button style={{ ...S.btn(false, scanning), fontSize: 12, padding: '5px 10px' }} disabled={scanning} onClick={() => scan()}>{scanning ? '읽는 중…' : tree ? '🔄 다시 읽기' : '폴더 읽기'}</button>}
-          </span>
         </div>
-        {!FS_SUPPORTED && <div style={S.msg('err')}>이 브라우저는 폴더 접근을 지원하지 않습니다 — Chrome 또는 Edge 에서 열어주세요</div>}
-        {FS_SUPPORTED && IN_IFRAME && (
-          // 오랩 등 다른 페이지 안(iframe)에서는 크롬이 폴더 선택 창을 막음 → 이 메뉴를 새 탭에서 바로 열기
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', padding: '10px 12px', borderRadius: 8, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
-            <button style={S.btn(true, false)}
-              onClick={() => window.open(`${window.location.origin}${window.location.pathname}?tab=print&sub=baseextra`, '_blank', 'noopener')}>
-              ↗ 새 탭에서 열어 폴더 연결
-            </button>
-            <span style={{ fontSize: 12, color: '#64748b' }}>오랩 화면 안에서는 브라우저가 공유 폴더 접근을 막습니다 — 새 탭에서 이 메뉴가 바로 열립니다</span>
-          </div>
-        )}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 8, padding: '10px 12px', borderRadius: 8, border: '1px dashed #cbd5e1', background: sel?.local ? '#eef2ff' : '#fff' }}>
-          <b style={{ fontSize: 12.5, color: '#334155' }}>폴더 연결 없이</b>
+          <b style={{ fontSize: 12.5, color: '#334155' }}>파일 선택</b>
           <label style={{ ...S.btn(false, false), fontSize: 12, padding: '5px 10px' }}>
             📂 차수 폴더 선택
             <input type="file" webkitdirectory="" directory="" multiple style={{ display: 'none' }} onChange={(e) => { openLocal(e.target.files); e.target.value = ''; }} />
@@ -393,7 +377,6 @@ export default function BaseExtraShipTab() {
             <button style={{ ...S.btn(false, false), fontSize: 12, padding: '4px 8px' }} onClick={() => connectFolder(true)}>기본 위치로 다시 열기</button>
           </div>
         )}
-        {rootDir && !tree && !scanning && <div style={{ fontSize: 12.5, color: '#64748b' }}>‘폴더 읽기’를 누르면 업체별 차수 폴더를 불러옵니다. (\\172.16.1.200\v팀\04_생산\06_외주업체 의뢰\02_나염)</div>}
         {tree && !tree.length && <div style={S.msg('err')}>‘_입고’ 업체 폴더를 찾지 못했습니다 — 02_나염 폴더를 연결해주세요</div>}
         {tree && tree.map((vd) => (
           <div key={vd.name} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '8px 0', borderTop: '1px solid #f1f5f9' }}>
