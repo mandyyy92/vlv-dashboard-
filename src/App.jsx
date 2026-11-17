@@ -6,6 +6,7 @@ import ReferenceItemForm from "./components/ReferenceItemForm";
 import ReferenceItemCard from "./components/ReferenceItemCard";
 import ProductionDashboard, { ProductDB } from "./ProductionDashboard";
 import VendorChatSummary from "./components/VendorChatSummary";
+import VendorAddressTab from "./components/VendorAddressTab";
 import StockCheckTab from "./components/StockCheckTab";
 import PrintPoTab from "./components/PrintPoTab";
 import BaseExtraShipTab from "./components/BaseExtraShipTab";
@@ -7723,6 +7724,7 @@ export default function Dashboard(){
     {id:"productdb",label:"제품 DB",icon:"🗃",hidden:true}, // 메뉴에서만 숨김(컴포넌트·데이터 유지)
     {id:"planning",label:"아이템 기획",icon:"💡",hidden:true},
     {id:"sample",label:"작업지시서",icon:"📝",hidden:true}, // 메뉴에서만 숨김(컴포넌트·데이터 유지)
+    {id:"vendoraddr",label:"업체 주소",icon:"📍"},
     {id:"vendorchat",label:"업체 소통 요약",icon:"💬"},
     {id:"stockcheck",label:"재고/바코드 점검",icon:"🔻"},
     {id:"measure",label:"실측 사이즈",icon:"📐",hidden:true},
@@ -7778,6 +7780,7 @@ export default function Dashboard(){
         {activeTab==="schedule"&&<ScheduleTab />}
         {activeTab==="price"&&<PriceTab />}
         {activeTab==="sample"&&<SampleTabWorkorder />}
+        {activeTab==="vendoraddr"&&<VendorAddressTab />}
         {activeTab==="vendorchat"&&<VendorChatSummary />}
         {activeTab==="stockcheck"&&<StockCheckTab />}
         {activeTab==="print"&&<PrintOutsourcingTab />}
