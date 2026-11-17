@@ -369,7 +369,6 @@ export default function BaseExtraShipTab() {
             📄 엑셀 파일 선택
             <input type="file" accept=".xlsx" multiple style={{ display: 'none' }} onChange={(e) => { openLocal(e.target.files); e.target.value = ''; }} />
           </label>
-          <span style={{ fontSize: 12, color: '#64748b' }}>예: 02_나염_국제프린팅_입고차 폴더 (또는 그 안의 베이스출고 · 정상입고 파일) → 결과 엑셀은 다운로드되니 차수 폴더에 옮겨주세요</span>
         </div>
         {folderErr && (
           <div style={{ ...S.msg('err'), display: 'flex', gap: 8, alignItems: 'center' }}>
