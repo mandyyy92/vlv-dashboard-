@@ -4675,7 +4675,7 @@ function MfsShipout(){
 // ─── MFS 출고 및 프린팅 외주 (UI 틀 · 발주 히스토리 표) ───
 // 소메뉴 4개: MFS 출고 / 발주서 작성 / 업체·단가·샘플 관리 / 발주 히스토리.
 function PrintOutsourcingTab(){
-  const [sub,setSub]=useState("po"); // mfsship | order | po | supplier | history (mfsship·order 는 숨김 → 기본 po)
+  const [sub,setSub]=useState(()=>new URLSearchParams(window.location.search).get("sub")==="baseextra"?"baseextra":"po"); // mfsship | order | po | supplier | history (mfsship·order 는 숨김 → 기본 po)
 
   const subTabs=[
     {id:"mfsship",label:"MFS 출고",hidden:true}, // 메뉴에서만 숨김 — 새 메뉴 '발주서 작성'(PrintPoTab)으로 대체
@@ -7708,7 +7708,7 @@ function OrderSheetDashboard(){
 
 // ─── Main Dashboard ───
 export default function Dashboard(){
-  const[activeTab,setActiveTab]=useState("schedule"); // 대시보드(overview) 탭 숨김 → 기본 탭을 입고 스케줄로
+  const[activeTab,setActiveTab]=useState(()=>new URLSearchParams(window.location.search).get("tab")==="print"?"print":"schedule"); // ?tab=print — 새 탭에서 바로 프린팅 외주(폴더 연결용) // 대시보드(overview) 탭 숨김 → 기본 탭을 입고 스케줄로
   const[time,setTime]=useState(new Date());
   useEffect(()=>{const t=setInterval(()=>setTime(new Date()),60000);return()=>clearInterval(t);},[]);
 

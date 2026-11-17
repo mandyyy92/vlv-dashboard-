@@ -324,7 +324,16 @@ export default function BaseExtraShipTab() {
           </span>
         </div>
         {!FS_SUPPORTED && <div style={S.msg('err')}>이 브라우저는 폴더 접근을 지원하지 않습니다 — Chrome 또는 Edge 에서 열어주세요</div>}
-        {FS_SUPPORTED && IN_IFRAME && <div style={S.msg('err')}>다른 사이트 안에 들어간 화면에서는 폴더를 열 수 없습니다 — 대시보드 주소를 새 탭으로 직접 열어주세요</div>}
+        {FS_SUPPORTED && IN_IFRAME && (
+          // 오랩 등 다른 페이지 안(iframe)에서는 크롬이 폴더 선택 창을 막음 → 이 메뉴를 새 탭에서 바로 열기
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', padding: '10px 12px', borderRadius: 8, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+            <button style={S.btn(true, false)}
+              onClick={() => window.open(`${window.location.origin}${window.location.pathname}?tab=print&sub=baseextra`, '_blank', 'noopener')}>
+              ↗ 새 탭에서 열어 폴더 연결
+            </button>
+            <span style={{ fontSize: 12, color: '#64748b' }}>오랩 화면 안에서는 브라우저가 공유 폴더 접근을 막습니다 — 새 탭에서 이 메뉴가 바로 열립니다</span>
+          </div>
+        )}
         {folderErr && (
           <div style={{ ...S.msg('err'), display: 'flex', gap: 8, alignItems: 'center' }}>
             폴더 연결 실패 — {folderErr}
