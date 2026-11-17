@@ -28,9 +28,14 @@ const EMPTY_EDIT = { ship: {}, recv: {}, bad: {}, extra: [] };
 function groupRounds(fileList) {
   const map = new Map();
   [...(fileList || [])].forEach((f) => {
-    if (!/\.xlsx$/i.test(f.name) || f.name.startsWith('~$')) return;
-    const isAdd = f.name.includes('베이스출고(추가');
-    const kind = isAdd ? 'done' : f.name.includes('베이스출고') ? 'base' : f.name.includes('정상입고') ? 'recv' : null;
+    if (f.name.startsWith('~$')) return;
+    const xl = /\.xlsx$/i.test(f.name), img = /\.(png|jpe?g)$/i.test(f.name);
+    const kind = xl && f.name.includes('베이스출고(추가') ? 'done'
+      : xl && f.name.includes('베이스출고') ? 'base'
+      : xl && f.name.includes('정상입고') ? 'recv'
+      : xl && f.name.includes('업체전달') ? 'report'   // 업체 보고(상품별 수량 · 비고에 불량)
+      : img && f.name.includes('업체전달') ? 'img'      // 업체 보고 이미지(자동 인식 불가 → 화면에 표시)
+      : null;
     if (!kind) return;
     const parts = String(f.webkitRelativePath || '').split('/');
     const roundDir = parts.find((p) => /^\d+차$/.test(p));
@@ -40,12 +45,31 @@ function groupRounds(fileList) {
     const vendor = shortVendor(vendorDir || toks.slice(1).find((t) => t && !/베이스출고|정상입고|^\d+$/.test(t)) || '');
     if (!round || !vendor) return;
     const key = `${vendor}|${round}`;
-    if (!map.has(key)) map.set(key, { key, vendor, round, base: [], recv: [], done: false });
+    if (!map.has(key)) map.set(key, { key, vendor, round, base: [], recv: [], report: [], img: [], done: false });
     const g = map.get(key);
     if (kind === 'done') g.done = true; else g[kind].push(f);
   });
   return [...map.values()].filter((g) => g.base.length || g.recv.length)
     .sort((a, b) => a.vendor.localeCompare(b.vendor) || b.round - a.round);
+}
+
+// 비고 글에서 불량 수량: '3불량원단'=3, '3불량/나염1불량'=4, '인쇄불량 1(번짐)'=1, '1벌 오염'=1, '2벌 부족'=0
+const parseBad = (text) => {
+  const t = trim(text);
+  if (!t) return 0;
+  let n = 0;
+  for (const m of t.matchAll(/(\d+)\s*(?:장|개|벌|pcs)?\s*(?:불량|오염)/gi)) n += num(m[1]);
+  if (!n) for (const m of t.matchAll(/(?:불량|오염)[가-힣]*\s*(\d+)/g)) n += num(m[1]);
+  return n;
+};
+// 업체전달 엑셀: 상품코드 · 옵션 + (불량 숫자 칸 또는 비고) → [{code,name,option,bad,text}]
+async function readReport(file) {
+  const rows = await readTable(file, ['상품코드', '옵션'], ['불량', '비고', '입고수량']);
+  return (rows || []).filter((r) => isCode(r['상품코드'])).map((r) => {
+    const text = trim(r['비고']);
+    const bad = num(r['불량']) || parseBad(text);
+    return { code: trim(r['상품코드']).toUpperCase(), name: trim(r['상품명']), option: trim(r['옵션']), bad, text };
+  }).filter((r) => r.bad > 0);
 }
 
 async function readRows(file) {
@@ -62,6 +86,32 @@ const stepTitle = (n, text, right) => (
     {right}
   </div>
 );
+
+// 업체 보고 이미지(PNG) — 글자 자동 인식은 못 하므로 화면에 띄워 보면서 불량 입력. 클릭하면 크게
+function ReportImages({ files }) {
+  const urls = useMemo(() => files.map((f) => ({ name: f.name, url: URL.createObjectURL(f) })), [files]);
+  useEffect(() => () => urls.forEach((u) => URL.revokeObjectURL(u.url)), [urls]);
+  const [open, setOpen] = useState(null);
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {urls.map((u) => (
+          <button key={u.name} type="button" onClick={() => setOpen(open === u.name ? null : u.name)} title={u.name}
+            style={{ padding: 4, borderRadius: 8, border: `1.5px solid ${open === u.name ? '#4f46e5' : '#e2e8f0'}`, background: '#fff', cursor: 'pointer', textAlign: 'center' }}>
+            <img src={u.url} alt={u.name} style={{ height: 70, maxWidth: 160, objectFit: 'contain', display: 'block' }} />
+            <span style={{ fontSize: 10.5, color: '#64748b' }}>{open === u.name ? '접기' : '크게 보기'}</span>
+          </button>
+        ))}
+      </div>
+      {urls.filter((u) => u.name === open).map((u) => (
+        <div key={u.name} style={{ marginTop: 8, border: '1px solid #e2e8f0', borderRadius: 8, padding: 8, maxHeight: 520, overflow: 'auto', background: '#f8fafc' }}>
+          <div style={{ fontSize: 11.5, color: '#64748b', marginBottom: 6 }}>{u.name}</div>
+          <img src={u.url} alt={u.name} style={{ maxWidth: '100%', display: 'block' }} />
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function BaseExtraShipTab() {
   const [rounds, setRounds] = useState(null);   // groupRounds 결과
@@ -121,13 +171,15 @@ export default function BaseExtraShipTab() {
       const bases = [], recvs = [];
       for (const f of g.base) bases.push(...(await readRows(f)));
       for (const f of g.recv) recvs.push(...(await readRows(f)));
-      setData({ bases, recvs });
+      const reports = [];
+      for (const f of g.report) { try { reports.push(...(await readReport(f))); } catch (e) { /* 서식이 다른 업체전달 파일은 건너뜀 */ } }
+      setData({ bases, recvs, reports });
       // 메모: 업체명은 정상입고 메모 표기(예: 코스타컴퍼니), 없으면 약칭
       const m = recvs.map((x) => x.memo.match(/^\d{6}_[^_]*입고_(.+?)[\s_]*\d+\s*차/)).find(Boolean);
       setMemo(`${today6()}_센터출고_${m ? m[1] : g.vendor}_${g.round}차(추가)`);
     } catch (e) {
       flash('err', `엑셀 읽기 실패 — ${String(e.message || e).slice(0, 60)}`);
-      setData({ bases: [], recvs: [] });
+      setData({ bases: [], recvs: [], reports: [] });
     } finally {
       setLoading(false);
     }
@@ -145,7 +197,7 @@ export default function BaseExtraShipTab() {
     data.bases.forEach((b) => { ensure(b.code, b.name, b.option).ship += b.qty; });
     const baseList = [...rows.values()];
     const unmatched = [];
-    data.recvs.forEach((x) => {
+    const findBase = (x) => {
       const nx = normName(x.name);
       let t = baseList.filter((r) => r.option === x.option && nx.startsWith(normName(r.name)))
         .sort((a, c) => normName(c.name).length - normName(a.name).length)[0] || null;
@@ -154,18 +206,31 @@ export default function BaseExtraShipTab() {
         const b = st ? idx.baseOf.get(`${st.group_key}|${trim(st['옵션'])}`) : null;
         if (b) t = ensure(trim(b['상품코드']), trim(b['상품명']), trim(b['옵션']));
       }
+      return t;
+    };
+    data.recvs.forEach((x) => {
+      const t = findBase(x);
       if (!t) { unmatched.push(x); return; }
       t.recv += x.qty;
+    });
+    // 업체전달 파일의 불량 → 베이스별 자동 불량
+    const autoBad = {}, autoText = {};
+    (data.reports || []).forEach((x) => {
+      const t = findBase(x);
+      if (!t) return;
+      autoBad[t.code] = (autoBad[t.code] || 0) + x.bad;
+      autoText[t.code] = [autoText[t.code], x.text || `불량 ${x.bad}`].filter(Boolean).join(' / ');
     });
     (edit.extra || []).forEach((e) => { if (!rows.has(e.code)) ensure(e.code, e.name, e.option).manual = true; });
     const list = [...rows.values()].map((r) => {
       const ship = r.code in edit.ship ? num(edit.ship[r.code]) : r.ship;
       const recv = r.code in edit.recv ? num(edit.recv[r.code]) : r.recv;
-      const bad = num(edit.bad[r.code]);
-      return { ...r, fileShip: r.ship, fileRecv: r.recv, ship, recv, bad, add: ship - recv - bad };
+      const auto = autoBad[r.code] || 0;
+      const bad = r.code in edit.bad ? num(edit.bad[r.code]) : auto;
+      return { ...r, fileShip: r.ship, fileRecv: r.recv, ship, recv, bad, autoBad: auto, autoText: autoText[r.code] || '', add: ship - recv - bad };
     });
     const tot = list.reduce((a, r) => ({ ship: a.ship + r.ship, recv: a.recv + r.recv, bad: a.bad + r.bad, add: a.add + r.add }), { ship: 0, recv: 0, bad: 0, add: 0 });
-    return { list, unmatched, tot, allZero: list.every((r) => r.add === 0) };
+    return { list, unmatched, tot, allZero: list.every((r) => r.add === 0), autoCount: Object.keys(autoBad).length, autoSum: Object.values(autoBad).reduce((a, b) => a + b, 0) };
   }, [data, idx, edit]);
 
   const setField = (field, code, v) => setEdit((p) => ({ ...p, [field]: { ...p[field], [code]: v } }));
@@ -290,6 +355,14 @@ export default function BaseExtraShipTab() {
           {loading && <div style={S.empty}>⏳ 엑셀 읽는 중…</div>}
           {!loading && calc && (
             <>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10, fontSize: 12.5 }}>
+                {calc.autoCount > 0
+                  ? <span style={{ fontWeight: 700, color: '#b45309', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '5px 10px' }}>불량 자동 반영 · 업체전달 파일에서 {calc.autoCount}개 상품 {fmt(calc.autoSum)}장</span>
+                  : sel.report.length > 0
+                    ? <span style={{ color: '#64748b' }}>업체전달 파일에 불량 기록 없음</span>
+                    : <span style={{ color: '#64748b' }}>업체전달 엑셀 없음{sel.img.length ? ' — 아래 업체 보고 이미지를 보고 불량을 입력하세요' : ''}</span>}
+              </div>
+              {sel.img.length > 0 && <ReportImages files={sel.img} />}
               <div style={{ ...S.tableWrap, maxHeight: 480, overflowY: 'auto' }}>
                 <table style={S.table}>
                   <thead><tr>
@@ -303,13 +376,16 @@ export default function BaseExtraShipTab() {
                         <td style={{ ...S.td, ...S.mono, width: 80 }}>{r.code}</td>
                         <td style={S.td}>
                           {r.name} <span style={{ color: '#64748b' }}>{r.option}</span>
+                          {r.autoText && <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 600, color: '#b45309', background: '#fffbeb', borderRadius: 4, padding: '1px 6px' }}>업체: {r.autoText}</span>}
                           {r.manual && <button type="button" onClick={() => removeExtra(r.code)} style={{ marginLeft: 8, fontSize: 11, color: '#b91c1c', background: 'none', border: 'none', cursor: 'pointer' }}>삭제</button>}
                         </td>
                         <td style={cellNum}>{numBox(r.ship, editNum('ship', r, r.fileShip), r.code in edit.ship && !r.manual)}</td>
                         <td style={cellNum}>{numBox(r.recv, editNum('recv', r, r.fileRecv), r.code in edit.recv && !r.manual)}</td>
                         <td style={cellNum}>
-                          <input type="number" min={0} value={edit.bad[r.code] ?? ''} placeholder="0" onChange={(e) => setField('bad', r.code, e.target.value)}
-                            style={{ ...S.qty, width: 56, color: '#b45309', borderColor: edit.bad[r.code] ? '#f59e0b' : '#e2e8f0' }} />
+                          <input type="number" min={0} value={r.code in edit.bad ? edit.bad[r.code] : (r.autoBad || '')} placeholder="0"
+                            title={r.autoText ? `업체전달 파일: ${r.autoText}` : ''}
+                            onChange={(e) => { const v = e.target.value; if (num(v) === r.autoBad) clearField('bad', r.code); else setField('bad', r.code, v); }}
+                            style={{ ...S.qty, width: 56, color: '#b45309', borderColor: r.bad ? '#f59e0b' : '#e2e8f0', background: r.bad ? '#fffbeb' : '#fff' }} />
                         </td>
                         <td style={{ ...cellNum, fontSize: 14, fontWeight: 800, color: r.add < 0 ? '#dc2626' : r.add > 0 ? '#0f766e' : '#cbd5e1' }}>{r.add}</td>
                       </tr>
