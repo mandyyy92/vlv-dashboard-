@@ -22,7 +22,7 @@ const vendorOfDir = (name) => String(name).replace(/^\d+_/, '').replace(/_입고
 const normName = (s) => trim(s).replace(/엘리멘트/g, '일반').replace(/시그니처/g, '기모').replace(/후디/g, '후드')
   .replace(/[♥☆()\s]/g, '').toLowerCase();
 const fmt = (n) => (Number(n) || 0).toLocaleString();
-const lsKey = (vendorDir, round) => `baseextra:${vendorDir}/${round}`;
+const lsKey = (vendor, round) => `baseextra:${vendor}/${round}`; // 업체 약칭(국제프린팅·코스타) 기준 — 폴더·파일 선택 모드 공통
 const lsGet = (k) => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* 저장 불가 환경 무시 */ } };
 
@@ -57,13 +57,26 @@ async function scanRoot(root) {
   return out;
 }
 
-async function readRows(dir, fileName) {
-  const fh = await dir.getFileHandle(fileName);
-  const rows = await readTable(await fh.getFile(), ['상품코드', '수량'], ['옵션', '상품명', '메모']);
+// 폴더 모드는 dir 핸들에서, 파일 직접 선택 모드는 File 객체(file)에서 읽는다
+async function readRows(dir, fileName, file) {
+  const f = file || await (await dir.getFileHandle(fileName)).getFile();
+  const rows = await readTable(f, ['상품코드', '수량'], ['옵션', '상품명', '메모']);
   return (rows || []).filter((r) => isCode(r['상품코드'])).map((r) => ({
     code: trim(r['상품코드']), qty: num(r['수량']), name: trim(r['상품명']), option: trim(r['옵션']), memo: trim(r['메모']), file: fileName,
   }));
 }
+
+// 파일 직접 선택 모드: '13차_정상입고_국제프린팅.xlsx' → {round:13, vendor:'국제프린팅'} ('코스타컴퍼니' → '코스타', 기존 파일명 표기)
+const guessRoundVendor = (names) => {
+  let round = 0, vendor = '';
+  names.forEach((n) => {
+    const toks = String(n).replace(/\.[^.]+$/, '').split('_');
+    if (!round) round = Number((toks[0].match(/^(\d+)\s*차/) || [])[1]) || 0;
+    const v = toks.slice(1).find((t) => t && !/베이스출고|정상입고|입고대기|MFS|^\d+$|^\(/.test(t));
+    if (!vendor && v) vendor = v.replace(/\(.*?\)/g, '').replace(/컴퍼니$/, '').trim();
+  });
+  return { round, vendor };
+};
 
 export default function BaseExtraShipTab() {
   const [rootDir, setRootDir] = useState(null);
@@ -133,7 +146,7 @@ export default function BaseExtraShipTab() {
   const openRound = async (vd, r) => {
     setSel({ vendorDir: vd.name, vendor: vd.vendor, round: r.no, dir: r.dir, done: r.done });
     setData(null); setOverArm(false);
-    const saved = lsGet(lsKey(vd.name, r.no));
+    const saved = lsGet(lsKey(vd.vendor, r.no));
     setEdit({ ship: {}, recv: {}, bad: {}, note: {}, extra: [], ...(saved || {}) });
     setFileName(`${r.no}차_베이스출고(추가)_${vd.vendor}.xlsx`);
     const fl = [];
@@ -156,7 +169,7 @@ export default function BaseExtraShipTab() {
     setLoadingRound(true);
     try {
       const bases = [], recvs = [];
-      for (const f of fl.filter((x) => x.on)) (f.kind === 'base' ? bases : recvs).push(...(await readRows(dir, f.name)));
+      for (const f of fl.filter((x) => x.on)) (f.kind === 'base' ? bases : recvs).push(...(await readRows(dir, f.name, f.file)));
       setData({ bases, recvs });
       // 메모 기본값: '오늘(KST YYMMDD)_센터출고_업체_N차(추가)' — 업체명은 정상입고 메모 표기(예: 코스타컴퍼니), 없으면 폴더 업체명
       const m = recvs.map((x) => x.memo.match(/^\d{6}_[^_]*입고_(.+?)[\s_]*\d+\s*차/)).find(Boolean);
@@ -170,6 +183,26 @@ export default function BaseExtraShipTab() {
     }
   };
 
+  // 폴더 연결 없이: 차수 폴더(또는 엑셀 파일들)를 직접 골라 계산 → 결과는 다운로드
+  const openLocal = async (fileList) => {
+    const all = [...(fileList || [])].filter((f) => /\.xlsx$/i.test(f.name) && !f.name.startsWith('~$'));
+    const fl = [];
+    all.forEach((f) => {
+      if (f.name.includes('베이스출고') && !f.name.includes('(추가')) fl.push({ name: f.name, kind: 'base', on: true, file: f });
+      else if (f.name.includes('정상입고')) fl.push({ name: f.name, kind: 'recv', on: true, file: f });
+    });
+    if (!fl.length) { flash('err', '베이스출고 · 정상입고 엑셀을 찾지 못했습니다 — 차수 폴더나 두 파일을 골라주세요'); return; }
+    fl.sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name));
+    const { round, vendor } = guessRoundVendor(fl.map((f) => f.name));
+    setSel({ vendorDir: '', vendor: vendor || '업체', round, dir: null, local: true });
+    setData(null); setOverArm(false);
+    const saved = round ? lsGet(lsKey(vendor, round)) : null;
+    setEdit({ ship: {}, recv: {}, bad: {}, note: {}, extra: [], ...(saved || {}) });
+    setFileName(`${round || 'N'}차_베이스출고(추가)_${vendor || '업체'}.xlsx`);
+    setFiles(fl);
+    await loadFiles(null, fl, round || 'N', vendor);
+  };
+
   const toggleFile = (name) => {
     const fl = files.map((f) => (f.name === name ? { ...f, on: !f.on } : f));
     setFiles(fl);
@@ -177,7 +210,7 @@ export default function BaseExtraShipTab() {
   };
 
   // 차수별 수동 입력은 브라우저에 기억(다시 열어도 불량·수정값 유지)
-  useEffect(() => { if (sel) lsSet(lsKey(sel.vendorDir, sel.round), edit); }, [edit, sel]);
+  useEffect(() => { if (sel && sel.round) lsSet(lsKey(sel.vendor, sel.round), edit); }, [edit, sel]);
 
   // 계산 행: 베이스 코드 기준으로 베이스출고·정상입고 합산
   const calc = useMemo(() => {
@@ -266,6 +299,7 @@ export default function BaseExtraShipTab() {
     if (!/\.xlsx$/i.test(fn)) { flash('err', '파일명은 .xlsx 로 끝나야 합니다'); return; }
     if (!calc.list.length) { flash('err', '저장할 행이 없습니다'); return; }
     if (allZero) { flash('neutral', '조정할 수량이 모두 0 — 파일을 만들지 않습니다'); return; }
+    if (sel.local) { await downloadOnly(); return; }
     setSaving(true);
     try {
       if (!(await ensurePermission(rootDir))) throw new Error('폴더 권한이 허용되지 않았습니다');
@@ -292,12 +326,15 @@ export default function BaseExtraShipTab() {
   const downloadOnly = async () => {
     if (!calc) return;
     if (allZero) { flash('neutral', '조정할 수량이 모두 0 — 파일을 만들지 않습니다'); return; }
-    try { downloadBlob(await buildBlob(), trim(fileName) || 'base_extra.xlsx'); } catch (e) { flash('err', '엑셀 생성 실패'); }
+    try {
+      downloadBlob(await buildBlob(), trim(fileName) || 'base_extra.xlsx');
+      flash('ok', `${trim(fileName)} 다운로드 · 합계 ${fmt(calc.tot.add)}장 — 차수 폴더에 옮겨주세요`);
+    } catch (e) { flash('err', '엑셀 생성 실패'); }
   };
 
   // ── 화면 ──
   const chip = (r, vd) => {
-    const on = sel && sel.vendorDir === vd.name && sel.round === r.no;
+    const on = sel && !sel.local && sel.vendorDir === vd.name && sel.round === r.no;
     const ready = r.hasBase && r.hasRecv;
     return (
       <button key={r.name} type="button" onClick={() => openRound(vd, r)} title={!r.hasBase ? '베이스출고 파일 없음' : !r.hasRecv ? '정상입고 파일 없음' : r.done ? '베이스출고(추가) 파일 있음' : '생성 전'}
@@ -338,6 +375,18 @@ export default function BaseExtraShipTab() {
             <span style={{ fontSize: 12, color: '#64748b' }}>오랩 화면 안에서는 브라우저가 공유 폴더 접근을 막습니다 — 새 탭에서 이 메뉴가 바로 열립니다</span>
           </div>
         )}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 8, padding: '10px 12px', borderRadius: 8, border: '1px dashed #cbd5e1', background: sel?.local ? '#eef2ff' : '#fff' }}>
+          <b style={{ fontSize: 12.5, color: '#334155' }}>폴더 연결 없이</b>
+          <label style={{ ...S.btn(false, false), fontSize: 12, padding: '5px 10px' }}>
+            📂 차수 폴더 선택
+            <input type="file" webkitdirectory="" directory="" multiple style={{ display: 'none' }} onChange={(e) => { openLocal(e.target.files); e.target.value = ''; }} />
+          </label>
+          <label style={{ ...S.btn(false, false), fontSize: 12, padding: '5px 10px' }}>
+            📄 엑셀 파일 선택
+            <input type="file" accept=".xlsx" multiple style={{ display: 'none' }} onChange={(e) => { openLocal(e.target.files); e.target.value = ''; }} />
+          </label>
+          <span style={{ fontSize: 12, color: '#64748b' }}>예: 02_나염_국제프린팅_입고차 폴더 (또는 그 안의 베이스출고 · 정상입고 파일) → 결과 엑셀은 다운로드되니 차수 폴더에 옮겨주세요</span>
+        </div>
         {folderErr && (
           <div style={{ ...S.msg('err'), display: 'flex', gap: 8, alignItems: 'center' }}>
             폴더 연결 실패 — {folderErr}
@@ -443,13 +492,13 @@ export default function BaseExtraShipTab() {
             </label>
           </div>
           <div style={{ ...S.bar, marginBottom: 0 }}>
-            <span style={{ fontSize: 12, color: '#64748b' }}>저장 위치: <b style={{ color: '#334155' }}>{sel.vendorDir}/{sel.round}차/</b> · 상품코드 | 수량 | 메모 | 상품명 | 옵션 · 합계 <b style={{ color: '#0f766e' }}>{fmt(calc.tot.add)}장</b></span>
+            <span style={{ fontSize: 12, color: '#64748b' }}>저장 위치: <b style={{ color: '#334155' }}>{sel.local ? '다운로드 폴더 (차수 폴더에 옮겨주세요)' : `${sel.vendorDir}/${sel.round}차/`}</b> · 상품코드 | 수량 | 메모 | 상품명 | 옵션 · 합계 <b style={{ color: '#0f766e' }}>{fmt(calc.tot.add)}장</b></span>
             <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
               {msg && <span style={S.msg(msg.kind)}>{msg.text}</span>}
               {allZero && <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b' }}>조정할 수량이 모두 0 — 파일 생성 안 함</span>}
-              <button style={S.btn(false, saving || allZero)} disabled={saving || allZero} onClick={downloadOnly}>다운로드만</button>
+              {!sel.local && <button style={S.btn(false, saving || allZero)} disabled={saving || allZero} onClick={downloadOnly}>다운로드만</button>}
               <button style={{ ...S.btn(true, saving || allZero), ...(overArm ? { background: '#dc2626', borderColor: '#dc2626' } : {}) }} disabled={saving || allZero} onClick={save}>
-                {saving ? '저장 중…' : overArm ? '한 번 더 누르면 덮어쓰기' : '📁 공유 폴더에 저장'}
+                {saving ? '저장 중…' : sel.local ? '⬇ 엑셀 다운로드' : overArm ? '한 번 더 누르면 덮어쓰기' : '📁 공유 폴더에 저장'}
               </button>
             </span>
           </div>
