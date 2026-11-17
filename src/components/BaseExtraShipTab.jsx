@@ -72,6 +72,33 @@ async function readReport(file) {
   }).filter((r) => r.bad > 0);
 }
 
+// 업체 보고 이미지 → 긴 변 1600px JPEG(base64) — 서버 요청 크기 제한(4.5MB) 안으로
+async function shrinkImage(file, max = 1600) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((resolve, reject) => { const i = new Image(); i.onload = () => resolve(i); i.onerror = reject; i.src = url; });
+    const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(img, 0, 0, c.width, c.height);
+    return { media_type: 'image/jpeg', data: c.toDataURL('image/jpeg', 0.85).split(',')[1] };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+// /api/defects (Claude) — 이미지에서 입고 상품코드별 불량 [{code,bad,note}]
+async function readImageDefects(imgFiles, products) {
+  const images = [];
+  for (const f of imgFiles) images.push(await shrinkImage(f));
+  const r = await fetch('/api/defects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ images, products }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `이미지 읽기 실패 (${r.status})`);
+  return j;
+}
+const aiKey = (g) => `baseextra-ai:${g.vendor}/${g.round}:${g.img.map((f) => `${f.name}:${f.size}`).sort().join('|')}`;
+
 async function readRows(file) {
   const rows = await readTable(file, ['상품코드', '수량'], ['옵션', '상품명', '메모']);
   return (rows || []).filter((r) => isCode(r['상품코드'])).map((r) => ({
@@ -126,6 +153,7 @@ export default function BaseExtraShipTab() {
   const [memo, setMemo] = useState('');
   const [fileName, setFileName] = useState('');
   const [showAdd, setShowAdd] = useState(false);
+  const [ai, setAi] = useState({ status: 'idle', items: [], msg: '' }); // 이미지 불량 읽기 상태
   const [addRow, setAddRow] = useState({ code: '', ship: '', recv: '' });
   const [msg, setMsg] = useState(null);
   const msgTimer = useRef(null);
@@ -162,6 +190,22 @@ export default function BaseExtraShipTab() {
     return (rounds || []).filter((r) => (!vendorF || r.vendor === vendorF) && (!d || String(r.round) === d));
   }, [rounds, q, vendorF]);
 
+  const runAi = async (g, recvs, force) => {
+    const key = aiKey(g);
+    const cached = !force && lsGet(key);
+    if (cached) { setAi({ status: 'done', items: cached.items || [], msg: cached.unreadable ? '이미지에서 불량 보고를 찾지 못했습니다' : '', cached: true }); return; }
+    const products = [...new Map(recvs.map((x) => [x.code, { code: x.code, name: x.name, option: x.option }])).values()];
+    if (!products.length) return;
+    setAi({ status: 'loading', items: [], msg: '' });
+    try {
+      const j = await readImageDefects(g.img, products);
+      lsSet(key, { items: j.items || [], unreadable: !!j.unreadable });
+      setAi({ status: 'done', items: j.items || [], msg: j.unreadable ? '이미지에서 불량 보고를 찾지 못했습니다' : '' });
+    } catch (e) {
+      setAi({ status: 'err', items: [], msg: String(e.message || e).slice(0, 120) });
+    }
+  };
+
   const pickRound = async (g) => {
     setSel(g); setData(null); setShowAdd(false);
     setEdit({ ...EMPTY_EDIT, ...(lsGet(lsKey(g.vendor, g.round)) || {}) });
@@ -174,6 +218,9 @@ export default function BaseExtraShipTab() {
       const reports = [];
       for (const f of g.report) { try { reports.push(...(await readReport(f))); } catch (e) { /* 서식이 다른 업체전달 파일은 건너뜀 */ } }
       setData({ bases, recvs, reports });
+      // 업체전달 엑셀이 없고 이미지만 있으면 → 이미지에서 불량 읽기(차수·이미지별 1회, 브라우저에 기억)
+      setAi({ status: 'idle', items: [], msg: '' });
+      if (g.img.length && !reports.length) runAi(g, recvs, false);
       // 메모: 업체명은 정상입고 메모 표기(예: 코스타컴퍼니), 없으면 약칭
       const m = recvs.map((x) => x.memo.match(/^\d{6}_[^_]*입고_(.+?)[\s_]*\d+\s*차/)).find(Boolean);
       setMemo(`${today6()}_센터출고_${m ? m[1] : g.vendor}_${g.round}차(추가)`);
@@ -215,7 +262,9 @@ export default function BaseExtraShipTab() {
     });
     // 업체전달 파일의 불량 → 베이스별 자동 불량
     const autoBad = {}, autoText = {};
-    (data.reports || []).forEach((x) => {
+    const recvByCode = new Map(data.recvs.map((x) => [x.code, x]));
+    const aiRows = (ai.items || []).map((it) => { const r = recvByCode.get(it.code); return r ? { ...r, bad: it.bad, text: `이미지: ${it.note || `불량 ${it.bad}`}` } : null; }).filter(Boolean);
+    [...(data.reports || []), ...aiRows].forEach((x) => {
       const t = findBase(x);
       if (!t) return;
       autoBad[t.code] = (autoBad[t.code] || 0) + x.bad;
@@ -231,7 +280,7 @@ export default function BaseExtraShipTab() {
     });
     const tot = list.reduce((a, r) => ({ ship: a.ship + r.ship, recv: a.recv + r.recv, bad: a.bad + r.bad, add: a.add + r.add }), { ship: 0, recv: 0, bad: 0, add: 0 });
     return { list, unmatched, tot, allZero: list.every((r) => r.add === 0), autoCount: Object.keys(autoBad).length, autoSum: Object.values(autoBad).reduce((a, b) => a + b, 0) };
-  }, [data, idx, edit]);
+  }, [data, idx, edit, ai]);
 
   const setField = (field, code, v) => setEdit((p) => ({ ...p, [field]: { ...p[field], [code]: v } }));
   const clearField = (field, code) => setEdit((p) => { const m = { ...p[field] }; delete m[code]; return { ...p, [field]: m }; });
@@ -356,11 +405,22 @@ export default function BaseExtraShipTab() {
           {!loading && calc && (
             <>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10, fontSize: 12.5 }}>
-                {calc.autoCount > 0
-                  ? <span style={{ fontWeight: 700, color: '#b45309', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '5px 10px' }}>불량 자동 반영 · 업체전달 파일에서 {calc.autoCount}개 상품 {fmt(calc.autoSum)}장</span>
-                  : sel.report.length > 0
-                    ? <span style={{ color: '#64748b' }}>업체전달 파일에 불량 기록 없음</span>
-                    : <span style={{ color: '#64748b' }}>업체전달 엑셀 없음{sel.img.length ? ' — 아래 업체 보고 이미지를 보고 불량을 입력하세요' : ''}</span>}
+                {ai.status === 'loading'
+                  ? <span style={{ fontWeight: 700, color: '#4f46e5' }}>⏳ 업체 보고 이미지에서 불량 읽는 중…</span>
+                  : calc.autoCount > 0
+                    ? <span style={{ fontWeight: 700, color: '#b45309', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '5px 10px' }}>
+                        불량 자동 반영 · {sel.report.length ? '업체전달 파일' : '업체 보고 이미지'}에서 {calc.autoCount}개 상품 {fmt(calc.autoSum)}장{!sel.report.length ? ' — 이미지와 맞는지 확인해주세요' : ''}
+                      </span>
+                    : sel.report.length > 0
+                      ? <span style={{ color: '#64748b' }}>업체전달 파일에 불량 기록 없음</span>
+                      : ai.status === 'done'
+                        ? <span style={{ color: '#64748b' }}>{ai.msg || '업체 보고 이미지에 불량 없음'}</span>
+                        : ai.status === 'err'
+                          ? <span style={{ color: '#b91c1c', fontWeight: 600 }}>이미지 읽기 실패 — {ai.msg} · 이미지를 보고 직접 입력해주세요</span>
+                          : <span style={{ color: '#64748b' }}>업체 불량 보고 파일 없음 — 불량이 있으면 직접 입력하세요</span>}
+                {sel.img.length > 0 && !sel.report.length && ai.status !== 'loading' && data && (
+                  <button type="button" onClick={() => runAi(sel, data.recvs, true)} style={{ background: 'none', border: 'none', color: '#4f46e5', fontWeight: 700, cursor: 'pointer', padding: 0, fontSize: 12 }}>이미지 다시 읽기</button>
+                )}
               </div>
               {sel.img.length > 0 && <ReportImages files={sel.img} />}
               <div style={{ ...S.tableWrap, maxHeight: 480, overflowY: 'auto' }}>
