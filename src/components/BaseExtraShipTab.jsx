@@ -158,10 +158,10 @@ export default function BaseExtraShipTab() {
       const bases = [], recvs = [];
       for (const f of fl.filter((x) => x.on)) (f.kind === 'base' ? bases : recvs).push(...(await readRows(dir, f.name)));
       setData({ bases, recvs });
-      // 메모 기본값: 정상입고 메모의 날짜·업체명 → 'YYMMDD_외주입고_업체_N차(추가)'
-      const m = recvs.map((x) => x.memo.match(/^(\d{6})_[^_]*입고_(.+?)[\s_]*\d+\s*차/)).find(Boolean);
-      const d6 = m ? m[1] : new Date(Date.now() + 9 * 3600e3).toISOString().slice(2, 10).replace(/-/g, '');
-      setMemo(`${d6}_외주입고_${m ? m[2] : vendor}_${round}차(추가)`);
+      // 메모 기본값: '오늘(KST YYMMDD)_센터출고_업체_N차(추가)' — 업체명은 정상입고 메모 표기(예: 코스타컴퍼니), 없으면 폴더 업체명
+      const m = recvs.map((x) => x.memo.match(/^\d{6}_[^_]*입고_(.+?)[\s_]*\d+\s*차/)).find(Boolean);
+      const d6 = new Date(Date.now() + 9 * 3600e3).toISOString().slice(2, 10).replace(/-/g, '');
+      setMemo(`${d6}_센터출고_${m ? m[1] : vendor}_${round}차(추가)`);
     } catch (e) {
       flash('err', `엑셀 읽기 실패 — ${String(e.message || e).slice(0, 60)}`);
       setData({ bases: [], recvs: [] });
