@@ -216,6 +216,8 @@ export default function BaseExtraShipTab() {
     return { list, unmatched, tot };
   }, [data, idx, edit]);
 
+  // 모든 행의 추가 출고가 0 이면 파일을 만들지 않음(어드민에 올릴 것 없음)
+  const allZero = !!calc && calc.list.every((r) => r.add === 0);
   const setField = (field, code, v) => setEdit((p) => ({ ...p, [field]: { ...p[field], [code]: v } }));
   const clearField = (field, code) => setEdit((p) => { const m = { ...p[field] }; delete m[code]; return { ...p, [field]: m }; });
 
@@ -263,6 +265,7 @@ export default function BaseExtraShipTab() {
     const fn = trim(fileName);
     if (!/\.xlsx$/i.test(fn)) { flash('err', '파일명은 .xlsx 로 끝나야 합니다'); return; }
     if (!calc.list.length) { flash('err', '저장할 행이 없습니다'); return; }
+    if (allZero) { flash('neutral', '조정할 수량이 모두 0 — 파일을 만들지 않습니다'); return; }
     setSaving(true);
     try {
       if (!(await ensurePermission(rootDir))) throw new Error('폴더 권한이 허용되지 않았습니다');
@@ -288,6 +291,7 @@ export default function BaseExtraShipTab() {
 
   const downloadOnly = async () => {
     if (!calc) return;
+    if (allZero) { flash('neutral', '조정할 수량이 모두 0 — 파일을 만들지 않습니다'); return; }
     try { downloadBlob(await buildBlob(), trim(fileName) || 'base_extra.xlsx'); } catch (e) { flash('err', '엑셀 생성 실패'); }
   };
 
@@ -442,8 +446,9 @@ export default function BaseExtraShipTab() {
             <span style={{ fontSize: 12, color: '#64748b' }}>저장 위치: <b style={{ color: '#334155' }}>{sel.vendorDir}/{sel.round}차/</b> · 상품코드 | 수량 | 메모 | 상품명 | 옵션 · 합계 <b style={{ color: '#0f766e' }}>{fmt(calc.tot.add)}장</b></span>
             <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
               {msg && <span style={S.msg(msg.kind)}>{msg.text}</span>}
-              <button style={S.btn(false, saving)} disabled={saving} onClick={downloadOnly}>다운로드만</button>
-              <button style={{ ...S.btn(true, saving), ...(overArm ? { background: '#dc2626', borderColor: '#dc2626' } : {}) }} disabled={saving} onClick={save}>
+              {allZero && <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b' }}>조정할 수량이 모두 0 — 파일 생성 안 함</span>}
+              <button style={S.btn(false, saving || allZero)} disabled={saving || allZero} onClick={downloadOnly}>다운로드만</button>
+              <button style={{ ...S.btn(true, saving || allZero), ...(overArm ? { background: '#dc2626', borderColor: '#dc2626' } : {}) }} disabled={saving || allZero} onClick={save}>
                 {saving ? '저장 중…' : overArm ? '한 번 더 누르면 덮어쓰기' : '📁 공유 폴더에 저장'}
               </button>
             </span>
