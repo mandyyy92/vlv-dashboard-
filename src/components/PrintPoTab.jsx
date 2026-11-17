@@ -1562,3 +1562,6 @@ export default function PrintPoTab() {
     </div>
   );
 }
+
+// 베이스 추가 출고 탭(BaseExtraShipTab)에서 같이 쓰는 도우미 — 저장 폴더 핸들(IndexedDB root)도 공유
+export { sbAll, loadXLSX, loadExcelJS, downloadBlob, XLSX_MIME, FS_SUPPORTED, IN_IFRAME, idbGet, idbSet, ensurePermission, writeFile, readTable, S };
