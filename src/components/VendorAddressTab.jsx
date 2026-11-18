@@ -40,6 +40,14 @@ export default function VendorAddressTab() {
   useEffect(() => () => { clearTimeout(msgTimer.current); clearTimeout(delTimer.current); }, []);
   const flash = (kind, text) => { clearTimeout(msgTimer.current); setMsg({ kind, text }); msgTimer.current = setTimeout(() => setMsg(null), 3000); };
 
+  // 업체 추가 팝업: Esc 로 닫기
+  useEffect(() => {
+    if (!edit || edit.id) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') setEdit(null); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [edit]);
+
   const load = async () => {
     try {
       const r = await fetch(`${REST}?select=*&order=sort_order.asc,id.asc`, { headers: sbHeaders });
@@ -118,22 +126,28 @@ export default function VendorAddressTab() {
   const smallBtn = { fontSize: 11.5, padding: '3px 8px', borderRadius: 6, border: '1px solid #E2E8F0', background: '#FFF', color: '#475569', cursor: 'pointer', whiteSpace: 'nowrap' };
   const msgColor = msg ? (msg.kind === 'ok' ? '#15803D' : msg.kind === 'err' ? '#B91C1C' : '#64748B') : '';
 
-  const form = edit && (
-    <div style={{ border: '1.5px solid #C7D2FE', background: '#F8FAFF', borderRadius: 12, padding: 16, marginBottom: 14 }}>
-      <div style={{ fontSize: 14, fontWeight: 800, color: '#1E293B', marginBottom: 10 }}>{edit.id ? `${edit.name || '업체'} 수정` : '업체 추가'}</div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 10 }}>
+  // 입력 칸 — compact: 카드 안 수정(한 줄에 하나), 아니면 위쪽 '업체 추가' 박스(여러 칸)
+  const editor = (compact) => edit && (
+    <div style={compact ? { display: 'flex', flexDirection: 'column', gap: 8 } : { padding: 20 }}>
+      {!compact && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+          <div style={{ fontSize: 16, fontWeight: 800, color: '#1E293B' }}>업체 추가</div>
+          <button type="button" onClick={() => setEdit(null)} aria-label="닫기" style={{ border: 'none', background: 'none', fontSize: 20, color: '#94A3B8', cursor: 'pointer', lineHeight: 1 }}>×</button>
+        </div>
+      )}
+      <div style={compact ? { display: 'flex', flexDirection: 'column', gap: 8 } : { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 10 }}>
         {FIELDS.map(([k, label, kind]) => (
           <label key={k} style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, fontWeight: 600, color: '#475569' }}>
-            {label}{k === 'name' && <span style={{ color: '#DC2626' }}> *</span>}
+            <span>{label}{k === 'name' && <span style={{ color: '#DC2626' }}> *</span>}</span>
             {kind === 'textarea'
-              ? <textarea rows={3} value={edit[k] || ''} onChange={(e) => setEdit((p) => ({ ...p, [k]: e.target.value }))} placeholder={k === 'address' || k === 'phone' ? '여러 개면 줄바꿈' : ''}
+              ? <textarea rows={k === 'memo' ? 2 : 3} value={edit[k] || ''} onChange={(e) => setEdit((p) => ({ ...p, [k]: e.target.value }))} placeholder={k === 'address' || k === 'phone' ? '여러 개면 줄바꿈' : ''}
                   style={{ fontSize: 13, padding: '7px 9px', border: '1px solid #CBD5E1', borderRadius: 8, resize: 'vertical', fontFamily: 'inherit' }} />
               : <input value={edit[k] || ''} onChange={(e) => setEdit((p) => ({ ...p, [k]: e.target.value }))}
                   style={{ fontSize: 13, padding: '7px 9px', border: '1px solid #CBD5E1', borderRadius: 8 }} />}
           </label>
         ))}
       </div>
-      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: compact ? 2 : 12 }}>
         <button type="button" onClick={() => setEdit(null)} style={{ ...smallBtn, fontSize: 13, padding: '7px 14px' }}>취소</button>
         <button type="button" onClick={save} disabled={saving}
           style={{ fontSize: 13, padding: '7px 16px', borderRadius: 8, border: 'none', background: '#4F46E5', color: '#FFF', fontWeight: 700, cursor: saving ? 'wait' : 'pointer' }}>
@@ -146,7 +160,7 @@ export default function VendorAddressTab() {
   return (
     <div style={{ background: '#FFF', border: '1px solid #E5E7EB', borderRadius: 14, padding: 20 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
-        <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: '#0F172A' }}>📍 업체 주소 <span style={{ fontSize: 13, color: '#94A3B8', fontWeight: 600 }}>{rows ? `${shown.length} / ${rows.length}곳` : ''}</span></h3>
+        <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: '#0F172A' }}>📍 업체 주소</h3>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {msg && <span style={{ fontSize: 13, fontWeight: 600, color: msgColor }}>{msg.text}</span>}
           <button type="button" onClick={() => setEdit({ ...EMPTY })}
@@ -154,10 +168,18 @@ export default function VendorAddressTab() {
         </div>
       </div>
 
-      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔍 업체명 · 구분 · 주소 · 연락처 · 담당자 검색 (예: 나염, 성동구, 7270)"
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="검색"
         style={{ width: '100%', boxSizing: 'border-box', fontSize: 15, padding: '11px 14px', border: '1.5px solid #CBD5E1', borderRadius: 10, marginBottom: 10 }} />
 
-      {form}
+      {edit && !edit.id && (
+        // 업체 추가 팝업 — 바깥(어두운 영역) 클릭 또는 Esc 로 닫기
+        <div onClick={() => setEdit(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(720px, 100%)', maxHeight: '90vh', overflowY: 'auto', background: '#FFF', borderRadius: 14, boxShadow: '0 20px 50px rgba(15,23,42,0.25)' }}>
+            {editor(false)}
+          </div>
+        </div>
+      )}
       {err && <div style={{ color: '#B91C1C', fontSize: 13, fontWeight: 600, padding: '10px 0' }}>{err}</div>}
       {!rows && <div style={{ textAlign: 'center', padding: 40, color: '#94A3B8' }}>⏳ 불러오는 중…</div>}
       {rows && !err && shown.length === 0 && <div style={{ textAlign: 'center', padding: 40, color: '#94A3B8' }}>{rows.length ? '검색 결과가 없습니다' : '등록된 업체가 없습니다 · “+ 업체 추가”'}</div>}
@@ -166,6 +188,12 @@ export default function VendorAddressTab() {
         {shown.map((r) => {
           const [bg, fg] = catColor(r.category);
           return (
+            edit?.id === r.id ? (
+              <div key={r.id} style={{ border: '1.5px solid #818CF8', borderRadius: 12, padding: 14, background: '#F8FAFF', boxShadow: '0 0 0 3px #EEF2FF' }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: '#4338CA', marginBottom: 8 }}>✏️ {r.name} 수정</div>
+                {editor(true)}
+              </div>
+            ) : (
             <div key={r.id} style={{ border: '1px solid #E2E8F0', borderRadius: 12, padding: 14, display: 'flex', flexDirection: 'column', gap: 9, background: '#FFF' }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
                 <div style={{ minWidth: 0 }}>
@@ -215,6 +243,7 @@ export default function VendorAddressTab() {
                 <div style={{ fontSize: 12, color: '#92400E', background: '#FFFBEB', borderRadius: 6, padding: '5px 8px', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{r.memo}</div>
               )}
             </div>
+            )
           );
         })}
       </div>
