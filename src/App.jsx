@@ -263,7 +263,8 @@ const getSupColor=(s)=>{
 // ─── Helper Components ───
 const Badge=({children,color="#64748B",bg})=>(<span style={{display:"inline-block",padding:"2px 10px",borderRadius:4,fontSize:13,fontWeight:600,letterSpacing:0.3,color,background:bg||`${color}18`,border:`1px solid ${color}30`,whiteSpace:"nowrap"}}>{children}</span>);
 
-const TabBtn=({active,children,onClick,icon})=>(<button onClick={onClick} style={{display:"flex",alignItems:"center",gap:8,padding:"10px 18px",border:"none",borderRadius:8,cursor:"pointer",fontSize:15,fontWeight:active?700:500,letterSpacing:-0.2,background:active?"#1E293B":"transparent",color:active?"#F8FAFC":"#64748B",transition:"all 0.2s"}}><span style={{fontSize:18}}>{icon}</span>{children}</button>);
+// href 를 주면 링크(<a>)로 그림 — 그냥 클릭은 탭 전환, Ctrl/휠 클릭·우클릭 '새 탭에서 열기'는 그 메뉴만 새 창으로
+const TabBtn=({active,children,onClick,icon,href})=>{const st={display:"flex",alignItems:"center",gap:8,padding:"10px 18px",border:"none",borderRadius:8,cursor:"pointer",fontSize:15,fontWeight:active?700:500,letterSpacing:-0.2,background:active?"#1E293B":"transparent",color:active?"#F8FAFC":"#64748B",transition:"all 0.2s",textDecoration:"none",whiteSpace:"nowrap"};const inner=<><span style={{fontSize:18}}>{icon}</span>{children}</>;if(href)return(<a href={href} onClick={e=>{if(e.button!==0||e.ctrlKey||e.metaKey||e.shiftKey||e.altKey)return;e.preventDefault();onClick&&onClick();}} style={st}>{inner}</a>);return(<button onClick={onClick} style={st}>{inner}</button>);};
 
 const SectionCard=({title,subtitle,children,actions})=>(<div style={{background:"#FFFFFF",borderRadius:14,padding:28,border:"1px solid #E2E8F0",marginBottom:20,boxShadow:"0 1px 3px rgba(0,0,0,0.04)"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,flexWrap:"wrap",gap:8}}><div><h3 style={{margin:0,fontSize:19,fontWeight:700,color:"#0F172A",letterSpacing:-0.3}}>{title}</h3>{subtitle&&<p style={{margin:"4px 0 0",fontSize:14,color:"#94A3B8"}}>{subtitle}</p>}</div>{actions&&<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{actions}</div>}</div>{children}</div>);
 
@@ -7709,7 +7710,12 @@ function OrderSheetDashboard(){
 
 // ─── Main Dashboard ───
 export default function Dashboard(){
-  const[activeTab,setActiveTab]=useState(()=>new URLSearchParams(window.location.search).get("tab")==="print"?"print":"schedule"); // ?tab=print — 새 탭에서 바로 프린팅 외주(폴더 연결용) // 대시보드(overview) 탭 숨김 → 기본 탭을 입고 스케줄로
+  // 메뉴별 주소: ?tab=<id> (예: ?tab=stockcheck). 주소로 열면 그 메뉴로 시작, 메뉴를 바꾸면 주소도 바뀜(뒤로 가기 지원)
+  const TAB_IDS=["overview","schedule","ordertrack","print","productdb","planning","sample","vendoraddr","vendorchat","stockcheck","measure","products","price","packing","reorder"];
+  const tabFromUrl=()=>{const t=new URLSearchParams(window.location.search).get("tab");return TAB_IDS.includes(t)?t:"schedule";}; // 대시보드(overview) 탭 숨김 → 기본 탭을 입고 스케줄로
+  const[activeTab,setActiveTabState]=useState(tabFromUrl);
+  const setActiveTab=(id)=>{setActiveTabState(id);if(tabFromUrl()!==id||!new URLSearchParams(window.location.search).get("tab")){const u=new URL(window.location.href);u.search="";u.searchParams.set("tab",id);window.history.pushState(null,"",u);}};
+  useEffect(()=>{const f=()=>setActiveTabState(tabFromUrl());window.addEventListener("popstate",f);return()=>window.removeEventListener("popstate",f);},[]);
   const[time,setTime]=useState(new Date());
   useEffect(()=>{const t=setInterval(()=>setTime(new Date()),60000);return()=>clearInterval(t);},[]);
 
@@ -7769,7 +7775,7 @@ export default function Dashboard(){
     <div style={{minHeight:"100vh",background:"#F1F5F9",fontFamily:"'Pretendard','Apple SD Gothic Neo',-apple-system,sans-serif"}}>
 
       <div style={{background:"#FFFFFF",padding:"6px 20px",display:"flex",gap:4,borderBottom:"1px solid #E2E8F0",overflowX:"auto"}}>
-        {tabs.filter(t=>!t.hidden).map(t=>(<TabBtn key={t.id} active={activeTab===t.id} onClick={()=>setActiveTab(t.id)} icon={t.icon}>{t.label}</TabBtn>))}
+        {tabs.filter(t=>!t.hidden).map(t=>(<TabBtn key={t.id} href={`?tab=${t.id}`} active={activeTab===t.id} onClick={()=>setActiveTab(t.id)} icon={t.icon}>{t.label}</TabBtn>))}
       </div>
 
       <div style={{padding:"20px 16px"}}>
