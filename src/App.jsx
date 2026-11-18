@@ -1686,19 +1686,24 @@ function ScheduleTab(){
                   </div>);})()}
                 </div>);
       // 조정입고일 date input — 바꾸면 이 블록 row_key 들만 저장(입력 멈춘 뒤 0.8초 또는 포커스 해제 시). 비우면 null(지움).
+      // 옵션표에서 체크한 옵션이 있으면 그 옵션에만 적용(없으면 상품 전체)
       const etaInput=(g)=>{
-        const cur=g.rep.revisedEta||"";
+        const picked=g.events.filter(o=>optChecked[o.id]);
+        const targets=picked.length?picked:g.events;
+        const pickedDates=[...new Set(picked.map(o=>o.revisedEta||""))];
+        const cur=picked.length?(pickedDates.length===1?pickedDates[0]:""):(g.rep.revisedEta||"");
         const done=g.totalRemain<=0;
         const commit=(v)=>{
           clearTimeout(etaTimerRef.current);
-          const now=(calEventsRef.current.find(e=>e.id===g.rep.id)||{}).revisedEta||""; // 이미 반영된 값이면 중복 저장 방지
-          if(v===now)return;
-          if(v===""){changeRevisedEta(g.events,null);return;}
-          if(/^20\d\d-\d\d-\d\d$/.test(v))changeRevisedEta(g.events,v);
+          const nowOf=(o)=>(calEventsRef.current.find(e=>e.id===o.id)||{}).revisedEta||""; // 이미 반영된 값이면 중복 저장 방지
+          if(picked.length?targets.every(o=>nowOf(o)===v):v===nowOf(g.rep))return;
+          const clearPicked=()=>{if(picked.length)setOptChecked(p=>{const n={...p};picked.forEach(o=>delete n[o.id]);return n;});};
+          if(v===""){changeRevisedEta(targets,null);clearPicked();return;}
+          if(/^20\d\d-\d\d-\d\d$/.test(v)){changeRevisedEta(targets,v);clearPicked();}
         };
-        return(<label onClick={e=>e.stopPropagation()} title={done?ETA_LOCKED_MSG:"조정입고일 변경 (비우면 지움)"} style={{display:"inline-flex",alignItems:"center",gap:4,flexShrink:0,fontSize:11,fontWeight:600,color:"#64748B",whiteSpace:"nowrap"}}>
-          조정입고일
-          <input type="date" key={`${g.key}|${cur}|${etaInputRev}`} defaultValue={cur} disabled={done}
+        return(<label onClick={e=>e.stopPropagation()} title={done?ETA_LOCKED_MSG:picked.length?`체크한 옵션 ${picked.length}개만 조정입고일 변경 (비우면 지움)`:"조정입고일 변경 — 상품 전체 (옵션만 바꾸려면 아래 표에서 체크)"} style={{display:"inline-flex",alignItems:"center",gap:4,flexShrink:0,fontSize:11,fontWeight:600,color:picked.length?"#1D4ED8":"#64748B",whiteSpace:"nowrap"}}>
+          조정입고일{picked.length?` (선택 ${picked.length}개)`:""}
+          <input type="date" key={`${g.key}|${cur}|${etaInputRev}|${picked.map(o=>o.id).join(",")}`} defaultValue={cur} disabled={done}
             onChange={e=>{const v=e.target.value;clearTimeout(etaTimerRef.current);if(v)etaTimerRef.current=setTimeout(()=>commit(v),800);}}
             onBlur={e=>{const v=e.target.value;if(v===""||/^20\d\d-\d\d-\d\d$/.test(v))commit(v);else{clearTimeout(etaTimerRef.current);e.target.value=cur;}}}
             onKeyDown={e=>{if(e.key==="Enter")e.currentTarget.blur();}}
