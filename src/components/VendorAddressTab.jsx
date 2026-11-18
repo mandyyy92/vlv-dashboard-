@@ -1,6 +1,6 @@
 // src/components/VendorAddressTab.jsx
 // 입고 캘린더 › 업체 주소 — 거래처 발송 주소·연락처·담당자 (Supabase vendor_addresses, supabase/vendor_addresses.sql)
-// 검색(업체명·구분·주소·연락처·담당자·메모) + 구분 필터 + 주소/연락처 복사 + 추가·수정·삭제(삭제는 2단계 확인)
+// 검색(업체명·구분·주소·연락처·담당자·메모) + 주소/연락처 복사 + 추가·수정·삭제(삭제는 2단계 확인)
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { SUPABASE_URL, sbHeaders } from '../lib/supabaseClient';
 
@@ -31,7 +31,6 @@ export default function VendorAddressTab() {
   const [rows, setRows] = useState(null);
   const [err, setErr] = useState('');
   const [q, setQ] = useState('');
-  const [cat, setCat] = useState('');
   const [edit, setEdit] = useState(null);     // {id|null, ...fields}
   const [saving, setSaving] = useState(false);
   const [delArm, setDelArm] = useState(null);
@@ -54,23 +53,17 @@ export default function VendorAddressTab() {
   };
   useEffect(() => { load(); }, []);
 
-  const cats = useMemo(() => {
-    const m = new Map();
-    (rows || []).forEach((r) => { const c = r.category || '기타'; m.set(c, (m.get(c) || 0) + 1); });
-    return [...m.entries()];
-  }, [rows]);
 
   const shown = useMemo(() => {
     const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
     const digits = q.replace(/\D/g, '');
     return (rows || []).filter((r) => {
-      if (cat && (r.category || '기타') !== cat) return false;
       if (!words.length) return true;
       const hay = [r.category, r.name, r.address, r.phone, r.contact, r.memo].join(' ').toLowerCase();
       const phoneDigits = String(r.phone || '').replace(/\D/g, '');
       return words.every((w) => hay.includes(w)) || (digits.length >= 3 && phoneDigits.includes(digits));
     });
-  }, [rows, q, cat]);
+  }, [rows, q]);
 
   const copy = async (text, label) => {
     try { await navigator.clipboard.writeText(text); flash('ok', `${label} 복사됨`); }
@@ -156,19 +149,13 @@ export default function VendorAddressTab() {
         <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: '#0F172A' }}>📍 업체 주소 <span style={{ fontSize: 13, color: '#94A3B8', fontWeight: 600 }}>{rows ? `${shown.length} / ${rows.length}곳` : ''}</span></h3>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {msg && <span style={{ fontSize: 13, fontWeight: 600, color: msgColor }}>{msg.text}</span>}
-          <button type="button" onClick={() => setEdit({ ...EMPTY, category: cat })}
+          <button type="button" onClick={() => setEdit({ ...EMPTY })}
             style={{ fontSize: 13, padding: '7px 14px', borderRadius: 8, border: 'none', background: '#4F46E5', color: '#FFF', fontWeight: 700, cursor: 'pointer' }}>+ 업체 추가</button>
         </div>
       </div>
 
       <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔍 업체명 · 구분 · 주소 · 연락처 · 담당자 검색 (예: 나염, 성동구, 7270)"
         style={{ width: '100%', boxSizing: 'border-box', fontSize: 15, padding: '11px 14px', border: '1.5px solid #CBD5E1', borderRadius: 10, marginBottom: 10 }} />
-      {cats.length > 0 && (
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
-          <button type="button" style={pill(!cat)} onClick={() => setCat('')}>전체</button>
-          {cats.map(([c, n]) => <button key={c} type="button" style={pill(cat === c)} onClick={() => setCat(cat === c ? '' : c)}>{c} {n}</button>)}
-        </div>
-      )}
 
       {form}
       {err && <div style={{ color: '#B91C1C', fontSize: 13, fontWeight: 600, padding: '10px 0' }}>{err}</div>}
