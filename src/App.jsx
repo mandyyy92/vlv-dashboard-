@@ -934,6 +934,8 @@ function ScheduleTab(){
   const[dropDay,setDropDay]=useState(null); // 드래그가 올라가 있는 날짜 칸
   const[etaMsg,setEtaMsg]=useState(null); // 조정입고일 변경 결과 {ok,text} — 상단 인라인, 3초 후 사라짐
   const[bulkEta,setBulkEta]=useState({}); // 프린팅 외주 서랍 — 업체·차수 카드별 조정입고일 일괄 입력값 {cardKey:'YYYY-MM-DD'}
+  const[optChecked,setOptChecked]=useState({}); // 서랍 옵션표 — 조정입고일 바꿀 옵션 체크 {event id:true}
+  const[optEta,setOptEta]=useState({}); // 서랍 옵션표 — 블록별 '선택 옵션 조정입고일' 입력값 {blockKey:'YYYY-MM-DD'}
   const[etaInputRev,setEtaInputRev]=useState(0); // 서랍 date input 리마운트 키 — 저장 실패 시 원래 값으로 복원
   const etaTimerRef=useRef(null); // 서랍 date input 입력 debounce
   const recvMainTimerRef=useRef(null); // 서랍 상품별 실입고일 input 입력 debounce
@@ -1604,14 +1606,17 @@ function ScheduleTab(){
       // 옵션별 표 (생산·프린팅 외주 공통, 프린팅 외주는 맨 뒤 '베이스 업체' 열)
       const optTable=(g)=>(
                 <div style={{overflowX:"auto",borderRadius:8,border:"1px solid #EEF2F6"}}>
-                  <table style={{width:"100%",minWidth:isPrint?1110:1000,tableLayout:"fixed",borderCollapse:"collapse"}}>
+                  <table style={{width:"100%",minWidth:isPrint?1140:1030,tableLayout:"fixed",borderCollapse:"collapse"}}>
                     <colgroup>
-                      <col style={{width:56}} /><col style={{width:90}} /><col /><col style={{width:110}} />
+                      <col style={{width:30}} /><col style={{width:56}} /><col style={{width:90}} /><col /><col style={{width:110}} />
                       <col style={{width:80}} /><col style={{width:100}} /><col style={{width:80}} />
                       <col style={{width:110}} /><col style={{width:110}} /><col style={{width:110}} />
                       {isPrint&&<col style={{width:110}} />}
                     </colgroup>
                     <thead><tr style={{background:"#F8FAFC"}}>
+                      {(()=>{const can=g.events.filter(o=>(Number(o.remain)||0)>0);const all=can.length>0&&can.every(o=>optChecked[o.id]);return(
+                      <th style={{...colTh,textAlign:"center"}}><input type="checkbox" checked={all} disabled={!can.length} title="잔량 있는 옵션 전체 선택"
+                        onChange={()=>setOptChecked(p=>{const n={...p};can.forEach(o=>{if(all)delete n[o.id];else n[o.id]=true;});return n;})} style={{cursor:can.length?"pointer":"not-allowed"}} /></th>);})()}
                       <th style={colTh}></th><th style={colTh}>상품코드</th><th style={colTh}>상품명</th><th style={colTh}>옵션</th>
                       <th style={{...colTh,textAlign:"right"}}>발주수량</th><th style={{...colTh,textAlign:"right"}}>입고수량</th><th style={{...colTh,textAlign:"right"}}>잔량</th>
                       <th style={{...colTh,textAlign:"center"}}>입고예정일</th><th style={{...colTh,textAlign:"center"}}>조정입고일</th><th style={{...colTh,textAlign:"center"}}>실입고일</th>
@@ -1624,7 +1629,9 @@ function ScheduleTab(){
                         const remain=(Number(o.remain)||0)-recvVal(o); // 입력 중이면 입력값만큼 차감해 표시
                         const revisedDiff=has(o.revisedEta)&&o.revisedEta!==o.eta;
                         return(
-                        <tr key={o.id||oi} style={has(o.receivedDate)?{background:"#F0FDF4"}:undefined}>
+                        <tr key={o.id||oi} style={optChecked[o.id]?{background:"#EFF6FF"}:has(o.receivedDate)?{background:"#F0FDF4"}:undefined}>
+                          <td style={{...colTd,textAlign:"center",verticalAlign:"middle"}}><input type="checkbox" checked={!!optChecked[o.id]} disabled={(Number(o.remain)||0)<=0} title={(Number(o.remain)||0)<=0?"입고 완료 옵션":"조정입고일 바꿀 옵션 선택"}
+                            onChange={()=>setOptChecked(p=>{const n={...p};if(n[o.id])delete n[o.id];else n[o.id]=true;return n;})} style={{cursor:(Number(o.remain)||0)<=0?"not-allowed":"pointer"}} /></td>
                           <td style={{...colTd,verticalAlign:"middle"}}><CalThumb src={o.imageUrl} size={32} /></td>
                           <td style={{...colTd,whiteSpace:"nowrap"}}>{o.code||"-"}</td>
                           <td style={{...colTd,...oneLine}} title={o.displayName||o.item||""}>{o.displayName||o.item||"-"}</td>
@@ -1649,7 +1656,7 @@ function ScheduleTab(){
                         </tr>);
                       })}
                       <tr style={{background:"#FAFAF9"}}>
-                        <td style={{...colTd,fontWeight:700,color:"#475569",borderBottom:"none"}} colSpan={4}>합계</td>
+                        <td style={{...colTd,fontWeight:700,color:"#475569",borderBottom:"none"}} colSpan={5}>합계</td>
                         <td style={{...colTd,textAlign:"right",fontWeight:800,color:"#0F172A",borderBottom:"none",whiteSpace:"nowrap"}}>{g.totalQty.toLocaleString()}</td>
                         <td style={{...colTd,textAlign:"right",fontWeight:800,color:"#0F766E",borderBottom:"none",whiteSpace:"nowrap"}}>{g.events.reduce((s,o)=>s+(has(o.received)&&Number.isFinite(Number(o.received))?Number(o.received):0),0).toLocaleString()}</td>
                         {(()=>{const r=g.totalRemain-g.events.reduce((s,o)=>s+recvVal(o),0);return(
@@ -1659,7 +1666,18 @@ function ScheduleTab(){
                     </tbody>
                   </table>
                   {(()=>{const n=g.events.filter(o=>recvTyped(o)>0||recvDates[o.id]).length;const busy=recvBusy===g.key;return(
-                  <div style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:10,padding:"8px 10px",borderTop:"1px solid #EEF2F6",background:"#FAFAF9"}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:10,padding:"8px 10px",borderTop:"1px solid #EEF2F6",background:"#FAFAF9",flexWrap:"wrap"}}>
+                    {/* 체크한 옵션만 조정입고일 변경 */}
+                    {(()=>{const sel=g.events.filter(o=>optChecked[o.id]);if(!sel.length)return null;const v=optEta[g.key]||"";const ok=/^20\d\d-\d\d-\d\d$/.test(v);
+                      const clear=()=>setOptChecked(p=>{const n={...p};sel.forEach(o=>delete n[o.id]);return n;});return(
+                    <span style={{marginRight:"auto",display:"inline-flex",alignItems:"center",gap:6,fontSize:12,fontWeight:600,color:"#1D4ED8",whiteSpace:"nowrap"}}>
+                      선택 {sel.length}개 · 조정입고일
+                      <input type="date" value={v} onChange={e=>{const x=e.target.value;setOptEta(p=>({...p,[g.key]:x}));}}
+                        style={{padding:"3px 6px",borderRadius:6,border:"1px solid #93C5FD",fontSize:12,color:"#1E293B",background:"#FFF",cursor:"pointer"}} />
+                      <button onClick={()=>{if(!ok)return;changeRevisedEta(sel,v);clear();setOptEta(p=>({...p,[g.key]:""}));}} disabled={!ok}
+                        style={{padding:"5px 12px",borderRadius:6,border:"none",fontSize:12,fontWeight:700,color:"#FFF",background:ok?"#2563EB":"#CBD5E1",cursor:ok?"pointer":"not-allowed"}}>적용</button>
+                      <span onClick={clear} style={{fontSize:11,fontWeight:600,color:"#94A3B8",cursor:"pointer"}}>선택 해제</span>
+                    </span>);})()}
                     <span style={{fontSize:11,color:"#94A3B8"}}>{recvRound}회차 · {recvDate||"-"} · 입력 {n}건</span>
                     <button onClick={()=>submitRecvQty(g)} disabled={busy||n===0}
                       style={{padding:"5px 14px",borderRadius:6,border:"none",fontSize:12,fontWeight:700,color:"#FFF",background:n===0?"#CBD5E1":"#0F766E",cursor:busy?"wait":n===0?"not-allowed":"pointer",opacity:busy?0.6:1}}>
