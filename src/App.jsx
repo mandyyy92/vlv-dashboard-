@@ -1667,17 +1667,6 @@ function ScheduleTab(){
                   </table>
                   {(()=>{const n=g.events.filter(o=>recvTyped(o)>0||recvDates[o.id]).length;const busy=recvBusy===g.key;return(
                   <div style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:10,padding:"8px 10px",borderTop:"1px solid #EEF2F6",background:"#FAFAF9",flexWrap:"wrap"}}>
-                    {/* 체크한 옵션만 조정입고일 변경 */}
-                    {(()=>{const sel=g.events.filter(o=>optChecked[o.id]);if(!sel.length)return null;const v=optEta[g.key]||"";const ok=/^20\d\d-\d\d-\d\d$/.test(v);
-                      const clear=()=>setOptChecked(p=>{const n={...p};sel.forEach(o=>delete n[o.id]);return n;});return(
-                    <span style={{marginRight:"auto",display:"inline-flex",alignItems:"center",gap:6,fontSize:12,fontWeight:600,color:"#1D4ED8",whiteSpace:"nowrap"}}>
-                      선택 {sel.length}개 · 조정입고일
-                      <input type="date" value={v} onChange={e=>{const x=e.target.value;setOptEta(p=>({...p,[g.key]:x}));}}
-                        style={{padding:"3px 6px",borderRadius:6,border:"1px solid #93C5FD",fontSize:12,color:"#1E293B",background:"#FFF",cursor:"pointer"}} />
-                      <button onClick={()=>{if(!ok)return;changeRevisedEta(sel,v);clear();setOptEta(p=>({...p,[g.key]:""}));}} disabled={!ok}
-                        style={{padding:"5px 12px",borderRadius:6,border:"none",fontSize:12,fontWeight:700,color:"#FFF",background:ok?"#2563EB":"#CBD5E1",cursor:ok?"pointer":"not-allowed"}}>적용</button>
-                      <span onClick={clear} style={{fontSize:11,fontWeight:600,color:"#94A3B8",cursor:"pointer"}}>선택 해제</span>
-                    </span>);})()}
                     <span style={{fontSize:11,color:"#94A3B8"}}>{recvRound}회차 · {recvDate||"-"} · 입력 {n}건</span>
                     <button onClick={()=>submitRecvQty(g)} disabled={busy||n===0}
                       style={{padding:"5px 14px",borderRadius:6,border:"none",fontSize:12,fontWeight:700,color:"#FFF",background:n===0?"#CBD5E1":"#0F766E",cursor:busy?"wait":n===0?"not-allowed":"pointer",opacity:busy?0.6:1}}>
@@ -1686,24 +1675,36 @@ function ScheduleTab(){
                   </div>);})()}
                 </div>);
       // 조정입고일 date input — 바꾸면 이 블록 row_key 들만 저장(입력 멈춘 뒤 0.8초 또는 포커스 해제 시). 비우면 null(지움).
-      // 옵션표에서 체크한 옵션이 있으면 그 옵션에만 적용(없으면 상품 전체)
+      // 체크한 옵션만 조정입고일 변경 — 블록 헤더 '조정입고일' 왼쪽에 표시(체크가 있을 때만)
+      const optEtaBar=(g)=>{
+        const sel=g.events.filter(o=>optChecked[o.id]);if(!sel.length)return null;
+        const v=optEta[g.key]||"";const ok=/^20\d\d-\d\d-\d\d$/.test(v);
+        const clear=()=>setOptChecked(p=>{const n={...p};sel.forEach(o=>delete n[o.id]);return n;});
+        return(
+        <span onClick={e=>e.stopPropagation()} style={{display:"inline-flex",alignItems:"center",gap:6,flexShrink:0,fontSize:11,fontWeight:700,color:"#1D4ED8",whiteSpace:"nowrap",padding:"3px 8px",borderRadius:8,background:"#EFF6FF",border:"1px solid #BFDBFE"}}>
+          선택 {sel.length}개 조정입고일
+          <input type="date" value={v} onChange={e=>{const x=e.target.value;setOptEta(p=>({...p,[g.key]:x}));}}
+            style={{padding:"2px 6px",borderRadius:6,border:"1px solid #93C5FD",fontSize:12,color:"#1E293B",background:"#FFF",cursor:"pointer"}} />
+          <button onClick={()=>{if(!ok)return;changeRevisedEta(sel,v);clear();setOptEta(p=>({...p,[g.key]:""}));}} disabled={!ok}
+            style={{padding:"3px 10px",borderRadius:6,border:"none",fontSize:12,fontWeight:700,color:"#FFF",background:ok?"#2563EB":"#CBD5E1",cursor:ok?"pointer":"not-allowed"}}>적용</button>
+          <span onClick={clear} style={{fontSize:11,fontWeight:600,color:"#94A3B8",cursor:"pointer"}}>해제</span>
+        </span>);
+      };
+      // 상품 전체 조정입고일 — 옵션을 체크한 동안은 잠금(왼쪽 '선택 N개 조정입고일'로 변경)
       const etaInput=(g)=>{
-        const picked=g.events.filter(o=>optChecked[o.id]);
-        const targets=picked.length?picked:g.events;
-        const pickedDates=[...new Set(picked.map(o=>o.revisedEta||""))];
-        const cur=picked.length?(pickedDates.length===1?pickedDates[0]:""):(g.rep.revisedEta||"");
+        const cur=g.rep.revisedEta||"";
+        const picking=g.events.some(o=>optChecked[o.id]);
         const done=g.totalRemain<=0;
         const commit=(v)=>{
           clearTimeout(etaTimerRef.current);
-          const nowOf=(o)=>(calEventsRef.current.find(e=>e.id===o.id)||{}).revisedEta||""; // 이미 반영된 값이면 중복 저장 방지
-          if(picked.length?targets.every(o=>nowOf(o)===v):v===nowOf(g.rep))return;
-          const clearPicked=()=>{if(picked.length)setOptChecked(p=>{const n={...p};picked.forEach(o=>delete n[o.id]);return n;});};
-          if(v===""){changeRevisedEta(targets,null);clearPicked();return;}
-          if(/^20\d\d-\d\d-\d\d$/.test(v)){changeRevisedEta(targets,v);clearPicked();}
+          const now=(calEventsRef.current.find(e=>e.id===g.rep.id)||{}).revisedEta||""; // 이미 반영된 값이면 중복 저장 방지
+          if(v===now)return;
+          if(v===""){changeRevisedEta(g.events,null);return;}
+          if(/^20\d\d-\d\d-\d\d$/.test(v))changeRevisedEta(g.events,v);
         };
-        return(<label onClick={e=>e.stopPropagation()} title={done?ETA_LOCKED_MSG:picked.length?`체크한 옵션 ${picked.length}개만 조정입고일 변경 (비우면 지움)`:"조정입고일 변경 — 상품 전체 (옵션만 바꾸려면 아래 표에서 체크)"} style={{display:"inline-flex",alignItems:"center",gap:4,flexShrink:0,fontSize:11,fontWeight:600,color:picked.length?"#1D4ED8":"#64748B",whiteSpace:"nowrap"}}>
-          조정입고일{picked.length?` (선택 ${picked.length}개)`:""}
-          <input type="date" key={`${g.key}|${cur}|${etaInputRev}|${picked.map(o=>o.id).join(",")}`} defaultValue={cur} disabled={done}
+        return(<label onClick={e=>e.stopPropagation()} title={done?ETA_LOCKED_MSG:picking?"옵션 선택 중 — 왼쪽 '선택 N개 조정입고일'에서 바꿔주세요":"조정입고일 변경 — 상품 전체 (비우면 지움)"} style={{display:"inline-flex",alignItems:"center",gap:4,flexShrink:0,fontSize:11,fontWeight:600,color:"#64748B",whiteSpace:"nowrap",opacity:picking?0.45:1}}>
+          조정입고일
+          <input type="date" key={`${g.key}|${cur}|${etaInputRev}`} defaultValue={cur} disabled={done||picking}
             onChange={e=>{const v=e.target.value;clearTimeout(etaTimerRef.current);if(v)etaTimerRef.current=setTimeout(()=>commit(v),800);}}
             onBlur={e=>{const v=e.target.value;if(v===""||/^20\d\d-\d\d-\d\d$/.test(v))commit(v);else{clearTimeout(etaTimerRef.current);e.target.value=cur;}}}
             onKeyDown={e=>{if(e.key==="Enter")e.currentTarget.blur();}}
@@ -1805,6 +1806,7 @@ function ScheduleTab(){
                       {g.delayed&&!isDoneStatus(g.rep.status)&&miniBadge("지연","#FFF","#DC2626")}
                       {revised&&miniBadge("조정","#475569","#E2E8F0")}
                       {queueBadge(g.events)}
+                      {optEtaBar(g)}
                       {etaInput(g)}
                     {recvMainInput(g)}
                       {statusPicker(g)}
@@ -1828,6 +1830,7 @@ function ScheduleTab(){
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
                     {queueBadge(g.events)}
+                    {optEtaBar(g)}
                     {etaInput(g)}
                     {recvMainInput(g)}
                     {statusPicker(g)}
