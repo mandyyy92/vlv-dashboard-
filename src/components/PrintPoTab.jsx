@@ -337,12 +337,40 @@ const guessFromName = (name) => {
   return { round, sup };
 };
 
+// 업체 작업내역 이미지 → 긴 변 1600px JPEG(base64) — 서버 요청 크기 제한(4.5MB) 안으로
+const isImageFile = (f) => /^image\//.test(f?.type || '') || /\.(png|jpe?g|webp|gif)$/i.test(f?.name || '');
+async function shrinkImage(file, max = 1600) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((resolve, reject) => { const i = new Image(); i.onload = () => resolve(i); i.onerror = reject; i.src = url; });
+    const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(img, 0, 0, c.width, c.height);
+    return { media_type: 'image/jpeg', data: c.toDataURL('image/jpeg', 0.85).split(',')[1] };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+// /api/receipt (Claude) — 작업내역 이미지에서 상품코드별 실제 입고(작업) 수량·불량 → readTable 과 같은 모양의 행
+async function readReceiptImages(files) {
+  const images = [];
+  for (const f of files.slice(0, 8)) images.push(await shrinkImage(f));
+  const r = await fetch('/api/receipt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ images }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `이미지 읽기 실패 (${r.status})`);
+  if (!j.items?.length) throw new Error(j.unreadable ? '이미지에서 작업내역 표를 읽지 못했습니다 — 엑셀 파일로 올려주세요' : '이미지에서 상품코드를 찾지 못했습니다');
+  return j.items.map((x) => ({ '상품코드': x.code, '상품명': x.name, '옵션': x.option, '조정': x.qty, '불량': x.bad }));
+}
+
 function BaseAdjustUpload({ stock, baseIndex, suppliers, makeWriter, whereText, flash, rootDir }) {
   const [reqFile, setReqFile] = useState(null);
-  const [recvFile, setRecvFile] = useState(null);
+  const [recvFiles, setRecvFiles] = useState([]); // 입고: 엑셀 1개 또는 작업내역 이미지(여러 장)
   const [round, setRound] = useState('');
   const [sup, setSup] = useState('');
-  const [result, setResult] = useState(null); // {rows, unmatched}
+  const [result, setResult] = useState(null); // {rows, unmatched, fromImage}
   const [putOver, setPutOver] = useState({});  // {baseCode: 수동 수정}
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -357,18 +385,22 @@ function BaseAdjustUpload({ stock, baseIndex, suppliers, makeWriter, whereText, 
     setReqFile(f); setResult(null); setErr('');
     if (f) { const g = guessFromName(f.name); if (g.round) setRound(g.round); if (g.sup) setSup(shortSupplier(g.sup)); }
   };
-  const pickRecv = (f) => {
-    setRecvFile(f); setResult(null); setErr('');
-    if (f && !round) { const g = guessFromName(f.name); if (g.round) setRound(g.round); }
+  const pickRecv = (fs) => {
+    const list = (fs || []).filter((f) => isImageFile(f) || /\.xlsx?$/i.test(f.name));
+    setRecvFiles(list); setResult(null); setErr('');
+    if (list[0] && !round) { const g = guessFromName(list[0].name); if (g.round) setRound(g.round); }
   };
 
   const compare = async () => {
-    if (!reqFile || !recvFile) { setErr('파일 2개를 모두 올려주세요'); return; }
+    if (!reqFile || !recvFiles.length) { setErr('발송요청 파일과 입고 파일(엑셀 또는 이미지)을 모두 올려주세요'); return; }
+    const recvXlsx = recvFiles.find((f) => !isImageFile(f));
+    const recvImgs = recvFiles.filter(isImageFile);
     setBusy(true); setErr('');
     try {
       const req = await readTable(reqFile, ['베이스상품코드', '옵션'], ['1차출고', '수량']);
       if (!req) throw new Error('① 발송요청 파일에서 "베이스 상품코드" 표를 찾지 못했습니다');
-      const recv = await readTable(recvFile, ['상품코드', '옵션', '조정'], ['불량', '의뢰수량']);
+      // 엑셀이 있으면 엑셀, 없으면 이미지(작업수량 → 조정 칸으로)
+      const recv = recvXlsx ? await readTable(recvXlsx, ['상품코드', '옵션', '조정'], ['불량', '의뢰수량']) : await readReceiptImages(recvImgs);
       if (!recv) throw new Error('② 입고 파일에서 "상품코드 · 옵션 · 조정" 표를 찾지 못했습니다');
       // 베이스(발송요청) — 1차 + 2차 출고, 둘 다 비면 수량
       const bases = new Map();
@@ -394,7 +426,7 @@ function BaseAdjustUpload({ stock, baseIndex, suppliers, makeWriter, whereText, 
         const b = bases.get(bcode);
         b.recv += adj; b.bad += bad; b.arts.push(code); b.artNames.add(String(r['상품명'] || '').trim());
       });
-      setResult({ rows: [...bases.values()].map((b) => ({ ...b, artNames: [...b.artNames].join(', ') })), unmatched });
+      setResult({ rows: [...bases.values()].map((b) => ({ ...b, artNames: [...b.artNames].join(', ') })), unmatched, fromImage: !recvXlsx });
       setPutOver({});
     } catch (e) {
       setErr(e.message || String(e));
@@ -499,13 +531,18 @@ function BaseAdjustUpload({ stock, baseIndex, suppliers, makeWriter, whereText, 
     }
   };
 
-  const fileBox = (label, file, onPick, hint) => (
-    <label style={{ flex: '1 1 260px', display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', border: `1px dashed ${file ? '#14b8a6' : '#cbd5e1'}`, borderRadius: 8, background: file ? '#f0fdfa' : '#f8fafc', cursor: 'pointer', fontSize: 12 }}>
-      <input type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={(e) => { onPick(e.target.files?.[0] || null); e.target.value = ''; }} />
+  // multi: 여러 파일(엑셀·이미지) 선택 → onPick(File[])
+  const fileBox = (label, file, onPick, hint, multi = false) => {
+    const files = multi ? (file || []) : (file ? [file] : []);
+    const text = files.length === 1 ? files[0].name : files.length ? `${files.length}개 — ${files.map((f) => f.name).join(', ')}` : hint;
+    return (
+    <label style={{ flex: '1 1 260px', display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', border: `1px dashed ${files.length ? '#14b8a6' : '#cbd5e1'}`, borderRadius: 8, background: files.length ? '#f0fdfa' : '#f8fafc', cursor: 'pointer', fontSize: 12 }}>
+      <input type="file" accept={multi ? '.xlsx,.xls,image/*' : '.xlsx,.xls'} multiple={multi} style={{ display: 'none' }}
+        onChange={(e) => { const fs = [...(e.target.files || [])]; onPick(multi ? fs : fs[0] || null); e.target.value = ''; }} />
       <b style={{ color: '#0f766e', whiteSpace: 'nowrap' }}>{label}</b>
-      <span style={{ color: file ? '#0f172a' : '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file ? file.name : hint}</span>
-    </label>
-  );
+      <span title={files.map((f) => f.name).join(', ')} style={{ color: files.length ? '#0f172a' : '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{text}</span>
+    </label>);
+  };
 
   const rows = result?.rows || [];
   const sum = rows.reduce((a, b) => ({ ship: a.ship + b.ship, recv: a.recv + b.recv, bad: a.bad + b.bad, left: a.left + leftOf(b), put: a.put + putOf(b) }), { ship: 0, recv: 0, bad: 0, left: 0, put: 0 });
@@ -514,7 +551,7 @@ function BaseAdjustUpload({ stock, baseIndex, suppliers, makeWriter, whereText, 
     <div style={{ border: '1px solid #99f6e4', borderRadius: 10, padding: 12, marginBottom: 12 }}>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
         {fileBox('① 발송요청', reqFile, pickReq, '베이스 상품코드 · 1차 출고 있는 파일')}
-        {fileBox('② 입고', recvFile, pickRecv, '상품코드 · 조정 · 불량 있는 파일')}
+        {fileBox('② 입고', recvFiles, pickRecv, '상품코드 · 조정 · 불량 있는 엑셀, 또는 업체 작업내역 이미지', true)}
       </div>
       <div style={{ ...S.bar, marginBottom: 0 }}>
         <label style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>차수
@@ -525,13 +562,14 @@ function BaseAdjustUpload({ stock, baseIndex, suppliers, makeWriter, whereText, 
         </label>
         <span style={{ fontSize: 12, color: '#64748b' }}>파일명: <b style={{ color: '#334155' }}>{round || 'N'}차_베이스입고(추가)_{sup || '업체'}.xlsx</b></span>
         <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 6 }}>
-          <button style={S.btn(false, busy)} disabled={busy} onClick={compare}>{busy && !result ? '비교 중…' : '비교하기'}</button>
+          <button style={S.btn(false, busy)} disabled={busy} onClick={compare}>{busy && !result ? (recvFiles.some((f) => !isImageFile(f)) ? '비교 중…' : '이미지 읽는 중…') : '비교하기'}</button>
           {result && <button style={S.btn(true, busy)} disabled={busy} onClick={download}>엑셀 생성 ({sum.put.toLocaleString()}장)</button>}
         </span>
       </div>
       {err && <div style={{ ...S.msg('err'), marginTop: 8 }}>{err}</div>}
       {result && (
         <div style={{ marginTop: 10 }}>
+          {result.fromImage && <div style={{ ...S.msg('info'), marginBottom: 6 }}>이미지에서 읽은 수량입니다 (작업수량 → 조정(입고)) — 업체 작업내역과 맞는지 확인 후 엑셀을 생성해주세요</div>}
           <div style={{ ...S.tableWrap, maxHeight: 460, overflowY: 'auto' }}>
             <table style={S.table}>
               <thead><tr>
