@@ -458,67 +458,23 @@ function BaseAdjustUpload({ stock, baseIndex, suppliers, makeWriter, whereText, 
       const thin = { style: 'thin', color: { argb: 'FFBFBFBF' } };
       const border = { top: thin, left: thin, bottom: thin, right: thin };
       const green = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2EFDA' } };
-      const blue = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDEBF7' } };
       const d6 = yymmdd(kstDate());
       const memo = `${d6}_${s}_베이스입고(추가)_${N}차`;
       const rows = result.rows;
-      const ws = wb.addWorksheet('베이스 재고 입력');
-      ws.mergeCells('A1:K1');
-      ws.getCell('A1').value = `${s} ${N}차 — 어드민 베이스 재고 입력 수량 (${d6})`;
-      ws.getCell('A1').font = { bold: true, size: 14 };
-      ws.mergeCells('A2:K2');
-      ws.getCell('A2').value = '1차 출고는 어드민에서 이미 차감됨 · 어드민에 넣을 수량 = 1차 출고 − 조정(입고) − 불량 (0 미만이면 0, 추가 차감 없음)';
-      ws.getCell('A2').font = { size: 10, color: { argb: 'FF64748B' } };
-      const h = ws.getRow(4);
-      h.values = ['베이스 상품코드', '베이스 상품명', '옵션', '입고 상품코드', '입고 상품명', '1차 출고(차감완료)', '조정(입고)', '불량', '남은 베이스', '어드민에 넣을 수량', '비고'];
-      h.height = 30;
-      h.eachCell((c) => { c.font = { bold: true }; c.fill = green; c.border = border; c.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; });
-      rows.forEach((b, i) => {
-        const n = 5 + i, left = leftOf(b), put = putOf(b), note = noteOf(b);
-        const manual = b.code in putOver;
-        const row = ws.getRow(n);
-        row.values = [b.code, b.name, b.option, b.arts.join(', '), b.artNames, b.ship, b.recv, b.bad || null,
-          { formula: `F${n}-G${n}-H${n}`, result: left },
-          manual ? put : { formula: `MAX(0,I${n})`, result: put },
-          manual ? [note, '수동 수정'].filter(Boolean).join(' · ') : note];
-        row.eachCell({ includeEmpty: true }, (c) => { c.border = border; c.alignment = { vertical: 'middle', horizontal: 'center' }; });
-        [6, 7, 8, 9, 10].forEach((c) => { row.getCell(c).numFmt = '#,##0;[Red]-#,##0'; });
-        row.getCell(10).font = { bold: true };
-        if (put > 0) row.getCell(10).fill = blue;
-        if (note) { row.getCell(11).font = { color: { argb: 'FFC00000' }, size: 10 }; row.getCell(11).alignment = { horizontal: 'left', vertical: 'middle' }; }
-      });
-      const last = 4 + rows.length, t = last + 1;
-      const tr = ws.getRow(t);
-      const tot = (k) => rows.reduce((a, b) => a + k(b), 0);
-      tr.values = ['합 계', '', '', '', '',
-        { formula: `SUM(F5:F${last})`, result: tot((b) => b.ship) }, { formula: `SUM(G5:G${last})`, result: tot((b) => b.recv) },
-        { formula: `SUM(H5:H${last})`, result: tot((b) => b.bad) }, { formula: `SUM(I5:I${last})`, result: tot(leftOf) },
-        { formula: `SUM(J5:J${last})`, result: tot(putOf) }, ''];
-      ws.mergeCells(`A${t}:E${t}`);
-      tr.eachCell({ includeEmpty: true }, (c) => { c.font = { bold: true }; c.fill = green; c.border = border; c.alignment = { horizontal: 'center' }; c.numFmt = '#,##0;[Red]-#,##0'; });
-      if (result.unmatched.length) {
-        const u0 = t + 2;
-        ws.getCell(`A${u0}`).value = '베이스를 찾지 못한 입고 상품 (계산 제외)';
-        ws.getCell(`A${u0}`).font = { bold: true, color: { argb: 'FFC00000' } };
-        result.unmatched.forEach((u, i) => { ws.getRow(u0 + 1 + i).values = ['', '', u.option, u.code, u.name, '', u.adj, u.bad || null, '', '', u.why]; });
-      }
-      [14, 20, 12, 14, 26, 12, 11, 8, 10, 12, 34].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
-      ws.views = [{ state: 'frozen', ySplit: 4 }];
-      const ws2 = wb.addWorksheet('어드민 입력용');
-      ws2.getRow(1).values = ['베이스 상품코드', '상품명', '옵션', '입력 수량', '메모'];
-      ws2.getRow(1).eachCell((c) => { c.font = { bold: true }; c.fill = green; c.border = border; c.alignment = { horizontal: 'center' }; });
+      // 어드민 재고일괄조정 업로드용 한 장만 — 헤더: 상품코드 · 작업수량 · 메모 · 상품명 · 옵션 (합계 줄 없음)
+      const ws = wb.addWorksheet('어드민 입력용');
+      ws.getRow(1).values = ['상품코드', '작업수량', '메모', '상품명', '옵션'];
+      ws.getRow(1).eachCell((c) => { c.font = { bold: true }; c.fill = green; c.border = border; c.alignment = { horizontal: 'center' }; });
       let k = 2;
       rows.forEach((b) => {
         const put = putOf(b);
         if (put <= 0) return;
-        const r = ws2.getRow(k++);
-        r.values = [b.code, b.name, b.option, put, memo];
+        const r = ws.getRow(k++);
+        r.values = [b.code, put, memo, b.name, b.option];
         r.eachCell((c) => { c.border = border; c.alignment = { horizontal: 'center' }; });
       });
-      const tt = ws2.getRow(k);
-      tt.values = ['합 계', '', '', { formula: `SUM(D2:D${Math.max(2, k - 1)})`, result: tot(putOf) }, ''];
-      tt.eachCell({ includeEmpty: true }, (c) => { c.font = { bold: true }; c.fill = green; c.border = border; c.alignment = { horizontal: 'center' }; });
-      [14, 22, 14, 10, 34].forEach((w, i) => { ws2.getColumn(i + 1).width = w; });
+      [14, 10, 34, 26, 16].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+      const tot = (f) => rows.reduce((x, b) => x + f(b), 0);
       const blob = new Blob([await wb.xlsx.writeBuffer()], { type: XLSX_MIME });
       // 폴더 저장: 업체 약칭 → 등록 업체명(폴더 찾기용)
       const full = (suppliers.find((x) => shortSupplier(x.name) === s || x.name === s) || {}).name || s;
@@ -1072,12 +1028,7 @@ export default function PrintPoTab() {
       const bases = [...m.values()];
       const memo = `${d6}_${shortSupplier(sup)}_베이스입고(추가)_${N}차`;
       const path = await saveXlsx(`${N}차_베이스입고(추가)_${shortSupplier(sup)}.xlsx`, [
-        { name: '어드민 입력', cols: [10, 8, 32, 22, 18], rows: [['상품코드', '수량', '메모'], ...bases.filter((b) => b.put > 0).map((b) => [b.code, b.put, memo, b.name, b.option])] },
-        { name: '계산 내역', cols: [12, 22, 16, 10, 10, 8, 10, 12], rows: [
-          ['베이스 상품코드', '베이스 상품명', '옵션', '1차 출고', '입고', '불량', '남은 베이스', '어드민에 넣을 수량'],
-          ...bases.map((b) => [b.code, b.name, b.option, b.ship, b.recv, b.bad, b.ship - b.recv - b.bad, b.put]),
-          ['합계', '', '', ...['ship', 'recv', 'bad'].map((k) => bases.reduce((s, b) => s + b[k], 0)), bases.reduce((s, b) => s + b.ship - b.recv - b.bad, 0), bases.reduce((s, b) => s + b.put, 0)],
-        ] },
+        { name: '어드민 입력용', cols: [12, 10, 34, 26, 16], rows: [['상품코드', '작업수량', '메모', '상품명', '옵션'], ...bases.filter((b) => b.put > 0).map((b) => [b.code, b.put, memo, b.name, b.option])] },
       ], makeWriter(sup, '입고', N));
       await loadPos();
       const total = bases.reduce((s, b) => s + b.put, 0);
