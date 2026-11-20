@@ -381,16 +381,23 @@ function BaseAdjustUpload({ stock, baseIndex, suppliers, makeWriter, whereText, 
     return m;
   }, [stock]);
 
+  // 파일은 고를 때마다 이어서 추가(같은 이름·크기는 한 번만). 칩의 × 로 하나씩 뺄 수 있음
+  const addFiles = (prev, add) => {
+    const key = (f) => `${f.name}:${f.size}`;
+    const have = new Set(prev.map(key));
+    return [...prev, ...add.filter((f) => !have.has(key(f)))];
+  };
   const pickReq = (f) => {
-    const list = (f || []).filter((x) => /\.xlsx?$/i.test(x.name));
-    setReqFiles(list); setResult(null); setErr('');
-    list.forEach((x) => { const g = guessFromName(x.name); if (g.round) setRound(g.round); if (g.sup) setSup(shortSupplier(g.sup)); });
+    const add = (f || []).filter((x) => /\.xlsx?$/i.test(x.name));
+    setReqFiles((p) => addFiles(p, add)); setResult(null); setErr('');
+    add.forEach((x) => { const g = guessFromName(x.name); if (g.round) setRound(g.round); if (g.sup) setSup(shortSupplier(g.sup)); });
   };
   const pickRecv = (fs) => {
-    const list = (fs || []).filter((f) => isImageFile(f) || /\.xlsx?$/i.test(f.name));
-    setRecvFiles(list); setResult(null); setErr('');
-    if (list[0] && !round) { const g = guessFromName(list[0].name); if (g.round) setRound(g.round); }
+    const add = (fs || []).filter((f) => isImageFile(f) || /\.xlsx?$/i.test(f.name));
+    setRecvFiles((p) => addFiles(p, add)); setResult(null); setErr('');
+    if (add[0] && !round) { const g = guessFromName(add[0].name); if (g.round) setRound(g.round); }
   };
+  const dropFile = (setter, f) => { setter((p) => p.filter((x) => x !== f)); setResult(null); };
 
   const compare = async () => {
     if (!reqFiles.length || !recvFiles.length) { setErr('발송요청(또는 베이스출고) 파일과 입고 파일(엑셀 또는 이미지)을 모두 올려주세요'); return; }
@@ -505,15 +512,23 @@ function BaseAdjustUpload({ stock, baseIndex, suppliers, makeWriter, whereText, 
   };
 
   // multi: 여러 파일(엑셀·이미지) 선택 → onPick(File[])
-  const fileBox = (label, file, onPick, hint, multi = false, accept = '') => {
+  // multi: 고를 때마다 추가, 올린 파일은 칩(× 로 빼기) · 칸을 누르면 파일 더 고르기
+  const fileBox = (label, file, onPick, hint, multi = false, accept = '', onDrop = null) => {
     const files = multi ? (file || []) : (file ? [file] : []);
-    const text = files.length === 1 ? files[0].name : files.length ? `${files.length}개 — ${files.map((f) => f.name).join(', ')}` : hint;
     return (
-    <label style={{ flex: '1 1 260px', display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', border: `1px dashed ${files.length ? '#14b8a6' : '#cbd5e1'}`, borderRadius: 8, background: files.length ? '#f0fdfa' : '#f8fafc', cursor: 'pointer', fontSize: 12 }}>
+    <label style={{ flex: '1 1 260px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '8px 12px', border: `1px dashed ${files.length ? '#14b8a6' : '#cbd5e1'}`, borderRadius: 8, background: files.length ? '#f0fdfa' : '#f8fafc', cursor: 'pointer', fontSize: 12 }}>
       <input type="file" accept={accept || (multi ? '.xlsx,.xls,image/*' : '.xlsx,.xls')} multiple={multi} style={{ display: 'none' }}
         onChange={(e) => { const fs = [...(e.target.files || [])]; onPick(multi ? fs : fs[0] || null); e.target.value = ''; }} />
       <b style={{ color: '#0f766e', whiteSpace: 'nowrap' }}>{label}</b>
-      <span title={files.map((f) => f.name).join(', ')} style={{ color: files.length ? '#0f172a' : '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{text}</span>
+      {!files.length && <span style={{ color: '#94a3b8' }}>{hint}</span>}
+      {files.map((f) => (
+        <span key={`${f.name}:${f.size}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 4px 2px 8px', borderRadius: 99, background: '#fff', border: '1px solid #99f6e4', color: '#0f172a', maxWidth: 260 }}>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={f.name}>{isImageFile(f) ? '🖼 ' : ''}{f.name}</span>
+          {onDrop && <span onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDrop(f); }} title="빼기"
+            style={{ width: 16, height: 16, lineHeight: '15px', textAlign: 'center', borderRadius: 99, color: '#64748b', cursor: 'pointer', flexShrink: 0 }}>×</span>}
+        </span>
+      ))}
+      {multi && files.length > 0 && <span style={{ color: '#0f766e', fontWeight: 700, whiteSpace: 'nowrap' }}>+ 추가</span>}
     </label>);
   };
 
@@ -523,8 +538,8 @@ function BaseAdjustUpload({ stock, baseIndex, suppliers, makeWriter, whereText, 
   return (
     <div style={{ border: '1px solid #99f6e4', borderRadius: 10, padding: 12, marginBottom: 12 }}>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
-        {fileBox('① 발송요청 · 베이스출고', reqFiles, pickReq, '발송요청 · 베이스출고 엑셀 (여러 개 선택 가능)', true, '.xlsx,.xls')}
-        {fileBox('② 입고', recvFiles, pickRecv, '상품코드 · 조정 · 불량 있는 엑셀, 또는 업체 작업내역 이미지', true)}
+        {fileBox('① 발송요청 · 베이스출고', reqFiles, pickReq, '발송요청 · 베이스출고 엑셀 (하나씩 추가 가능)', true, '.xlsx,.xls', (f) => dropFile(setReqFiles, f))}
+        {fileBox('② 입고', recvFiles, pickRecv, '상품코드 · 조정 · 불량 있는 엑셀, 또는 업체 작업내역 이미지', true, '', (f) => dropFile(setRecvFiles, f))}
       </div>
       <div style={{ ...S.bar, marginBottom: 0 }}>
         <label style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>차수
